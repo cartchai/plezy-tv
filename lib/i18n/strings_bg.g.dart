@@ -102,7 +102,7 @@ class _Translations$app$bg extends Translations$app$en {
 	final TranslationsBg _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$bg extends Translations$profiles$en {
 	final TranslationsBg _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Добави Plezy профил';
+	@override String get addPlezTVProfile => 'Добави Plezy профил';
 	@override String get switchingProfile => 'Смяна на профил…';
 	@override String get deleteThisProfileTitle => 'Да се изтрие ли този профил?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Премахване на ${displayName}. Връзките не се засягат.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$bg extends Translations$startup$en {
 	@override String get repairSucceeded => 'Хранилището е ремонтирано';
 	@override String get repairNeedsRestart => 'Хранилището е ремонтирано — изисква се рестартиране';
 	@override String get restartRequiredBody => 'Данните ви бяха ремонтирани, но Plezy трябва да стартира наново, преди да ги използва. Затворете Plezy и го отворете отново.';
-	@override String get quitPlezy => 'Изход от Plezy';
+	@override String get quitPlezTV => 'Изход от Plezy';
 	@override String get repairFailed => 'Ремонтът се провали';
 	@override String get repairKeptSignIns => 'Сървърите и профилите ви са все още вписани.';
 	@override String get repairLostSignIns => 'Ключът, защитаващ запазените ви вписвания, не можа да бъде възстановен. Ще трябва да се впишете отново във всеки сървър и профил.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$bg extends Translations$services$libr
 extension on TranslationsBg {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Икона на приложението',
 			'appIcon.defaultIcon' => 'По подразбиране',
 			'appIcon.current' => 'Текуща икона',
@@ -4354,7 +4354,7 @@ extension on TranslationsBg {
 			'mpvConfig.removeLine' => 'Премахни ред',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context и gpu-api се игнорират на Linux: вграденото видео винаги се рендерира през vo=libmpv върху видео равнината, а gpu-next (който е нужен за compute шейдъри като ArtCNN) не може да работи вградено.',
 			'dialog.confirmAction' => 'Потвърждение на действие',
-			'profiles.addPlezyProfile' => 'Добави Plezy профил',
+			'profiles.addPlezTVProfile' => 'Добави Plezy профил',
 			'profiles.switchingProfile' => 'Смяна на профил…',
 			'profiles.deleteThisProfileTitle' => 'Да се изтрие ли този профил?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Премахване на ${displayName}. Връзките не се засягат.',
@@ -4686,7 +4686,7 @@ extension on TranslationsBg {
 			'startup.repairSucceeded' => 'Хранилището е ремонтирано',
 			'startup.repairNeedsRestart' => 'Хранилището е ремонтирано — изисква се рестартиране',
 			'startup.restartRequiredBody' => 'Данните ви бяха ремонтирани, но Plezy трябва да стартира наново, преди да ги използва. Затворете Plezy и го отворете отново.',
-			'startup.quitPlezy' => 'Изход от Plezy',
+			'startup.quitPlezTV' => 'Изход от Plezy',
 			'startup.repairFailed' => 'Ремонтът се провали',
 			'startup.repairKeptSignIns' => 'Сървърите и профилите ви са все още вписани.',
 			'startup.repairLostSignIns' => 'Ключът, защитаващ запазените ви вписвания, не можа да бъде възстановен. Ще трябва да се впишете отново във всеки сървър и профил.',

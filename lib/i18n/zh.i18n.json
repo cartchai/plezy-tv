@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "应用图标",
@@ -1026,7 +1026,7 @@
     "confirmAction": "确认操作"
   },
   "profiles": {
-    "addPlezyProfile": "添加 Plezy 用户资料",
+    "addPlezTVProfile": "添加 Plezy 用户资料",
     "switchingProfile": "正在切换用户资料…",
     "deleteThisProfileTitle": "删除此用户资料？",
     "deleteThisProfileMessage": "移除 ${displayName}。连接不会受影响。",
@@ -1402,7 +1402,7 @@
     "repairSucceeded": "存储已修复",
     "repairNeedsRestart": "存储已修复 — 需要重启",
     "restartRequiredBody": "你的数据已修复，但 Plezy 需要重新启动后才能使用。请关闭 Plezy 并重新打开。",
-    "quitPlezy": "退出 Plezy",
+    "quitPlezTV": "退出 Plezy",
     "repairFailed": "修复失败",
     "repairKeptSignIns": "你的服务器和个人资料仍然保持登录状态。",
     "repairLostSignIns": "保护已保存登录信息的密钥无法恢复。你需要重新登录每个服务器和个人资料。",

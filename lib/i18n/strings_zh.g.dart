@@ -102,7 +102,7 @@ class Translations$app$zh extends Translations$app$en {
 	final TranslationsZh _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1173,7 +1173,7 @@ class Translations$profiles$zh extends Translations$profiles$en {
 	final TranslationsZh _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => '添加 Plezy 用户资料';
+	@override String get addPlezTVProfile => '添加 Plezy 用户资料';
 	@override String get switchingProfile => '正在切换用户资料…';
 	@override String get deleteThisProfileTitle => '删除此用户资料？';
 	@override String deleteThisProfileMessage({required Object displayName}) => '移除 ${displayName}。连接不会受影响。';
@@ -1502,7 +1502,7 @@ class Translations$startup$zh extends Translations$startup$en {
 	@override String get repairSucceeded => '存储已修复';
 	@override String get repairNeedsRestart => '存储已修复 — 需要重启';
 	@override String get restartRequiredBody => '你的数据已修复，但 Plezy 需要重新启动后才能使用。请关闭 Plezy 并重新打开。';
-	@override String get quitPlezy => '退出 Plezy';
+	@override String get quitPlezTV => '退出 Plezy';
 	@override String get repairFailed => '修复失败';
 	@override String get repairKeptSignIns => '你的服务器和个人资料仍然保持登录状态。';
 	@override String get repairLostSignIns => '保护已保存登录信息的密钥无法恢复。你需要重新登录每个服务器和个人资料。';
@@ -3383,7 +3383,7 @@ class Translations$services$libraryFilter$zh extends Translations$services$libra
 extension on TranslationsZh {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => '应用图标',
 			'appIcon.defaultIcon' => '默认',
 			'appIcon.current' => '当前图标',
@@ -4342,7 +4342,7 @@ extension on TranslationsZh {
 			'mpvConfig.removeLine' => '移除行',
 			'mpvConfig.embeddedVoHint' => 'Linux 上会忽略 vo、gpu-context 和 gpu-api：嵌入式视频始终通过视频平面上的 vo=libmpv 渲染，而 gpu-next（ArtCNN 等计算着色器需要它）无法以嵌入式方式运行。',
 			'dialog.confirmAction' => '确认操作',
-			'profiles.addPlezyProfile' => '添加 Plezy 用户资料',
+			'profiles.addPlezTVProfile' => '添加 Plezy 用户资料',
 			'profiles.switchingProfile' => '正在切换用户资料…',
 			'profiles.deleteThisProfileTitle' => '删除此用户资料？',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '移除 ${displayName}。连接不会受影响。',
@@ -4674,7 +4674,7 @@ extension on TranslationsZh {
 			'startup.repairSucceeded' => '存储已修复',
 			'startup.repairNeedsRestart' => '存储已修复 — 需要重启',
 			'startup.restartRequiredBody' => '你的数据已修复，但 Plezy 需要重新启动后才能使用。请关闭 Plezy 并重新打开。',
-			'startup.quitPlezy' => '退出 Plezy',
+			'startup.quitPlezTV' => '退出 Plezy',
 			'startup.repairFailed' => '修复失败',
 			'startup.repairKeptSignIns' => '你的服务器和个人资料仍然保持登录状态。',
 			'startup.repairLostSignIns' => '保护已保存登录信息的密钥无法恢复。你需要重新登录每个服务器和个人资料。',

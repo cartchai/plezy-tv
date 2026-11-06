@@ -102,7 +102,7 @@ class _Translations$app$uz extends Translations$app$en {
 	final TranslationsUz _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$uz extends Translations$profiles$en {
 	final TranslationsUz _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy profilini qoʻshish';
+	@override String get addPlezTVProfile => 'Plezy profilini qoʻshish';
 	@override String get switchingProfile => 'Profil almashtirilmoqda…';
 	@override String get deleteThisProfileTitle => 'Ushbu profil oʻchirilsinmi?';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName} oʻchiriladi. Ulanishlarga taʼsir qilmaydi.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$uz extends Translations$startup$en {
 	@override String get repairSucceeded => 'Saqlash tiklandi';
 	@override String get repairNeedsRestart => 'Saqlash tiklandi — qayta ishga tushirish kerak';
 	@override String get restartRequiredBody => 'Maʼlumotlaringiz tiklandi, lekin Plezy ulardan foydalanishi uchun yangidan ishga tushishi kerak. Plezy-ni yoping va qayta oching.';
-	@override String get quitPlezy => 'Plezy-dan chiqish';
+	@override String get quitPlezTV => 'Plezy-dan chiqish';
 	@override String get repairFailed => 'Tiklash amalga oshmadi';
 	@override String get repairKeptSignIns => 'Serverlaringiz va profillaringiz hali ham tizimga kirgan.';
 	@override String get repairLostSignIns => 'Saqlangan kirish maʼlumotlaringizni himoya qiluvchi kalitni tiklab boʻlmadi. Har bir server va profilga qaytadan kirishingiz kerak boʻladi.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$uz extends Translations$services$libr
 extension on TranslationsUz {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Ilova belgisi',
 			'appIcon.defaultIcon' => 'Standart',
 			'appIcon.current' => 'Joriy belgi',
@@ -4354,7 +4354,7 @@ extension on TranslationsUz {
 			'mpvConfig.removeLine' => 'Qatorni oʻchirish',
 			'mpvConfig.embeddedVoHint' => 'Linux-da vo, gpu-context va gpu-api e\'tiborga olinmaydi: ichki video har doim video tekisligida vo=libmpv orqali ko\'rsatiladi va gpu-next (ArtCNN kabi compute shaderlar uchun zarur) ichki rejimda ishlay olmaydi.',
 			'dialog.confirmAction' => 'Harakatni tasdiqlash',
-			'profiles.addPlezyProfile' => 'Plezy profilini qoʻshish',
+			'profiles.addPlezTVProfile' => 'Plezy profilini qoʻshish',
 			'profiles.switchingProfile' => 'Profil almashtirilmoqda…',
 			'profiles.deleteThisProfileTitle' => 'Ushbu profil oʻchirilsinmi?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName} oʻchiriladi. Ulanishlarga taʼsir qilmaydi.',
@@ -4686,7 +4686,7 @@ extension on TranslationsUz {
 			'startup.repairSucceeded' => 'Saqlash tiklandi',
 			'startup.repairNeedsRestart' => 'Saqlash tiklandi — qayta ishga tushirish kerak',
 			'startup.restartRequiredBody' => 'Maʼlumotlaringiz tiklandi, lekin Plezy ulardan foydalanishi uchun yangidan ishga tushishi kerak. Plezy-ni yoping va qayta oching.',
-			'startup.quitPlezy' => 'Plezy-dan chiqish',
+			'startup.quitPlezTV' => 'Plezy-dan chiqish',
 			'startup.repairFailed' => 'Tiklash amalga oshmadi',
 			'startup.repairKeptSignIns' => 'Serverlaringiz va profillaringiz hali ham tizimga kirgan.',
 			'startup.repairLostSignIns' => 'Saqlangan kirish maʼlumotlaringizni himoya qiluvchi kalitni tiklab boʻlmadi. Har bir server va profilga qaytadan kirishingiz kerak boʻladi.',

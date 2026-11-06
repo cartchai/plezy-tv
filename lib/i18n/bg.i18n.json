@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Икона на приложението",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Потвърждение на действие"
   },
   "profiles": {
-    "addPlezyProfile": "Добави Plezy профил",
+    "addPlezTVProfile": "Добави Plezy профил",
     "switchingProfile": "Смяна на профил…",
     "deleteThisProfileTitle": "Да се изтрие ли този профил?",
     "deleteThisProfileMessage": "Премахване на ${displayName}. Връзките не се засягат.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Хранилището е ремонтирано",
     "repairNeedsRestart": "Хранилището е ремонтирано — изисква се рестартиране",
     "restartRequiredBody": "Данните ви бяха ремонтирани, но Plezy трябва да стартира наново, преди да ги използва. Затворете Plezy и го отворете отново.",
-    "quitPlezy": "Изход от Plezy",
+    "quitPlezTV": "Изход от Plezy",
     "repairFailed": "Ремонтът се провали",
     "repairKeptSignIns": "Сървърите и профилите ви са все още вписани.",
     "repairLostSignIns": "Ключът, защитаващ запазените ви вписвания, не можа да бъде възстановен. Ще трябва да се впишете отново във всеки сървър и профил.",

@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Ilova belgisi",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Harakatni tasdiqlash"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy profilini qoʻshish",
+    "addPlezTVProfile": "Plezy profilini qoʻshish",
     "switchingProfile": "Profil almashtirilmoqda…",
     "deleteThisProfileTitle": "Ushbu profil oʻchirilsinmi?",
     "deleteThisProfileMessage": "${displayName} oʻchiriladi. Ulanishlarga taʼsir qilmaydi.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Saqlash tiklandi",
     "repairNeedsRestart": "Saqlash tiklandi — qayta ishga tushirish kerak",
     "restartRequiredBody": "Maʼlumotlaringiz tiklandi, lekin Plezy ulardan foydalanishi uchun yangidan ishga tushishi kerak. Plezy-ni yoping va qayta oching.",
-    "quitPlezy": "Plezy-dan chiqish",
+    "quitPlezTV": "Plezy-dan chiqish",
     "repairFailed": "Tiklash amalga oshmadi",
     "repairKeptSignIns": "Serverlaringiz va profillaringiz hali ham tizimga kirgan.",
     "repairLostSignIns": "Saqlangan kirish maʼlumotlaringizni himoya qiluvchi kalitni tiklab boʻlmadi. Har bir server va profilga qaytadan kirishingiz kerak boʻladi.",

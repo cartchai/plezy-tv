@@ -102,7 +102,7 @@ class _Translations$app$ja extends Translations$app$en {
 	final TranslationsJa _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1173,7 +1173,7 @@ class _Translations$profiles$ja extends Translations$profiles$en {
 	final TranslationsJa _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezyプロフィールを追加';
+	@override String get addPlezTVProfile => 'Plezyプロフィールを追加';
 	@override String get switchingProfile => 'プロフィールを切り替え中…';
 	@override String get deleteThisProfileTitle => 'このプロフィールを削除しますか？';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName}を削除します。接続には影響しません。';
@@ -1502,7 +1502,7 @@ class _Translations$startup$ja extends Translations$startup$en {
 	@override String get repairSucceeded => 'ストレージを修復しました';
 	@override String get repairNeedsRestart => 'ストレージを修復しました — 再起動が必要です';
 	@override String get restartRequiredBody => 'データは修復されましたが、Plezyはそれを使用する前に再起動する必要があります。Plezyを閉じて再度開いてください。';
-	@override String get quitPlezy => 'Plezyを終了';
+	@override String get quitPlezTV => 'Plezyを終了';
 	@override String get repairFailed => '修復に失敗しました';
 	@override String get repairKeptSignIns => 'サーバーとプロフィールはサインインしたままです。';
 	@override String get repairLostSignIns => '保存済みのサインインを保護するキーを復元できませんでした。すべてのサーバーとプロフィールに再度サインインする必要があります。';
@@ -3383,7 +3383,7 @@ class _Translations$services$libraryFilter$ja extends Translations$services$libr
 extension on TranslationsJa {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'アプリアイコン',
 			'appIcon.defaultIcon' => 'デフォルト',
 			'appIcon.current' => '現在のアイコン',
@@ -4342,7 +4342,7 @@ extension on TranslationsJa {
 			'mpvConfig.removeLine' => '行を削除',
 			'mpvConfig.embeddedVoHint' => 'Linux では vo、gpu-context、gpu-api は無視されます。埋め込み動画は常にビデオプレーン上で vo=libmpv を通してレンダリングされ、gpu-next（ArtCNN のようなコンピュートシェーダーに必要）は埋め込みでは実行できません。',
 			'dialog.confirmAction' => '操作の確認',
-			'profiles.addPlezyProfile' => 'Plezyプロフィールを追加',
+			'profiles.addPlezTVProfile' => 'Plezyプロフィールを追加',
 			'profiles.switchingProfile' => 'プロフィールを切り替え中…',
 			'profiles.deleteThisProfileTitle' => 'このプロフィールを削除しますか？',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName}を削除します。接続には影響しません。',
@@ -4674,7 +4674,7 @@ extension on TranslationsJa {
 			'startup.repairSucceeded' => 'ストレージを修復しました',
 			'startup.repairNeedsRestart' => 'ストレージを修復しました — 再起動が必要です',
 			'startup.restartRequiredBody' => 'データは修復されましたが、Plezyはそれを使用する前に再起動する必要があります。Plezyを閉じて再度開いてください。',
-			'startup.quitPlezy' => 'Plezyを終了',
+			'startup.quitPlezTV' => 'Plezyを終了',
 			'startup.repairFailed' => '修復に失敗しました',
 			'startup.repairKeptSignIns' => 'サーバーとプロフィールはサインインしたままです。',
 			'startup.repairLostSignIns' => '保存済みのサインインを保護するキーを復元できませんでした。すべてのサーバーとプロフィールに再度サインインする必要があります。',

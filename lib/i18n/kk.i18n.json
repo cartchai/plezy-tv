@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Қолданба белгішесі",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Әрекетті растау"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy профилін қосу",
+    "addPlezTVProfile": "Plezy профилін қосу",
     "switchingProfile": "Профильді ауыстыру…",
     "deleteThisProfileTitle": "Осы профиль өшірілсін бе?",
     "deleteThisProfileMessage": "${displayName} өшіріледі. Қосылымдарға әсер етпейді.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Сақтау қалпына келтірілді",
     "repairNeedsRestart": "Сақтау қалпына келтірілді — қайта іске қосу қажет",
     "restartRequiredBody": "Деректеріңіз қалпына келтірілді, бірақ Plezy оларды пайдаланар алдында жаңадан іске қосылуы керек. Plezy жабыңыз да, қайта ашыңыз.",
-    "quitPlezy": "Plezy бағдарламасынан шығу",
+    "quitPlezTV": "Plezy бағдарламасынан шығу",
     "repairFailed": "Қалпына келтіру сәтсіз аяқталды",
     "repairKeptSignIns": "Серверлеріңіз бен профильдеріңіз әлі кірген күйде.",
     "repairLostSignIns": "Сақталған кіру деректерін қорғайтын кілт қалпына келтірілмеді. Әрбір сервер мен профильге қайта кіруге тура келеді.",

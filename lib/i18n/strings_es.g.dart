@@ -102,7 +102,7 @@ class _Translations$app$es extends Translations$app$en {
 	final TranslationsEs _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$es extends Translations$profiles$en {
 	final TranslationsEs _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Añadir perfil de Plezy';
+	@override String get addPlezTVProfile => 'Añadir perfil de Plezy';
 	@override String get switchingProfile => 'Cambiando de perfil…';
 	@override String get deleteThisProfileTitle => '¿Eliminar este perfil?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Eliminar ${displayName}. Las conexiones no se verán afectadas.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$es extends Translations$startup$en {
 	@override String get repairSucceeded => 'Almacenamiento reparado';
 	@override String get repairNeedsRestart => 'Almacenamiento reparado: es necesario reiniciar';
 	@override String get restartRequiredBody => 'Tus datos se repararon, pero Plezy debe iniciarse de nuevo antes de poder usarlos. Cierra Plezy y ábrelo otra vez.';
-	@override String get quitPlezy => 'Salir de Plezy';
+	@override String get quitPlezTV => 'Salir de Plezy';
 	@override String get repairFailed => 'Error en la reparación';
 	@override String get repairKeptSignIns => 'Tus servidores y perfiles siguen con la sesión iniciada.';
 	@override String get repairLostSignIns => 'La clave que protege tus inicios de sesión guardados no se pudo recuperar. Tendrás que iniciar sesión de nuevo en cada servidor y perfil.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$es extends Translations$services$libr
 extension on TranslationsEs {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Icono de la aplicación',
 			'appIcon.defaultIcon' => 'Predeterminado',
 			'appIcon.current' => 'Icono actual',
@@ -4354,7 +4354,7 @@ extension on TranslationsEs {
 			'mpvConfig.removeLine' => 'Eliminar línea',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context y gpu-api se ignoran en Linux: el vídeo integrado siempre se renderiza mediante vo=libmpv en el plano de vídeo, y gpu-next (que los shaders de cómputo como ArtCNN necesitan) no puede ejecutarse integrado.',
 			'dialog.confirmAction' => 'Confirmar acción',
-			'profiles.addPlezyProfile' => 'Añadir perfil de Plezy',
+			'profiles.addPlezTVProfile' => 'Añadir perfil de Plezy',
 			'profiles.switchingProfile' => 'Cambiando de perfil…',
 			'profiles.deleteThisProfileTitle' => '¿Eliminar este perfil?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Eliminar ${displayName}. Las conexiones no se verán afectadas.',
@@ -4686,7 +4686,7 @@ extension on TranslationsEs {
 			'startup.repairSucceeded' => 'Almacenamiento reparado',
 			'startup.repairNeedsRestart' => 'Almacenamiento reparado: es necesario reiniciar',
 			'startup.restartRequiredBody' => 'Tus datos se repararon, pero Plezy debe iniciarse de nuevo antes de poder usarlos. Cierra Plezy y ábrelo otra vez.',
-			'startup.quitPlezy' => 'Salir de Plezy',
+			'startup.quitPlezTV' => 'Salir de Plezy',
 			'startup.repairFailed' => 'Error en la reparación',
 			'startup.repairKeptSignIns' => 'Tus servidores y perfiles siguen con la sesión iniciada.',
 			'startup.repairLostSignIns' => 'La clave que protege tus inicios de sesión guardados no se pudo recuperar. Tendrás que iniciar sesión de nuevo en cada servidor y perfil.',

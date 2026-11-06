@@ -102,7 +102,7 @@ class _Translations$app$da extends Translations$app$en {
 	final TranslationsDa _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$da extends Translations$profiles$en {
 	final TranslationsDa _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Tilføj Plezy-profil';
+	@override String get addPlezTVProfile => 'Tilføj Plezy-profil';
 	@override String get switchingProfile => 'Skifter profil…';
 	@override String get deleteThisProfileTitle => 'Slet denne profil?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Fjern ${displayName}. Forbindelser påvirkes ikke.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$da extends Translations$startup$en {
 	@override String get repairSucceeded => 'Lager repareret';
 	@override String get repairNeedsRestart => 'Lager repareret — genstart påkrævet';
 	@override String get restartRequiredBody => 'Dine data er blevet repareret, men Plezy skal starte på ny, før det kan bruge dem. Luk Plezy, og åbn det igen.';
-	@override String get quitPlezy => 'Afslut Plezy';
+	@override String get quitPlezTV => 'Afslut Plezy';
 	@override String get repairFailed => 'Reparation mislykkedes';
 	@override String get repairKeptSignIns => 'Dine servere og profiler er stadig logget ind.';
 	@override String get repairLostSignIns => 'Nøglen, der beskytter dine gemte loginoplysninger, kunne ikke gendannes. Du skal logge ind på alle servere og profiler igen.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$da extends Translations$services$libr
 extension on TranslationsDa {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Appikon',
 			'appIcon.defaultIcon' => 'Standard',
 			'appIcon.current' => 'Nuværende ikon',
@@ -4354,7 +4354,7 @@ extension on TranslationsDa {
 			'mpvConfig.removeLine' => 'Fjern linje',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context og gpu-api ignoreres på Linux: indlejret video renderes altid via vo=libmpv på videoplanen, og gpu-next (som compute-shaders som ArtCNN kræver) kan ikke køre indlejret.',
 			'dialog.confirmAction' => 'Bekræft handling',
-			'profiles.addPlezyProfile' => 'Tilføj Plezy-profil',
+			'profiles.addPlezTVProfile' => 'Tilføj Plezy-profil',
 			'profiles.switchingProfile' => 'Skifter profil…',
 			'profiles.deleteThisProfileTitle' => 'Slet denne profil?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Fjern ${displayName}. Forbindelser påvirkes ikke.',
@@ -4686,7 +4686,7 @@ extension on TranslationsDa {
 			'startup.repairSucceeded' => 'Lager repareret',
 			'startup.repairNeedsRestart' => 'Lager repareret — genstart påkrævet',
 			'startup.restartRequiredBody' => 'Dine data er blevet repareret, men Plezy skal starte på ny, før det kan bruge dem. Luk Plezy, og åbn det igen.',
-			'startup.quitPlezy' => 'Afslut Plezy',
+			'startup.quitPlezTV' => 'Afslut Plezy',
 			'startup.repairFailed' => 'Reparation mislykkedes',
 			'startup.repairKeptSignIns' => 'Dine servere og profiler er stadig logget ind.',
 			'startup.repairLostSignIns' => 'Nøglen, der beskytter dine gemte loginoplysninger, kunne ikke gendannes. Du skal logge ind på alle servere og profiler igen.',

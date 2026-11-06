@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Appikon",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Bekreft handling"
   },
   "profiles": {
-    "addPlezyProfile": "Legg til Plezy-profil",
+    "addPlezTVProfile": "Legg til Plezy-profil",
     "switchingProfile": "Bytter profil…",
     "deleteThisProfileTitle": "Slett denne profilen?",
     "deleteThisProfileMessage": "Fjern ${displayName}. Tilkoblinger påvirkes ikke.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Lagring reparert",
     "repairNeedsRestart": "Lagring reparert – omstart kreves",
     "restartRequiredBody": "Dataene dine ble reparert, men Plezy må starte på nytt før det kan bruke dem. Lukk Plezy og åpne det igjen.",
-    "quitPlezy": "Avslutt Plezy",
+    "quitPlezTV": "Avslutt Plezy",
     "repairFailed": "Reparasjon mislyktes",
     "repairKeptSignIns": "Serverne og profilene dine er fortsatt pålogget.",
     "repairLostSignIns": "Nøkkelen som beskytter de lagrede påloggingene dine kunne ikke gjenvinnes. Du må logge på alle servere og profiler på nytt.",

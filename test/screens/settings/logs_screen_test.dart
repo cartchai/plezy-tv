@@ -59,7 +59,7 @@ void main() {
     String? clipboardText;
 
     PackageInfo.setMockInitialValues(
-      appName: 'Plezy',
+      appName: 'PlezTV',
       packageName: 'com.plezy.test',
       version: '1.2.3',
       buildNumber: '45',
@@ -171,7 +171,7 @@ void main() {
 
     Future<void> pumpLogs(WidgetTester tester) async {
       PackageInfo.setMockInitialValues(
-        appName: 'Plezy',
+        appName: 'PlezTV',
         packageName: 'com.plezy.test',
         version: '2.11.0',
         buildNumber: '124',
@@ -237,7 +237,7 @@ void main() {
 
     setUp(() {
       PackageInfo.setMockInitialValues(
-        appName: 'Plezy',
+        appName: 'PlezTV',
         packageName: 'com.plezy.test',
         version: '1.2.3',
         buildNumber: '45',
@@ -440,7 +440,7 @@ void main() {
       await tester.pump();
 
       expect(clipboardText, isNotNull);
-      expect(clipboardText, startsWith('Plezy'));
+      expect(clipboardText, startsWith('PlezTV'));
       expect(clipboardText, matches(RegExp(r'---\n\[')));
       expect(clipboardText, matches(RegExp(r'newer-row\n\[')));
       expect(clipboardText, endsWith('older-row'));
@@ -463,7 +463,7 @@ void main() {
 
       await pumpLogs(tester);
       await pumpSelectionRegistration(tester);
-      final header = find.textContaining('Plezy', findRichText: true);
+      final header = find.textContaining('PlezTV', findRichText: true);
       final newerRow = find.textContaining('newer-row', findRichText: true);
       final gesture = await tester.startGesture(
         tester.getTopLeft(header) + const Offset(1, 6),
@@ -501,7 +501,7 @@ void main() {
       await TvDetectionService.getInstance(forceTv: true);
       TvDetectionService.setForceTVSync(true);
       PackageInfo.setMockInitialValues(
-        appName: 'Plezy',
+        appName: 'PlezTV',
         packageName: 'com.plezy.test',
         version: '1.2.3',
         buildNumber: '45',

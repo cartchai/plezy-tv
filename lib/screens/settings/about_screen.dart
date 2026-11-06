@@ -53,6 +53,19 @@ class AboutScreen extends StatelessWidget {
 
                   const SizedBox(height: 40),
 
+                  // What's new: static in-app changelog, newest first. Kept
+                  // in code (not fetched) so About works fully offline.
+                  SettingsGroup(
+                    margin: EdgeInsets.zero,
+                    title: t.about.changelogTitle,
+                    children: [
+                      _ChangelogEntry(version: '2.25.1', changes: t.about.changelog2251),
+                      _ChangelogEntry(version: '2.25.0', changes: t.about.changelog2250),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
                   SettingsGroup(
                     margin: EdgeInsets.zero,
                     children: [
@@ -75,6 +88,44 @@ class AboutScreen extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// One version's entry in the About changelog: a version heading followed
+/// by a plain-words bullet list of what changed in that release.
+class _ChangelogEntry extends StatelessWidget {
+  final String version;
+  final List<String> changes;
+
+  const _ChangelogEntry({required this.version, required this.changes});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t.about.versionLabel(version: version),
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          for (final change in changes)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('•  ', style: theme.textTheme.bodyMedium),
+                  Expanded(child: Text(change, style: theme.textTheme.bodyMedium)),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

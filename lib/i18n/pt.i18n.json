@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Ícone do app",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Confirmar Ação"
   },
   "profiles": {
-    "addPlezyProfile": "Adicionar perfil Plezy",
+    "addPlezTVProfile": "Adicionar perfil Plezy",
     "switchingProfile": "Mudando perfil…",
     "deleteThisProfileTitle": "Excluir este perfil?",
     "deleteThisProfileMessage": "Remover ${displayName}. As conexões não serão afetadas.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Armazenamento reparado",
     "repairNeedsRestart": "Armazenamento reparado — reinício necessário",
     "restartRequiredBody": "Seus dados foram reparados, mas o Plezy precisa iniciar do zero antes de usá-los. Feche o Plezy e abra-o novamente.",
-    "quitPlezy": "Sair do Plezy",
+    "quitPlezTV": "Sair do Plezy",
     "repairFailed": "Falha no reparo",
     "repairKeptSignIns": "Seus servidores e perfis ainda estão conectados.",
     "repairLostSignIns": "A chave que protege seus logins salvos não pôde ser recuperada. Você terá que entrar novamente em todos os servidores e perfis.",

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../../exceptions/media_server_exceptions.dart';
@@ -43,7 +44,10 @@ class XtreamApi {
     );
   }
 
-  Future<dynamic> _getJson(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
+  /// Fetch a response body with status checks. Shared by [_getJson] and the
+  /// big catalog calls, which hand the body to an isolate for parsing
+  /// instead of decoding it here (see [_parseLiveStreams] etc.).
+  Future<String> _fetchBody(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
     http.Response response;
     try {
       response = await _http.get(uri).timeout(timeout);
@@ -69,13 +73,18 @@ class XtreamApi {
         requestUri: uri,
       );
     }
+    return response.body;
+  }
+
+  Future<dynamic> _getJson(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
+    final body = await _fetchBody(uri, timeout: timeout);
     try {
-      return jsonDecode(response.body);
+      return jsonDecode(body);
     } on FormatException catch (e) {
       throw MediaServerHttpException(
         type: MediaServerHttpErrorType.unknown,
         message: 'Xtream returned unparseable JSON: $e',
-        statusCode: response.statusCode,
+        statusCode: 200,
         requestUri: uri,
       );
     }
@@ -131,29 +140,34 @@ class XtreamApi {
   }
 
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
-    // The full live list is tens of thousands of rows; give it a minute
-    // on slow connections instead of the 30s default.
-    final decoded = await _getJson(
+    // The full live list is tens of thousands of rows; give it two minutes
+    // on slow connections instead of the 30s default, and parse it off the
+    // UI thread — decoding tens of thousands of rows on the main isolate
+    // freezes the app for seconds.
+    final body = await _fetchBody(
       _playerApiUri(action: 'get_live_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
-      timeout: const Duration(seconds: 60),
+      timeout: const Duration(seconds: 120),
     );
-    return _asObjectList(decoded).map(XtreamLiveStream.fromJson).toList();
+    return compute(_parseLiveStreams, body);
   }
 
   Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
-    final decoded = await _getJson(
+    // The full VOD list is ~200k rows (tens of MB of JSON). Same treatment
+    // as the live list: a long timeout and isolate parsing, so opening
+    // Movies does not hang or time out on a slow connection.
+    final body = await _fetchBody(
       _playerApiUri(action: 'get_vod_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
-      timeout: const Duration(seconds: 60),
+      timeout: const Duration(seconds: 120),
     );
-    return _asObjectList(decoded).map(XtreamVodStream.fromJson).toList();
+    return compute(_parseVodStreams, body);
   }
 
   Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
-    final decoded = await _getJson(
+    final body = await _fetchBody(
       _playerApiUri(action: 'get_series', extra: categoryId == null ? null : {'category_id': categoryId}),
-      timeout: const Duration(seconds: 60),
+      timeout: const Duration(seconds: 120),
     );
-    return _asObjectList(decoded).map(XtreamSeries.fromJson).toList();
+    return compute(_parseSeries, body);
   }
 
   /// Full series detail: info + per-season episode lists.
@@ -223,6 +237,31 @@ class XtreamApi {
     return '$serverUrl/timeshift/$username/$password/$durationMinutes/$stamp/$streamId.m3u8';
   }
 }
+
+/// Top-level catalog parsers for [compute]: the big Xtream lists are tens
+/// of thousands of rows, and decoding + mapping them on the UI thread
+/// freezes the app for seconds. These run on a background isolate; a
+/// malformed body surfaces as the same [MediaServerHttpException] the
+/// inline path used to throw, so callers see no difference.
+dynamic _decodeCatalogJson(String body) {
+  try {
+    return jsonDecode(body);
+  } on FormatException catch (e) {
+    throw MediaServerHttpException(
+      type: MediaServerHttpErrorType.unknown,
+      message: 'Xtream returned unparseable JSON: $e',
+    );
+  }
+}
+
+List<XtreamLiveStream> _parseLiveStreams(String body) =>
+    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamLiveStream.fromJson).toList();
+
+List<XtreamVodStream> _parseVodStreams(String body) =>
+    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamVodStream.fromJson).toList();
+
+List<XtreamSeries> _parseSeries(String body) =>
+    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamSeries.fromJson).toList();
 
 class XtreamCategory {
   final String id;

@@ -102,7 +102,7 @@ class _Translations$app$kk extends Translations$app$en {
 	final TranslationsKk _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$kk extends Translations$profiles$en {
 	final TranslationsKk _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy профилін қосу';
+	@override String get addPlezTVProfile => 'Plezy профилін қосу';
 	@override String get switchingProfile => 'Профильді ауыстыру…';
 	@override String get deleteThisProfileTitle => 'Осы профиль өшірілсін бе?';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName} өшіріледі. Қосылымдарға әсер етпейді.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$kk extends Translations$startup$en {
 	@override String get repairSucceeded => 'Сақтау қалпына келтірілді';
 	@override String get repairNeedsRestart => 'Сақтау қалпына келтірілді — қайта іске қосу қажет';
 	@override String get restartRequiredBody => 'Деректеріңіз қалпына келтірілді, бірақ Plezy оларды пайдаланар алдында жаңадан іске қосылуы керек. Plezy жабыңыз да, қайта ашыңыз.';
-	@override String get quitPlezy => 'Plezy бағдарламасынан шығу';
+	@override String get quitPlezTV => 'Plezy бағдарламасынан шығу';
 	@override String get repairFailed => 'Қалпына келтіру сәтсіз аяқталды';
 	@override String get repairKeptSignIns => 'Серверлеріңіз бен профильдеріңіз әлі кірген күйде.';
 	@override String get repairLostSignIns => 'Сақталған кіру деректерін қорғайтын кілт қалпына келтірілмеді. Әрбір сервер мен профильге қайта кіруге тура келеді.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$kk extends Translations$services$libr
 extension on TranslationsKk {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Қолданба белгішесі',
 			'appIcon.defaultIcon' => 'Әдепкі',
 			'appIcon.current' => 'Ағымдағы белгіше',
@@ -4354,7 +4354,7 @@ extension on TranslationsKk {
 			'mpvConfig.removeLine' => 'Жолды өшіру',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context және gpu-api Linux-те еленбейді: ендірілген бейне әрқашан бейне жазықтығында vo=libmpv арқылы көрсетіледі, ал gpu-next (ArtCNN сияқты compute шейдерлеріне қажет) ендірілген режимде жұмыс істей алмайды.',
 			'dialog.confirmAction' => 'Әрекетті растау',
-			'profiles.addPlezyProfile' => 'Plezy профилін қосу',
+			'profiles.addPlezTVProfile' => 'Plezy профилін қосу',
 			'profiles.switchingProfile' => 'Профильді ауыстыру…',
 			'profiles.deleteThisProfileTitle' => 'Осы профиль өшірілсін бе?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName} өшіріледі. Қосылымдарға әсер етпейді.',
@@ -4686,7 +4686,7 @@ extension on TranslationsKk {
 			'startup.repairSucceeded' => 'Сақтау қалпына келтірілді',
 			'startup.repairNeedsRestart' => 'Сақтау қалпына келтірілді — қайта іске қосу қажет',
 			'startup.restartRequiredBody' => 'Деректеріңіз қалпына келтірілді, бірақ Plezy оларды пайдаланар алдында жаңадан іске қосылуы керек. Plezy жабыңыз да, қайта ашыңыз.',
-			'startup.quitPlezy' => 'Plezy бағдарламасынан шығу',
+			'startup.quitPlezTV' => 'Plezy бағдарламасынан шығу',
 			'startup.repairFailed' => 'Қалпына келтіру сәтсіз аяқталды',
 			'startup.repairKeptSignIns' => 'Серверлеріңіз бен профильдеріңіз әлі кірген күйде.',
 			'startup.repairLostSignIns' => 'Сақталған кіру деректерін қорғайтын кілт қалпына келтірілмеді. Әрбір сервер мен профильге қайта кіруге тура келеді.',

@@ -102,7 +102,7 @@ class _Translations$app$tr extends Translations$app$en {
 	final TranslationsTr _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$tr extends Translations$profiles$en {
 	final TranslationsTr _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy profili ekle';
+	@override String get addPlezTVProfile => 'Plezy profili ekle';
 	@override String get switchingProfile => 'Profil değiştiriliyor…';
 	@override String get deleteThisProfileTitle => 'Bu profil silinsin mi?';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName} kişisi kaldırılacak. Bağlantılar etkilenmez.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$tr extends Translations$startup$en {
 	@override String get repairSucceeded => 'Depolama alanı onarıldı';
 	@override String get repairNeedsRestart => 'Depolama alanı onarıldı — yeniden başlatma gerekli';
 	@override String get restartRequiredBody => 'Verileriniz onarıldı, ancak Plezy\'nin bunları kullanabilmesi için temiz bir başlangıç yapması gerekiyor. Plezy\'yi kapatıp yeniden açın.';
-	@override String get quitPlezy => 'Plezy\'den Çık';
+	@override String get quitPlezTV => 'Plezy\'den Çık';
 	@override String get repairFailed => 'Onarım başarısız oldu';
 	@override String get repairKeptSignIns => 'Sunucularınız ve profilleriniz hâlâ giriş yapılı.';
 	@override String get repairLostSignIns => 'Kayıtlı girişlerinizi koruyan anahtar kurtarılamadı. Her sunucuya ve profile yeniden giriş yapmanız gerekecek.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$tr extends Translations$services$libr
 extension on TranslationsTr {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Uygulama simgesi',
 			'appIcon.defaultIcon' => 'Varsayılan',
 			'appIcon.current' => 'Mevcut simge',
@@ -4354,7 +4354,7 @@ extension on TranslationsTr {
 			'mpvConfig.removeLine' => 'Satırı Kaldır',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context ve gpu-api Linux\'ta yok sayılır: gömülü video her zaman video düzleminde vo=libmpv üzerinden işlenir ve gpu-next (ArtCNN gibi compute shader\'ların ihtiyaç duyduğu) gömülü olarak çalışamaz.',
 			'dialog.confirmAction' => 'Eylemi Onayla',
-			'profiles.addPlezyProfile' => 'Plezy profili ekle',
+			'profiles.addPlezTVProfile' => 'Plezy profili ekle',
 			'profiles.switchingProfile' => 'Profil değiştiriliyor…',
 			'profiles.deleteThisProfileTitle' => 'Bu profil silinsin mi?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName} kişisi kaldırılacak. Bağlantılar etkilenmez.',
@@ -4686,7 +4686,7 @@ extension on TranslationsTr {
 			'startup.repairSucceeded' => 'Depolama alanı onarıldı',
 			'startup.repairNeedsRestart' => 'Depolama alanı onarıldı — yeniden başlatma gerekli',
 			'startup.restartRequiredBody' => 'Verileriniz onarıldı, ancak Plezy\'nin bunları kullanabilmesi için temiz bir başlangıç yapması gerekiyor. Plezy\'yi kapatıp yeniden açın.',
-			'startup.quitPlezy' => 'Plezy\'den Çık',
+			'startup.quitPlezTV' => 'Plezy\'den Çık',
 			'startup.repairFailed' => 'Onarım başarısız oldu',
 			'startup.repairKeptSignIns' => 'Sunucularınız ve profilleriniz hâlâ giriş yapılı.',
 			'startup.repairLostSignIns' => 'Kayıtlı girişlerinizi koruyan anahtar kurtarılamadı. Her sunucuya ve profile yeniden giriş yapmanız gerekecek.',

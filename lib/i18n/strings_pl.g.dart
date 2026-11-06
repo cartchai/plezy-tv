@@ -102,7 +102,7 @@ class _Translations$app$pl extends Translations$app$en {
 	final TranslationsPl _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1185,7 +1185,7 @@ class _Translations$profiles$pl extends Translations$profiles$en {
 	final TranslationsPl _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Dodaj profil Plezy';
+	@override String get addPlezTVProfile => 'Dodaj profil Plezy';
 	@override String get switchingProfile => 'Przełączanie profilu…';
 	@override String get deleteThisProfileTitle => 'Usunąć ten profil?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Usuń ${displayName}. Połączenia nie zostaną zmienione.';
@@ -1517,7 +1517,7 @@ class _Translations$startup$pl extends Translations$startup$en {
 	@override String get repairSucceeded => 'Naprawiono pamięć';
 	@override String get repairNeedsRestart => 'Naprawiono pamięć — wymagany restart';
 	@override String get restartRequiredBody => 'Twoje dane zostały naprawione, ale Plezy musi uruchomić się od nowa, zanim będzie mogło z nich korzystać. Zamknij Plezy i otwórz je ponownie.';
-	@override String get quitPlezy => 'Zamknij Plezy';
+	@override String get quitPlezTV => 'Zamknij Plezy';
 	@override String get repairFailed => 'Naprawa nie powiodła się';
 	@override String get repairKeptSignIns => 'Twoje serwery i profile są nadal zalogowane.';
 	@override String get repairLostSignIns => 'Nie udało się odzyskać klucza chroniącego zapisane logowania. Musisz zalogować się ponownie na każdym serwerze i profilu.';
@@ -3419,7 +3419,7 @@ class _Translations$services$libraryFilter$pl extends Translations$services$libr
 extension on TranslationsPl {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Ikona aplikacji',
 			'appIcon.defaultIcon' => 'Domyślna',
 			'appIcon.current' => 'Bieżąca ikona',
@@ -4378,7 +4378,7 @@ extension on TranslationsPl {
 			'mpvConfig.removeLine' => 'Usuń wiersz',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context i gpu-api są ignorowane w systemie Linux: wbudowane wideo jest zawsze renderowane przez vo=libmpv na płaszczyźnie wideo, a gpu-next (wymagany przez shadery obliczeniowe takie jak ArtCNN) nie może działać w trybie wbudowanym.',
 			'dialog.confirmAction' => 'Potwierdź działanie',
-			'profiles.addPlezyProfile' => 'Dodaj profil Plezy',
+			'profiles.addPlezTVProfile' => 'Dodaj profil Plezy',
 			'profiles.switchingProfile' => 'Przełączanie profilu…',
 			'profiles.deleteThisProfileTitle' => 'Usunąć ten profil?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Usuń ${displayName}. Połączenia nie zostaną zmienione.',
@@ -4710,7 +4710,7 @@ extension on TranslationsPl {
 			'startup.repairSucceeded' => 'Naprawiono pamięć',
 			'startup.repairNeedsRestart' => 'Naprawiono pamięć — wymagany restart',
 			'startup.restartRequiredBody' => 'Twoje dane zostały naprawione, ale Plezy musi uruchomić się od nowa, zanim będzie mogło z nich korzystać. Zamknij Plezy i otwórz je ponownie.',
-			'startup.quitPlezy' => 'Zamknij Plezy',
+			'startup.quitPlezTV' => 'Zamknij Plezy',
 			'startup.repairFailed' => 'Naprawa nie powiodła się',
 			'startup.repairKeptSignIns' => 'Twoje serwery i profile są nadal zalogowane.',
 			'startup.repairLostSignIns' => 'Nie udało się odzyskać klucza chroniącego zapisane logowania. Musisz zalogować się ponownie na każdym serwerze i profilu.',

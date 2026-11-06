@@ -102,7 +102,7 @@ class _Translations$app$nl extends Translations$app$en {
 	final TranslationsNl _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$nl extends Translations$profiles$en {
 	final TranslationsNl _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy-profiel toevoegen';
+	@override String get addPlezTVProfile => 'Plezy-profiel toevoegen';
 	@override String get switchingProfile => 'Profiel wisselen…';
 	@override String get deleteThisProfileTitle => 'Dit profiel verwijderen?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Verwijder ${displayName}. Verbindingen blijven ongewijzigd.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$nl extends Translations$startup$en {
 	@override String get repairSucceeded => 'Opslag gerepareerd';
 	@override String get repairNeedsRestart => 'Opslag gerepareerd — herstart vereist';
 	@override String get restartRequiredBody => 'Je gegevens zijn gerepareerd, maar Plezy moet opnieuw starten voordat het ze kan gebruiken. Sluit Plezy en open het opnieuw.';
-	@override String get quitPlezy => 'Plezy afsluiten';
+	@override String get quitPlezTV => 'Plezy afsluiten';
 	@override String get repairFailed => 'Repareren mislukt';
 	@override String get repairKeptSignIns => 'Je servers en profielen zijn nog steeds aangemeld.';
 	@override String get repairLostSignIns => 'De sleutel die je opgeslagen aanmeldingen beschermt, kon niet worden hersteld. Je moet je opnieuw aanmelden bij elke server en elk profiel.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$nl extends Translations$services$libr
 extension on TranslationsNl {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'App-icoon',
 			'appIcon.defaultIcon' => 'Standaard',
 			'appIcon.current' => 'Huidig icoon',
@@ -4354,7 +4354,7 @@ extension on TranslationsNl {
 			'mpvConfig.removeLine' => 'Regel verwijderen',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context en gpu-api worden genegeerd op Linux: ingebedde video wordt altijd weergegeven via vo=libmpv op het videovlak, en gpu-next (nodig voor compute-shaders zoals ArtCNN) kan niet ingebed draaien.',
 			'dialog.confirmAction' => 'Bevestig actie',
-			'profiles.addPlezyProfile' => 'Plezy-profiel toevoegen',
+			'profiles.addPlezTVProfile' => 'Plezy-profiel toevoegen',
 			'profiles.switchingProfile' => 'Profiel wisselen…',
 			'profiles.deleteThisProfileTitle' => 'Dit profiel verwijderen?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Verwijder ${displayName}. Verbindingen blijven ongewijzigd.',
@@ -4686,7 +4686,7 @@ extension on TranslationsNl {
 			'startup.repairSucceeded' => 'Opslag gerepareerd',
 			'startup.repairNeedsRestart' => 'Opslag gerepareerd — herstart vereist',
 			'startup.restartRequiredBody' => 'Je gegevens zijn gerepareerd, maar Plezy moet opnieuw starten voordat het ze kan gebruiken. Sluit Plezy en open het opnieuw.',
-			'startup.quitPlezy' => 'Plezy afsluiten',
+			'startup.quitPlezTV' => 'Plezy afsluiten',
 			'startup.repairFailed' => 'Repareren mislukt',
 			'startup.repairKeptSignIns' => 'Je servers en profielen zijn nog steeds aangemeld.',
 			'startup.repairLostSignIns' => 'De sleutel die je opgeslagen aanmeldingen beschermt, kon niet worden hersteld. Je moet je opnieuw aanmelden bij elke server en elk profiel.',

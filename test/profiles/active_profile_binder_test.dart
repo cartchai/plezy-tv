@@ -122,6 +122,53 @@ void main() {
     expect(multiServerProvider.serverIds, isEmpty);
   });
 
+  test('IPTV-only local profile binds the Xtream client with no Plex anywhere', () async {
+    // First-run shape: a local profile whose only connection is Xtream.
+    // The server URL is loopback with a closed port, so the health probe
+    // fails fast (connection refused) instead of waiting on the network:
+    // the client must still register and the server must be expected,
+    // because on a real phone the probe succeeds and the server goes visible.
+    final profile = Profile.local(id: 'local-iptv', displayName: 'Trex', createdAt: DateTime(2026, 1, 1));
+    await profiles.upsert(profile);
+    await storage.setActiveProfileId(profile.id);
+    await activeProfile.initialize();
+
+    final connection = XtreamConnection(
+      id: 'trex',
+      name: 'Trex',
+      serverUrl: 'http://127.0.0.1:1',
+      username: 'user',
+      password: 'pass',
+      createdAt: DateTime(2026, 1, 1),
+    );
+    await connections.upsert(connection);
+    await profileConnections.upsert(
+      ProfileConnection(
+        profileId: profile.id,
+        connectionId: connection.id,
+        userToken: null,
+        userIdentifier: 'user',
+        tokenAcquiredAt: DateTime(2026, 1, 1),
+      ),
+    );
+
+    await binder.rebindActive();
+
+    // The bind ROUTED through _bindIptv with no Plex anywhere: the client
+    // registered and the server is expected. `lastBindingSucceeded` is
+    // false here ONLY because the health probe cannot succeed in a test
+    // (HttpClient returns 400 / loopback refuses) — on a real phone a
+    // working Trex login probes online and the server goes visible. A
+    // failed probe still leaves the server expected (not dropped), and the
+    // app falls back to its offline shell rather than getting stuck.
+    expect(activeProfile.lastBindingSucceeded, isFalse);
+    expect(manager.registeredServerIds, contains('trex'));
+    expect(manager.getIptvClientByConnectionId('trex'), isNotNull);
+    expect(multiServerProvider.expectedServerIds, contains('trex'));
+    // No Plex account, no Plex server: the bind must not need one.
+    expect(manager.registeredServerIds, hasLength(1));
+  });
+
   test('started binder does not loop forever after empty local bind', () async {
     final profile = Profile.local(id: 'local-empty', displayName: 'Empty', createdAt: DateTime(2026, 1, 1));
     await profiles.upsert(profile);

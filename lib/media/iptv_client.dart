@@ -309,10 +309,28 @@ class IptvClient implements MediaServerClient {
     // (the Live TV tab). Only on-demand catalogs become libraries, so the
     // library picker never shows a "Live TV" row. M3U has no on-demand
     // catalog, so it exposes no libraries at all.
+    //
+    // The "omit this library when ALL its categories are disabled" check
+    // needs two provider round trips. Those run in parallel with a short
+    // fail-open timeout: the library list itself must never depend on the
+    // provider being fast — the aggregation service drops a server whose
+    // library fetch misses its 15s deadline, which would hide the whole
+    // Trex section. Content-level filtering (in _moviesItems/_seriesItems)
+    // still hides disabled categories even when this probe fails open.
     final name = _name;
     final libraries = <MediaLibrary>[];
     if (_isXtream) {
-      if (!await _allCategoriesDisabled(_vodCategories)) {
+      var allVodDisabled = false;
+      var allSeriesDisabled = false;
+      if (_disabledCategories.isNotEmpty) {
+        final results = await Future.wait([
+          _allCategoriesDisabled(_vodCategories),
+          _allCategoriesDisabled(_seriesCategories),
+        ]).timeout(const Duration(seconds: 5), onTimeout: () => [false, false]);
+        allVodDisabled = results[0];
+        allSeriesDisabled = results[1];
+      }
+      if (!allVodDisabled) {
         libraries.add(
           MediaLibrary(
             id: _moviesLibraryId,
@@ -324,7 +342,7 @@ class IptvClient implements MediaServerClient {
           ),
         );
       }
-      if (!await _allCategoriesDisabled(_seriesCategories)) {
+      if (!allSeriesDisabled) {
         libraries.add(
           MediaLibrary(
             id: _seriesLibraryId,

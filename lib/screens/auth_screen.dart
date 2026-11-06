@@ -33,6 +33,8 @@ import '../widgets/dialog_action_button.dart';
 import 'auth/plex_pin_auth_flow.dart';
 import 'profile/profile_switch_screen.dart';
 import 'settings/add_jellyfin_screen.dart';
+import 'settings/add_m3u_screen.dart';
+import 'settings/add_xtream_screen.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({
@@ -248,6 +250,23 @@ class _AuthScreenState extends State<AuthScreen> {
     unawaited(Navigator.pushReplacement(context, fadeRoute(const ProfileSessionScreen())));
   }
 
+  /// First-run IPTV entry point, same standing as Plex / Jellyfin / Emby:
+  /// the add screen provisions the first-run profile itself (see
+  /// [persistAndExitIptvConnection]), so no Plex account is needed to get
+  /// into the app. Mirrors [_connectToMediaBrowser] after the form pops.
+  Future<void> _connectToIptv({required bool isM3u}) async {
+    if (!await _prepareDatabaseRecoveryForSignIn()) return;
+    if (!mounted) return;
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => isM3u ? const AddM3uScreen() : const AddXtreamScreen()),
+    );
+    if (!mounted || added != true) return;
+    // The connection persisted and the manager registered the client; move
+    // straight to the main screen.
+    unawaited(Navigator.pushReplacement(context, fadeRoute(const ProfileSessionScreen())));
+  }
+
   void _showDebugTokenDialog() {
     unawaited(
       showScopedDialog<void>(
@@ -362,6 +381,8 @@ class _AuthScreenState extends State<AuthScreen> {
     const embyDialect = MediaBrowserDialect.emby;
     void connectToJellyfin() => unawaited(_connectToMediaBrowser(jellyfinDialect));
     void connectToEmby() => unawaited(_connectToMediaBrowser(embyDialect));
+    void connectToM3u() => unawaited(_connectToIptv(isM3u: true));
+    void connectToXtream() => unawaited(_connectToIptv(isM3u: false));
     return Column(
       mainAxisSize: .min,
       crossAxisAlignment: .stretch,
@@ -451,6 +472,26 @@ class _AuthScreenState extends State<AuthScreen> {
             style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
             icon: const BackendBadge(backend: MediaBackend.emby, size: 18),
             label: Text(t.auth.connectToMediaBrowser(product: embyDialect.productName)),
+          ),
+        ),
+        const SizedBox(height: 12),
+        FocusableButton(
+          onPressed: connectToM3u,
+          child: OutlinedButton.icon(
+            onPressed: connectToM3u,
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+            icon: const BackendBadge(backend: MediaBackend.m3u, size: 18),
+            label: Text(t.addServer.connectToM3uCard),
+          ),
+        ),
+        const SizedBox(height: 12),
+        FocusableButton(
+          onPressed: connectToXtream,
+          child: OutlinedButton.icon(
+            onPressed: connectToXtream,
+            style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+            icon: const BackendBadge(backend: MediaBackend.xtream, size: 18),
+            label: Text(t.addServer.connectToXtreamCard),
           ),
         ),
         if (kDebugMode) ...[

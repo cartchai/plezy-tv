@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "應用程式圖示",
@@ -1026,7 +1026,7 @@
     "confirmAction": "確認操作"
   },
   "profiles": {
-    "addPlezyProfile": "新增 Plezy 使用者設定檔",
+    "addPlezTVProfile": "新增 Plezy 使用者設定檔",
     "switchingProfile": "正在切換使用者設定檔…",
     "deleteThisProfileTitle": "刪除此使用者設定檔？",
     "deleteThisProfileMessage": "將移除 ${displayName}。連線資訊將不受影響。",
@@ -1402,7 +1402,7 @@
     "repairSucceeded": "儲存空間已修復",
     "repairNeedsRestart": "儲存空間已修復 — 需要重新啟動",
     "restartRequiredBody": "您的資料已修復，但 Plezy 必須重新啟動才能使用。請關閉 Plezy 後重新開啟。",
-    "quitPlezy": "退出 Plezy",
+    "quitPlezTV": "退出 Plezy",
     "repairFailed": "修復失敗",
     "repairKeptSignIns": "您的伺服器與使用者設定檔仍保持登入狀態。",
     "repairLostSignIns": "保護已儲存登入資訊的金鑰無法復原。您必須重新登入每個伺服器與使用者設定檔。",

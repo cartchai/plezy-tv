@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "アプリアイコン",
@@ -1026,7 +1026,7 @@
     "confirmAction": "操作の確認"
   },
   "profiles": {
-    "addPlezyProfile": "Plezyプロフィールを追加",
+    "addPlezTVProfile": "Plezyプロフィールを追加",
     "switchingProfile": "プロフィールを切り替え中…",
     "deleteThisProfileTitle": "このプロフィールを削除しますか？",
     "deleteThisProfileMessage": "${displayName}を削除します。接続には影響しません。",
@@ -1402,7 +1402,7 @@
     "repairSucceeded": "ストレージを修復しました",
     "repairNeedsRestart": "ストレージを修復しました — 再起動が必要です",
     "restartRequiredBody": "データは修復されましたが、Plezyはそれを使用する前に再起動する必要があります。Plezyを閉じて再度開いてください。",
-    "quitPlezy": "Plezyを終了",
+    "quitPlezTV": "Plezyを終了",
     "repairFailed": "修復に失敗しました",
     "repairKeptSignIns": "サーバーとプロフィールはサインインしたままです。",
     "repairLostSignIns": "保存済みのサインインを保護するキーを復元できませんでした。すべてのサーバーとプロフィールに再度サインインする必要があります。",

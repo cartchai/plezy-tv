@@ -102,7 +102,7 @@ class _Translations$app$ko extends Translations$app$en {
 	final TranslationsKo _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1173,7 +1173,7 @@ class _Translations$profiles$ko extends Translations$profiles$en {
 	final TranslationsKo _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy 프로필 추가';
+	@override String get addPlezTVProfile => 'Plezy 프로필 추가';
 	@override String get switchingProfile => '프로필 전환 중…';
 	@override String get deleteThisProfileTitle => '이 프로필을 삭제하시겠습니까?';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName}을(를) 제거합니다. 연결에는 영향이 없습니다.';
@@ -1502,7 +1502,7 @@ class _Translations$startup$ko extends Translations$startup$en {
 	@override String get repairSucceeded => '저장소가 복구되었습니다';
 	@override String get repairNeedsRestart => '저장소가 복구되었습니다 — 재시작 필요';
 	@override String get restartRequiredBody => '데이터가 복구되었지만 Plezy는 이를 사용하려면 새로 시작해야 합니다. Plezy를 종료한 후 다시 열어주세요.';
-	@override String get quitPlezy => 'Plezy 종료';
+	@override String get quitPlezTV => 'Plezy 종료';
 	@override String get repairFailed => '복구 실패';
 	@override String get repairKeptSignIns => '서버와 프로필이 계속 로그인 상태입니다.';
 	@override String get repairLostSignIns => '저장된 로그인 정보를 보호하는 키를 복구할 수 없었습니다. 모든 서버와 프로필에 다시 로그인해야 합니다.';
@@ -3383,7 +3383,7 @@ class _Translations$services$libraryFilter$ko extends Translations$services$libr
 extension on TranslationsKo {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => '앱 아이콘',
 			'appIcon.defaultIcon' => '기본',
 			'appIcon.current' => '현재 아이콘',
@@ -4342,7 +4342,7 @@ extension on TranslationsKo {
 			'mpvConfig.removeLine' => '줄 제거',
 			'mpvConfig.embeddedVoHint' => 'Linux에서는 vo, gpu-context, gpu-api가 무시됩니다. 내장 동영상은 항상 비디오 평면에서 vo=libmpv로 렌더링되며, gpu-next(ArtCNN 같은 컴퓨트 셰이더에 필요)는 내장 방식으로 실행할 수 없습니다.',
 			'dialog.confirmAction' => '작업 확인',
-			'profiles.addPlezyProfile' => 'Plezy 프로필 추가',
+			'profiles.addPlezTVProfile' => 'Plezy 프로필 추가',
 			'profiles.switchingProfile' => '프로필 전환 중…',
 			'profiles.deleteThisProfileTitle' => '이 프로필을 삭제하시겠습니까?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName}을(를) 제거합니다. 연결에는 영향이 없습니다.',
@@ -4674,7 +4674,7 @@ extension on TranslationsKo {
 			'startup.repairSucceeded' => '저장소가 복구되었습니다',
 			'startup.repairNeedsRestart' => '저장소가 복구되었습니다 — 재시작 필요',
 			'startup.restartRequiredBody' => '데이터가 복구되었지만 Plezy는 이를 사용하려면 새로 시작해야 합니다. Plezy를 종료한 후 다시 열어주세요.',
-			'startup.quitPlezy' => 'Plezy 종료',
+			'startup.quitPlezTV' => 'Plezy 종료',
 			'startup.repairFailed' => '복구 실패',
 			'startup.repairKeptSignIns' => '서버와 프로필이 계속 로그인 상태입니다.',
 			'startup.repairLostSignIns' => '저장된 로그인 정보를 보호하는 키를 복구할 수 없었습니다. 모든 서버와 프로필에 다시 로그인해야 합니다.',

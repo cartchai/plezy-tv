@@ -102,7 +102,7 @@ class _Translations$app$az extends Translations$app$en {
 	final TranslationsAz _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$az extends Translations$profiles$en {
 	final TranslationsAz _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Plezy profili əlavə et';
+	@override String get addPlezTVProfile => 'Plezy profili əlavə et';
 	@override String get switchingProfile => 'Profil dəyişdirilir…';
 	@override String get deleteThisProfileTitle => 'Bu profil silinsin?';
 	@override String deleteThisProfileMessage({required Object displayName}) => '${displayName} silinəcək. Qoşulmalar təsirlənmir.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$az extends Translations$startup$en {
 	@override String get repairSucceeded => 'Yaddaş təmir edildi';
 	@override String get repairNeedsRestart => 'Yaddaş təmir edildi — yenidən başlatma tələb olunur';
 	@override String get restartRequiredBody => 'Məlumatlarınız təmir edildi, lakin Plezy ondan istifadə etmək üçün yenidən başlamalıdır. Plezy-ni bağlayın və yenidən açın.';
-	@override String get quitPlezy => 'Plezy-dən çıx';
+	@override String get quitPlezTV => 'Plezy-dən çıx';
 	@override String get repairFailed => 'Təmir uğursuz oldu';
 	@override String get repairKeptSignIns => 'Serverləriniz və profilləriniz hələ də daxil olub.';
 	@override String get repairLostSignIns => 'Saxlanmış daxil olmalarınızı qoruyan açar bərpa edilə bilmədi. Hər serverə və profilə yenidən daxil olmalı olacaqsınız.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$az extends Translations$services$libr
 extension on TranslationsAz {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Tətbiq ikonu',
 			'appIcon.defaultIcon' => 'Defolt',
 			'appIcon.current' => 'Cari ikon',
@@ -4354,7 +4354,7 @@ extension on TranslationsAz {
 			'mpvConfig.removeLine' => 'Sətiri sil',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context və gpu-api Linux-da nəzərə alınmır: daxili video həmişə video müstəvisində vo=libmpv vasitəsilə göstərilir və gpu-next (ArtCNN kimi hesablama şeyderlərinə lazımdır) daxili işləyə bilməz.',
 			'dialog.confirmAction' => 'Əməliyyatı təsdiqlə',
-			'profiles.addPlezyProfile' => 'Plezy profili əlavə et',
+			'profiles.addPlezTVProfile' => 'Plezy profili əlavə et',
 			'profiles.switchingProfile' => 'Profil dəyişdirilir…',
 			'profiles.deleteThisProfileTitle' => 'Bu profil silinsin?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '${displayName} silinəcək. Qoşulmalar təsirlənmir.',
@@ -4686,7 +4686,7 @@ extension on TranslationsAz {
 			'startup.repairSucceeded' => 'Yaddaş təmir edildi',
 			'startup.repairNeedsRestart' => 'Yaddaş təmir edildi — yenidən başlatma tələb olunur',
 			'startup.restartRequiredBody' => 'Məlumatlarınız təmir edildi, lakin Plezy ondan istifadə etmək üçün yenidən başlamalıdır. Plezy-ni bağlayın və yenidən açın.',
-			'startup.quitPlezy' => 'Plezy-dən çıx',
+			'startup.quitPlezTV' => 'Plezy-dən çıx',
 			'startup.repairFailed' => 'Təmir uğursuz oldu',
 			'startup.repairKeptSignIns' => 'Serverləriniz və profilləriniz hələ də daxil olub.',
 			'startup.repairLostSignIns' => 'Saxlanmış daxil olmalarınızı qoruyan açar bərpa edilə bilmədi. Hər serverə və profilə yenidən daxil olmalı olacaqsınız.',

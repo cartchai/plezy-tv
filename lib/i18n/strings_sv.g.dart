@@ -102,7 +102,7 @@ class _Translations$app$sv extends Translations$app$en {
 	final TranslationsSv _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1177,7 +1177,7 @@ class _Translations$profiles$sv extends Translations$profiles$en {
 	final TranslationsSv _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => 'Lägg till Plezy-profil';
+	@override String get addPlezTVProfile => 'Lägg till Plezy-profil';
 	@override String get switchingProfile => 'Byter profil…';
 	@override String get deleteThisProfileTitle => 'Ta bort denna profil?';
 	@override String deleteThisProfileMessage({required Object displayName}) => 'Ta bort ${displayName}. Anslutningar påverkas inte.';
@@ -1507,7 +1507,7 @@ class _Translations$startup$sv extends Translations$startup$en {
 	@override String get repairSucceeded => 'Lagringen reparerad';
 	@override String get repairNeedsRestart => 'Lagringen reparerad — omstart krävs';
 	@override String get restartRequiredBody => 'Dina data reparerades, men Plezy måste starta om innan de kan användas. Stäng Plezy och öppna det igen.';
-	@override String get quitPlezy => 'Avsluta Plezy';
+	@override String get quitPlezTV => 'Avsluta Plezy';
 	@override String get repairFailed => 'Reparationen misslyckades';
 	@override String get repairKeptSignIns => 'Dina servrar och profiler är fortfarande inloggade.';
 	@override String get repairLostSignIns => 'Nyckeln som skyddar dina sparade inloggningar kunde inte återställas. Du måste logga in på varje server och profil igen.';
@@ -3395,7 +3395,7 @@ class _Translations$services$libraryFilter$sv extends Translations$services$libr
 extension on TranslationsSv {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => 'Appikon',
 			'appIcon.defaultIcon' => 'Standard',
 			'appIcon.current' => 'Aktuell ikon',
@@ -4354,7 +4354,7 @@ extension on TranslationsSv {
 			'mpvConfig.removeLine' => 'Ta bort rad',
 			'mpvConfig.embeddedVoHint' => 'vo, gpu-context och gpu-api ignoreras på Linux: inbäddad video renderas alltid via vo=libmpv på videoplanet, och gpu-next (som compute-shaders som ArtCNN behöver) kan inte köras inbäddat.',
 			'dialog.confirmAction' => 'Bekräfta åtgärd',
-			'profiles.addPlezyProfile' => 'Lägg till Plezy-profil',
+			'profiles.addPlezTVProfile' => 'Lägg till Plezy-profil',
 			'profiles.switchingProfile' => 'Byter profil…',
 			'profiles.deleteThisProfileTitle' => 'Ta bort denna profil?',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => 'Ta bort ${displayName}. Anslutningar påverkas inte.',
@@ -4686,7 +4686,7 @@ extension on TranslationsSv {
 			'startup.repairSucceeded' => 'Lagringen reparerad',
 			'startup.repairNeedsRestart' => 'Lagringen reparerad — omstart krävs',
 			'startup.restartRequiredBody' => 'Dina data reparerades, men Plezy måste starta om innan de kan användas. Stäng Plezy och öppna det igen.',
-			'startup.quitPlezy' => 'Avsluta Plezy',
+			'startup.quitPlezTV' => 'Avsluta Plezy',
 			'startup.repairFailed' => 'Reparationen misslyckades',
 			'startup.repairKeptSignIns' => 'Dina servrar och profiler är fortfarande inloggade.',
 			'startup.repairLostSignIns' => 'Nyckeln som skyddar dina sparade inloggningar kunde inte återställas. Du måste logga in på varje server och profil igen.',

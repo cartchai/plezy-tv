@@ -1,0 +1,585 @@
+import 'dart:async';
+
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:plezy/connection/connection.dart';
+import 'package:plezy/connection/connection_registry.dart';
+import 'package:plezy/database/app_database.dart';
+import 'package:plezy/focus/input_mode_tracker.dart';
+import 'package:plezy/i18n/strings.g.dart';
+import 'package:plezy/media/ids.dart';
+import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/media/live_tv_support.dart';
+import 'package:plezy/media/media_backend.dart';
+import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/media/media_library.dart';
+import 'package:plezy/media/library_filter_result.dart';
+import 'package:plezy/media/library_query.dart';
+import 'package:plezy/media/media_hub.dart';
+import 'package:plezy/media/media_item.dart';
+import 'package:plezy/media/media_server_client.dart';
+import 'package:plezy/media/server_capabilities.dart';
+import 'package:plezy/models/livetv_channel.dart';
+import 'package:plezy/models/livetv_program.dart';
+import 'package:plezy/models/transcode_quality_preset.dart';
+import 'package:plezy/providers/download_provider.dart';
+import 'package:plezy/providers/hidden_libraries_provider.dart';
+import 'package:plezy/providers/libraries_provider.dart';
+import 'package:plezy/providers/multi_server_provider.dart';
+import 'package:plezy/screens/libraries/libraries_screen.dart';
+import 'package:plezy/screens/libraries/tabs/library_browse_tab.dart';
+import 'package:plezy/screens/libraries/tabs/library_recommended_tab.dart';
+import 'package:plezy/screens/livetv/live_tv_screen.dart';
+import 'package:plezy/screens/auth_screen.dart';
+import 'package:plezy/screens/settings/about_screen.dart';
+import 'package:plezy/screens/settings/iptv_settings_screen.dart';
+import 'package:plezy/services/credential_vault.dart';
+import 'package:plezy/services/iptv/xtream_api.dart';
+import 'package:plezy/services/multi_server_manager.dart';
+import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/services/storage_service.dart';
+import 'package:plezy/utils/media_server_http_client.dart';
+import 'package:plezy/theme/mono_theme.dart';
+import 'package:plezy/widgets/overlay_sheet.dart';
+import 'package:provider/provider.dart';
+
+import '../../test_helpers/download_fixtures.dart';
+import '../../test_helpers/library_tab_scaffold.dart';
+import '../../test_helpers/multi_server_fixtures.dart';
+import '../../test_helpers/prefs.dart';
+
+/// Pre-ship screen tests for the Plezy TV IPTV flows (the build #4 lesson:
+/// unit tests + analyze passed while the real flows were broken on Matt's
+/// phone). Every test pumps the ACTUAL screen with a fake Plex client and a
+/// REAL [IptvClient] backed by a fake Xtream catalog — no network — and
+/// asserts exactly what Matt checks on his phone:
+///
+/// - Libraries: "Trex — Live TV" must NOT appear; Movies + Series must.
+/// - Movies / Series library: Recommended AND Browse must show items, not
+///   "Unable to load Recommended".
+/// - Live TV: the source picker must offer HOME PC and Trex, and picking
+///   each must show that source's channels.
+/// - Settings → IPTV: the settings screen renders the Trex connection.
+const _trexMoviesLibrary = MediaLibrary(
+  id: 'iptv:trex:movies',
+  backend: MediaBackend.xtream,
+  title: 'Trex — Movies',
+  kind: MediaKind.movie,
+  serverId: 'trex',
+  serverName: 'Trex',
+);
+
+const _trexSeriesLibrary = MediaLibrary(
+  id: 'iptv:trex:series',
+  backend: MediaBackend.xtream,
+  title: 'Trex — Series',
+  kind: MediaKind.show,
+  serverId: 'trex',
+  serverName: 'Trex',
+);
+
+XtreamConnection _trexConnection() => XtreamConnection(
+  id: 'trex',
+  name: 'Trex',
+  serverUrl: 'https://panel.example.com:8080',
+  username: 'user',
+  password: 'pass',
+  createdAt: DateTime.utc(2026, 11, 6),
+);
+
+/// Fake provider catalog: two movies, one series, two live channels (one
+/// with catch-up), a handful of categories. Mirrors the stage-2 fake.
+class _FakeXtreamApi extends XtreamApi {
+  _FakeXtreamApi()
+    : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pass');
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+    XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
+    XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+    XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+    XtreamLiveStream(
+      streamId: 100,
+      name: 'Trex News',
+      categoryId: '1',
+      tvArchive: true,
+      tvArchiveDuration: 86400,
+    ),
+    XtreamLiveStream(streamId: 101, name: 'Trex Sports', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getVodCategories() async =>
+      const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async =>
+      const [XtreamCategory(id: '1', name: 'Action')];
+
+  @override
+  Future<List<XtreamCategory>> getLiveCategories() async =>
+      const [XtreamCategory(id: '1', name: 'News')];
+}
+
+/// The REAL IptvClient, pointed at the fake catalog. Anything this client
+/// gets wrong, the tests catch.
+IptvClient _trexClient() {
+  final client = IptvClient.xtream(xtreamConnection: _trexConnection());
+  client.testXtreamApi = _FakeXtreamApi();
+  return client;
+}
+
+/// Minimal Plex stand-in: two libraries, two live channels, everything else
+/// unimplemented (throws, like the existing fakes).
+class _FakePlexClient implements MediaServerClient {
+  _FakePlexClient(this.liveTv);
+
+  @override
+  final LiveTvSupport liveTv;
+
+  @override
+  ServerId get serverId => ServerId('home-pc');
+
+  @override
+  String get serverName => 'HOME PC';
+
+  @override
+  MediaBackend get backend => MediaBackend.plex;
+
+  @override
+  ServerCapabilities get capabilities => ServerCapabilities.plex;
+
+  @override
+  Future<List<MediaLibrary>> fetchLibraries() async => const [
+    MediaLibrary(
+      id: 'plex-movies',
+      backend: MediaBackend.plex,
+      title: 'Movies',
+      kind: MediaKind.movie,
+      serverId: 'home-pc',
+      serverName: 'HOME PC',
+    ),
+    MediaLibrary(
+      id: 'plex-shows',
+      backend: MediaBackend.plex,
+      title: 'TV Shows',
+      kind: MediaKind.show,
+      serverId: 'home-pc',
+      serverName: 'HOME PC',
+    ),
+  ];
+
+  @override
+  void close() {}
+
+  /// The Libraries screen auto-selects the first library and loads its
+  /// Recommended content through these — without them the fake hits
+  /// noSuchMethod and the whole screen degrades to an error state.
+  @override
+  Future<List<MediaHub>> fetchLibraryHubs(
+    String libraryId, {
+    required String libraryName,
+    int limit = defaultHubPreviewLimit,
+    bool includePlaybackHubs = true,
+    MediaKind? libraryKind,
+    HubFetchDiagnostics? diagnostics,
+  }) async => const [];
+
+  @override
+  Future<LibraryPage<MediaItem>> fetchLibraryPagedContent(
+    String libraryId, {
+    required LibraryQuery query,
+    MediaKind? libraryKind,
+    AbortController? abort,
+  }) async => const LibraryPage(items: [], totalCount: 0);
+
+  @override
+  Future<LibraryFilterResult> fetchLibraryFiltersWithValues(String libraryId, {MediaKind? libraryKind}) async =>
+      LibraryFilterResult.empty;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakePlexLiveTv implements LiveTvSupport {
+  @override
+  LiveTvDvrSupport? get dvr => null;
+
+  @override
+  Future<bool> isAvailable() async => true;
+
+  @override
+  Future<List<LiveTvChannel>> fetchChannels({String? lineup}) async => [
+    LiveTvChannel(key: '1000', number: '1000', title: 'A&E US Eastern', serverId: 'home-pc'),
+    LiveTvChannel(key: '1001', number: '1001', title: 'ABC (KABC) Los Angeles', serverId: 'home-pc'),
+  ];
+
+  @override
+  Future<List<LiveTvProgram>> fetchSchedule({DateTime? from, DateTime? to}) async => const [];
+
+  @override
+  Future<LiveTvPlaybackSession?> startPlayback(
+    String channelKey, {
+    String? dvrKey,
+    TranscodeQualityPreset quality = TranscodeQualityPreset.original,
+  }) async => null;
+
+  @override
+  Future<String> buildFavoriteChannelSource({String? lineup}) async => 'server://home-pc/plex';
+
+  @override
+  String get favoriteStoreKey => 'plex:home-pc';
+
+  @override
+  FavoriteChannelPersistenceMode get favoritePersistenceMode => FavoriteChannelPersistenceMode.serverSlice;
+
+  @override
+  Future<List<FavoriteChannel>> fetchFavoriteChannels({
+    bool migrate = true,
+    void Function()? checkCurrent,
+  }) async => const [];
+
+  @override
+  Future<void> setFavoriteChannels(List<FavoriteChannel> channels, {void Function()? checkCurrent}) async {}
+}
+
+/// Registry with a fake live stream: the real Drift `watchConnections()`
+/// stream schedules a zero-duration close timer when its StreamBuilder
+/// unmounts, which the test framework flags as a pending timer. The screen
+/// under test only needs the connection list, so the stream is a fixed
+/// value while `list()` / `upsert()` still hit the real in-memory DB.
+/// (Same pattern as profile_detail_screen_test's `_FakeConnectionRegistry`.)
+class _FakeConnectionRegistry extends ConnectionRegistry {
+  _FakeConnectionRegistry(super.db);
+
+  @override
+  Stream<List<Connection>> watchConnections() => Stream.value([_trexConnection()]);
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() => initializeDateFormatting('en'));
+
+  setUp(() async {
+    resetSharedPreferencesForTest();
+    LocaleSettings.setLocaleSync(AppLocale.en);
+    await SettingsService.getInstance();
+    await StorageService.getInstance();
+  });
+
+  testWidgets('Libraries screen lists Trex Movies + Series but no Trex Live TV library', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_FakePlexClient(_FakePlexLiveTv()));
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    final libraries = LibrariesProvider();
+    libraries.initialize(provider.aggregationService);
+    // initialize() only stores the service — the app shell normally triggers
+    // the load via syncToOnlineServers when servers come online. Drive the
+    // real load here so the screen shows what the aggregation fetch returns.
+    await libraries.loadLibraries();
+    final hiddenLibraries = HiddenLibrariesProvider();
+    await hiddenLibraries.ensureInitialized();
+    addTearDown(() {
+      libraries.dispose();
+      hiddenLibraries.dispose();
+    });
+
+    // Phone viewport: the library list lives in the app-bar dropdown (on
+    // wide layouts it moves to MainScreen's side nav, which this screen
+    // doesn't render standalone). physicalSize is in physical pixels, so
+    // 840x1800 at ratio 2 == 420x900 logical.
+    tester.view.physicalSize = const Size(840, 1800);
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final downloads = NoSyncRulesDownloadProvider();
+    addTearDown(downloads.dispose);
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<LibrariesProvider>.value(value: libraries),
+          ChangeNotifierProvider<HiddenLibrariesProvider>.value(value: hiddenLibraries),
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          ChangeNotifierProvider<DownloadProvider>.value(value: downloads),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(
+            theme: monoTheme(MonoPalette.dark),
+            home: OverlaySheetHost(child: FocusScope(child: LibrariesScreen(onLibrarySelected: (_) {}))),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The selected library (Plex Movies) is the dropdown title.
+    expect(find.text('Movies'), findsWidgets);
+
+    // Open the library dropdown: every library must be listed there.
+    await tester.tap(find.byTooltip(t.libraries.selectLibrary));
+    await tester.pumpAndSettle();
+
+    // Plex still works.
+    expect(find.text('TV Shows'), findsWidgets);
+    // IPTV on-demand libraries are present…
+    expect(find.text('Trex — Movies'), findsWidgets);
+    expect(find.text('Trex — Series'), findsWidgets);
+    // …and live TV is NOT a library.
+    expect(find.text('Trex — Live TV'), findsNothing);
+  });
+
+  testWidgets('Movies Recommended tab loads items instead of "Unable to load Recommended"', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await pumpLibraryTab(
+      tester,
+      provider: provider,
+      tab: const LibraryRecommendedTab(library: _trexMoviesLibrary),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alpha Movie'), findsWidgets);
+    expect(find.text('Beta Movie'), findsWidgets);
+    expect(find.textContaining('Unable to load'), findsNothing);
+  });
+
+  testWidgets('Movies Browse tab loads items', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await pumpLibraryTab(
+      tester,
+      provider: provider,
+      tab: const LibraryBrowseTab(library: _trexMoviesLibrary, canGroupByFolders: false),
+    );
+    await pumpRequestFrames(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alpha Movie'), findsWidgets);
+    expect(find.text('Beta Movie'), findsWidgets);
+    expect(find.textContaining('Unable to load'), findsNothing);
+  });
+
+  testWidgets('Series Recommended tab loads items', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await pumpLibraryTab(
+      tester,
+      provider: provider,
+      tab: const LibraryRecommendedTab(library: _trexSeriesLibrary),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alpha Show'), findsWidgets);
+    expect(find.textContaining('Unable to load'), findsNothing);
+  });
+
+  testWidgets('Series Browse tab loads items', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await pumpLibraryTab(
+      tester,
+      provider: provider,
+      tab: const LibraryBrowseTab(library: _trexSeriesLibrary, canGroupByFolders: false),
+    );
+    await pumpRequestFrames(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alpha Show'), findsWidgets);
+    expect(find.textContaining('Unable to load'), findsNothing);
+  });
+
+  testWidgets('Live TV picker offers HOME PC and Trex and switches channels', (tester) async {
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_FakePlexClient(_FakePlexLiveTv()));
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    provider.debugSetLiveTvServersForTesting([
+      LiveTvServerInfo(serverId: 'home-pc', dvrKey: 'plex-dvr', lineup: 'HOME PC - My Guide'),
+      LiveTvServerInfo(serverId: 'trex', dvrKey: 'xtream', lineup: null),
+    ]);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      TranslationProvider(
+        child: InputModeTracker(
+          child: ChangeNotifierProvider<MultiServerProvider>.value(
+            value: provider,
+            child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const LiveTvScreen()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The source picker is there with both sources.
+    expect(find.text(t.liveTv.allSources), findsOneWidget);
+    expect(find.text('HOME PC'), findsWidgets);
+    expect(find.text('Trex'), findsWidgets);
+    // All sources: both guides' channels render.
+    expect(find.text('A&E US Eastern'), findsWidgets);
+    expect(find.text('Trex News'), findsWidgets);
+
+    // Pick Trex: only Trex channels remain.
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Trex'));
+    await tester.pumpAndSettle();
+    expect(find.text('Trex News'), findsWidgets);
+    expect(find.text('Trex Sports'), findsWidgets);
+    expect(find.text('A&E US Eastern'), findsNothing);
+    expect(find.text('ABC (KABC) Los Angeles'), findsNothing);
+
+    // Pick HOME PC: only Plex channels remain.
+    await tester.tap(find.widgetWithText(ChoiceChip, 'HOME PC'));
+    await tester.pumpAndSettle();
+    expect(find.text('A&E US Eastern'), findsWidgets);
+    expect(find.text('ABC (KABC) Los Angeles'), findsWidgets);
+    expect(find.text('Trex News'), findsNothing);
+    expect(find.text('Trex Sports'), findsNothing);
+  });
+
+  testWidgets('IPTV settings screen renders the Trex connection', (tester) async {
+    CredentialVault.resetKeyForTesting();
+    await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async => db.close());
+    final registry = _FakeConnectionRegistry(db);
+    await registry.upsert(_trexConnection());
+
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          Provider<ConnectionRegistry>.value(value: registry),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Trex'), findsWidgets);
+    expect(find.textContaining('Xtream Codes'), findsWidgets);
+    expect(find.text(t.iptv.refreshPlaylists), findsOneWidget);
+  });
+
+  group('First-run IPTV onboarding', () {
+    testWidgets('Auth screen offers M3U and Xtream Codes and opens their add screens', (tester) async {
+      await tester.pumpWidget(
+        TranslationProvider(
+          child: MaterialApp(
+            theme: monoTheme(MonoPalette.dark),
+            home: const AuthScreen(initializeServices: false),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // IPTV sits alongside Plex / Jellyfin / Emby on first start — not
+      // buried behind a Plex sign-in.
+      expect(find.text(t.auth.signInWithPlex), findsWidgets);
+      expect(find.text(t.addServer.connectToM3uCard), findsOneWidget);
+      expect(find.text(t.addServer.connectToXtreamCard), findsOneWidget);
+
+      // Tapping Xtream opens its add form (name + server + username + password).
+      await tester.tap(find.text(t.addServer.connectToXtreamCard));
+      await tester.pumpAndSettle();
+      expect(find.text(t.addServer.addXtreamTitle), findsOneWidget);
+      expect(find.text(t.addServer.serverUrl), findsOneWidget);
+      expect(find.text(t.addServer.username), findsOneWidget);
+      expect(find.text(t.addServer.password), findsOneWidget);
+
+      // Back out, then M3U opens its add form (name + playlist URL).
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(t.addServer.connectToM3uCard));
+      await tester.pumpAndSettle();
+      expect(find.text(t.addServer.addM3uTitle), findsOneWidget);
+      expect(find.text(t.addServer.playlistUrl), findsOneWidget);
+    });
+  });
+
+  group('PlezTV rename + About changelog', () {
+    test('English strings call the app PlezTV and carry the changelog', () async {
+      final strings = await AppLocale.en.build();
+      expect(strings.app.title, 'PlezTV');
+      expect(strings.about.changelogTitle, "What's new");
+      expect(strings.about.changelog2251, hasLength(9));
+      expect(strings.about.changelog2251, contains('Blue app icon'));
+      expect(strings.about.changelog2251, contains('Movies and Series Recommended now loads'));
+      expect(strings.about.changelog2250, hasLength(4));
+      expect(strings.about.changelog2250.first, contains('First PlezTV release'));
+    });
+
+    testWidgets('About screen shows PlezTV and the changelog, newest first', (tester) async {
+      await tester.pumpWidget(
+        TranslationProvider(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const AboutScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('PlezTV'), findsWidgets);
+      expect(find.text("What's new"), findsOneWidget);
+      expect(find.text('Version 2.25.1'), findsOneWidget);
+      expect(find.text('Version 2.25.0'), findsOneWidget);
+      expect(find.text('Blue app icon'), findsOneWidget);
+      // Newest first: the 2.25.1 heading sits above the 2.25.0 heading.
+      final first = tester.getTopLeft(find.text('Version 2.25.1')).dy;
+      final second = tester.getTopLeft(find.text('Version 2.25.0')).dy;
+      expect(first, lessThan(second));
+    });
+  });
+}

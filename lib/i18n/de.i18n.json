@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "App-Symbol",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Aktion bestätigen"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy-Profil hinzufügen",
+    "addPlezTVProfile": "Plezy-Profil hinzufügen",
     "switchingProfile": "Profil wird gewechselt…",
     "deleteThisProfileTitle": "Dieses Profil löschen?",
     "deleteThisProfileMessage": "${displayName} entfernen. Verbindungen bleiben unberührt.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Speicher repariert",
     "repairNeedsRestart": "Speicher repariert – Neustart erforderlich",
     "restartRequiredBody": "Deine Daten wurden repariert, aber Plezy muss neu starten, bevor es sie verwenden kann. Schließe Plezy und öffne es erneut.",
-    "quitPlezy": "Plezy beenden",
+    "quitPlezTV": "Plezy beenden",
     "repairFailed": "Reparatur fehlgeschlagen",
     "repairKeptSignIns": "Deine Server und Profile sind weiterhin angemeldet.",
     "repairLostSignIns": "Der Schlüssel, der deine gespeicherten Anmeldungen schützt, konnte nicht wiederhergestellt werden. Du musst dich bei jedem Server und Profil erneut anmelden.",

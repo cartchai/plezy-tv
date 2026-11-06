@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Appikon",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Bekräfta åtgärd"
   },
   "profiles": {
-    "addPlezyProfile": "Lägg till Plezy-profil",
+    "addPlezTVProfile": "Lägg till Plezy-profil",
     "switchingProfile": "Byter profil…",
     "deleteThisProfileTitle": "Ta bort denna profil?",
     "deleteThisProfileMessage": "Ta bort ${displayName}. Anslutningar påverkas inte.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Lagringen reparerad",
     "repairNeedsRestart": "Lagringen reparerad — omstart krävs",
     "restartRequiredBody": "Dina data reparerades, men Plezy måste starta om innan de kan användas. Stäng Plezy och öppna det igen.",
-    "quitPlezy": "Avsluta Plezy",
+    "quitPlezTV": "Avsluta Plezy",
     "repairFailed": "Reparationen misslyckades",
     "repairKeptSignIns": "Dina servrar och profiler är fortfarande inloggade.",
     "repairLostSignIns": "Nyckeln som skyddar dina sparade inloggningar kunde inte återställas. Du måste logga in på varje server och profil igen.",

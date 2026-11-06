@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Alkalmazásikon",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Művelet megerősítése"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy profil hozzáadása",
+    "addPlezTVProfile": "Plezy profil hozzáadása",
     "switchingProfile": "Profilváltás…",
     "deleteThisProfileTitle": "Törlöd ezt a profilt?",
     "deleteThisProfileMessage": "${displayName} eltávolítása. A kapcsolatokat nem érinti.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "A tárhely javítva",
     "repairNeedsRestart": "A tárhely javítva – újraindítás szükséges",
     "restartRequiredBody": "Az adatait kijavítottuk, de a Plezy-nek frissen kell elindulnia, mielőtt használhatná. Zárja be a Plezy-t, és nyissa meg újra.",
-    "quitPlezy": "Kilépés a Plezy-ből",
+    "quitPlezTV": "Kilépés a Plezy-ből",
     "repairFailed": "A javítás nem sikerült",
     "repairKeptSignIns": "A szerverei és profiljai továbbra is be vannak jelentkezve.",
     "repairLostSignIns": "A mentett bejelentkezéseket védő kulcs nem volt visszanyerhető. Minden szerverre és profilba újra be kell jelentkeznie.",

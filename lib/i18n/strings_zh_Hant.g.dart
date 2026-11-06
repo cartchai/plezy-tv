@@ -103,7 +103,7 @@ class _Translations$app$zh_Hant extends Translations$app$zh {
 	final TranslationsZhHant _root; // ignore: unused_field
 
 	// Translations
-	@override String get title => 'Plezy';
+	@override String get title => 'PlezTV';
 }
 
 // Path: appIcon
@@ -1174,7 +1174,7 @@ class _Translations$profiles$zh_Hant extends Translations$profiles$zh {
 	final TranslationsZhHant _root; // ignore: unused_field
 
 	// Translations
-	@override String get addPlezyProfile => '新增 Plezy 使用者設定檔';
+	@override String get addPlezTVProfile => '新增 Plezy 使用者設定檔';
 	@override String get switchingProfile => '正在切換使用者設定檔…';
 	@override String get deleteThisProfileTitle => '刪除此使用者設定檔？';
 	@override String deleteThisProfileMessage({required Object displayName}) => '將移除 ${displayName}。連線資訊將不受影響。';
@@ -1503,7 +1503,7 @@ class _Translations$startup$zh_Hant extends Translations$startup$zh {
 	@override String get repairSucceeded => '儲存空間已修復';
 	@override String get repairNeedsRestart => '儲存空間已修復 — 需要重新啟動';
 	@override String get restartRequiredBody => '您的資料已修復，但 Plezy 必須重新啟動才能使用。請關閉 Plezy 後重新開啟。';
-	@override String get quitPlezy => '退出 Plezy';
+	@override String get quitPlezTV => '退出 Plezy';
 	@override String get repairFailed => '修復失敗';
 	@override String get repairKeptSignIns => '您的伺服器與使用者設定檔仍保持登入狀態。';
 	@override String get repairLostSignIns => '保護已儲存登入資訊的金鑰無法復原。您必須重新登入每個伺服器與使用者設定檔。';
@@ -3384,7 +3384,7 @@ class _Translations$services$libraryFilter$zh_Hant extends Translations$services
 extension on TranslationsZhHant {
 	dynamic _flatMapFunction(String path) {
 		return switch (path) {
-			'app.title' => 'Plezy',
+			'app.title' => 'PlezTV',
 			'appIcon.title' => '應用程式圖示',
 			'appIcon.defaultIcon' => '預設',
 			'appIcon.current' => '目前圖示',
@@ -4343,7 +4343,7 @@ extension on TranslationsZhHant {
 			'mpvConfig.removeLine' => '移除行',
 			'mpvConfig.embeddedVoHint' => '在 Linux 上會忽略 vo、gpu-context 和 gpu-api：嵌入式影片一律透過影片平面上的 vo=libmpv 轉譯，而 gpu-next（ArtCNN 等計算著色器需要它）無法以嵌入式方式執行。',
 			'dialog.confirmAction' => '確認操作',
-			'profiles.addPlezyProfile' => '新增 Plezy 使用者設定檔',
+			'profiles.addPlezTVProfile' => '新增 Plezy 使用者設定檔',
 			'profiles.switchingProfile' => '正在切換使用者設定檔…',
 			'profiles.deleteThisProfileTitle' => '刪除此使用者設定檔？',
 			'profiles.deleteThisProfileMessage' => ({required Object displayName}) => '將移除 ${displayName}。連線資訊將不受影響。',
@@ -4675,7 +4675,7 @@ extension on TranslationsZhHant {
 			'startup.repairSucceeded' => '儲存空間已修復',
 			'startup.repairNeedsRestart' => '儲存空間已修復 — 需要重新啟動',
 			'startup.restartRequiredBody' => '您的資料已修復，但 Plezy 必須重新啟動才能使用。請關閉 Plezy 後重新開啟。',
-			'startup.quitPlezy' => '退出 Plezy',
+			'startup.quitPlezTV' => '退出 Plezy',
 			'startup.repairFailed' => '修復失敗',
 			'startup.repairKeptSignIns' => '您的伺服器與使用者設定檔仍保持登入狀態。',
 			'startup.repairLostSignIns' => '保護已儲存登入資訊的金鑰無法復原。您必須重新登入每個伺服器與使用者設定檔。',

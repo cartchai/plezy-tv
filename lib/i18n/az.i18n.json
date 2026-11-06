@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Tətbiq ikonu",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Əməliyyatı təsdiqlə"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy profili əlavə et",
+    "addPlezTVProfile": "Plezy profili əlavə et",
     "switchingProfile": "Profil dəyişdirilir…",
     "deleteThisProfileTitle": "Bu profil silinsin?",
     "deleteThisProfileMessage": "${displayName} silinəcək. Qoşulmalar təsirlənmir.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Yaddaş təmir edildi",
     "repairNeedsRestart": "Yaddaş təmir edildi — yenidən başlatma tələb olunur",
     "restartRequiredBody": "Məlumatlarınız təmir edildi, lakin Plezy ondan istifadə etmək üçün yenidən başlamalıdır. Plezy-ni bağlayın və yenidən açın.",
-    "quitPlezy": "Plezy-dən çıx",
+    "quitPlezTV": "Plezy-dən çıx",
     "repairFailed": "Təmir uğursuz oldu",
     "repairKeptSignIns": "Serverləriniz və profilləriniz hələ də daxil olub.",
     "repairLostSignIns": "Saxlanmış daxil olmalarınızı qoruyan açar bərpa edilə bilmədi. Hər serverə və profilə yenidən daxil olmalı olacaqsınız.",

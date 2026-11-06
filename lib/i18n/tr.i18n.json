@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Uygulama simgesi",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Eylemi Onayla"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy profili ekle",
+    "addPlezTVProfile": "Plezy profili ekle",
     "switchingProfile": "Profil değiştiriliyor…",
     "deleteThisProfileTitle": "Bu profil silinsin mi?",
     "deleteThisProfileMessage": "${displayName} kişisi kaldırılacak. Bağlantılar etkilenmez.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Depolama alanı onarıldı",
     "repairNeedsRestart": "Depolama alanı onarıldı — yeniden başlatma gerekli",
     "restartRequiredBody": "Verileriniz onarıldı, ancak Plezy'nin bunları kullanabilmesi için temiz bir başlangıç yapması gerekiyor. Plezy'yi kapatıp yeniden açın.",
-    "quitPlezy": "Plezy'den Çık",
+    "quitPlezTV": "Plezy'den Çık",
     "repairFailed": "Onarım başarısız oldu",
     "repairKeptSignIns": "Sunucularınız ve profilleriniz hâlâ giriş yapılı.",
     "repairLostSignIns": "Kayıtlı girişlerinizi koruyan anahtar kurtarılamadı. Her sunucuya ve profile yeniden giriş yapmanız gerekecek.",

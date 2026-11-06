@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "앱 아이콘",
@@ -1026,7 +1026,7 @@
     "confirmAction": "작업 확인"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy 프로필 추가",
+    "addPlezTVProfile": "Plezy 프로필 추가",
     "switchingProfile": "프로필 전환 중…",
     "deleteThisProfileTitle": "이 프로필을 삭제하시겠습니까?",
     "deleteThisProfileMessage": "${displayName}을(를) 제거합니다. 연결에는 영향이 없습니다.",
@@ -1402,7 +1402,7 @@
     "repairSucceeded": "저장소가 복구되었습니다",
     "repairNeedsRestart": "저장소가 복구되었습니다 — 재시작 필요",
     "restartRequiredBody": "데이터가 복구되었지만 Plezy는 이를 사용하려면 새로 시작해야 합니다. Plezy를 종료한 후 다시 열어주세요.",
-    "quitPlezy": "Plezy 종료",
+    "quitPlezTV": "Plezy 종료",
     "repairFailed": "복구 실패",
     "repairKeptSignIns": "서버와 프로필이 계속 로그인 상태입니다.",
     "repairLostSignIns": "저장된 로그인 정보를 보호하는 키를 복구할 수 없었습니다. 모든 서버와 프로필에 다시 로그인해야 합니다.",

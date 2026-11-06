@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "App-icoon",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Bevestig actie"
   },
   "profiles": {
-    "addPlezyProfile": "Plezy-profiel toevoegen",
+    "addPlezTVProfile": "Plezy-profiel toevoegen",
     "switchingProfile": "Profiel wisselen…",
     "deleteThisProfileTitle": "Dit profiel verwijderen?",
     "deleteThisProfileMessage": "Verwijder ${displayName}. Verbindingen blijven ongewijzigd.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Opslag gerepareerd",
     "repairNeedsRestart": "Opslag gerepareerd — herstart vereist",
     "restartRequiredBody": "Je gegevens zijn gerepareerd, maar Plezy moet opnieuw starten voordat het ze kan gebruiken. Sluit Plezy en open het opnieuw.",
-    "quitPlezy": "Plezy afsluiten",
+    "quitPlezTV": "Plezy afsluiten",
     "repairFailed": "Repareren mislukt",
     "repairKeptSignIns": "Je servers en profielen zijn nog steeds aangemeld.",
     "repairLostSignIns": "De sleutel die je opgeslagen aanmeldingen beschermt, kon niet worden hersteld. Je moet je opnieuw aanmelden bij elke server en elk profiel.",

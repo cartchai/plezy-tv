@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Plezy"
+    "title": "PlezTV"
   },
   "appIcon": {
     "title": "Appikon",
@@ -1030,7 +1030,7 @@
     "confirmAction": "Bekræft handling"
   },
   "profiles": {
-    "addPlezyProfile": "Tilføj Plezy-profil",
+    "addPlezTVProfile": "Tilføj Plezy-profil",
     "switchingProfile": "Skifter profil…",
     "deleteThisProfileTitle": "Slet denne profil?",
     "deleteThisProfileMessage": "Fjern ${displayName}. Forbindelser påvirkes ikke.",
@@ -1407,7 +1407,7 @@
     "repairSucceeded": "Lager repareret",
     "repairNeedsRestart": "Lager repareret — genstart påkrævet",
     "restartRequiredBody": "Dine data er blevet repareret, men Plezy skal starte på ny, før det kan bruge dem. Luk Plezy, og åbn det igen.",
-    "quitPlezy": "Afslut Plezy",
+    "quitPlezTV": "Afslut Plezy",
     "repairFailed": "Reparation mislykkedes",
     "repairKeptSignIns": "Dine servere og profiler er stadig logget ind.",
     "repairLostSignIns": "Nøglen, der beskytter dine gemte loginoplysninger, kunne ikke gendannes. Du skal logge ind på alle servere og profiler igen.",
