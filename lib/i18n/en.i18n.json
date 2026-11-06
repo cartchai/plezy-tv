@@ -150,7 +150,11 @@
     "skipVersion": "Skip This Version",
     "viewRelease": "View Release",
     "latestVersion": "You are on the latest version",
-    "checkFailed": "Failed to check for updates"
+    "checkFailed": "Failed to check for updates",
+    "downloadApk": "Download APK",
+    "noApkAttached": "This release has no APK attached yet — open the release page for details.",
+    "installApkHint": "Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.",
+    "releaseNotes": "What’s new"
   },
   "supporter": {
     "title": "PlezTV Supporter",
@@ -339,6 +343,7 @@
     "checkForUpdates": "Check for Updates",
     "autoCheckUpdatesOnStartup": "Automatically check for updates on startup",
     "autoCheckUpdatesOnStartupDescription": "Notify when an update is available at launch",
+    "viewReleasesOnGitHub": "View releases on GitHub",
     "validationErrorEnterNumber": "Please enter a valid number",
     "validationErrorDuration": "Duration must be between ${min} and ${max} ${unit}",
     "shortcutAlreadyAssigned": "Shortcut already assigned to ${action}",
@@ -1114,7 +1119,16 @@
     "iptvFilterLoading": "Loading categories…",
     "iptvFilterLoadFailed": "Could not load the categories. Check the connection and try again.",
     "iptvFilterShowAll": "Show all",
-    "iptvFilterHideAll": "Hide all"
+    "iptvFilterHideAll": "Hide all",
+    "iptvFilterLiveTv": "Live TV",
+    "iptvFilterMovies": "Movies",
+    "iptvFilterSeries": "TV Series",
+    "iptvFilterGroups": "Groups",
+    "iptvFilterSectionCount": {
+      "one": "${n} category",
+      "other": "${n} categories"
+    },
+    "iptvFilterSectionOff": "${off} of ${total} hidden"
   },
   "accountPreferences": {
     "sectionTitle": "Account preferences",
@@ -1376,20 +1390,29 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2252": [
+      "TV guide (EPG) now loads for IPTV channels",
+      "EPG settings: how many days to load, how often it updates, past days to keep",
+      "TV/Series library now loads — one bad row no longer kills the whole catalog",
+      "Categories split into Live TV, Movies and TV/Series — each opens and closes on its own",
+      "Channels with no guide data show tappable one-hour blocks saying No information available, with catch-up where the channel supports it",
+      "Check for updates above About — downloads new releases from GitHub and installs over the top",
+      "Subtle loading line under the guide while the EPG loads"
+    ],
     "changelog2251": [
       "PlezTV name throughout the app",
       "Blue app icon",
       "Add IPTV on first start — no Plex needed",
       "Movies and Series Recommended now loads",
-      "\u201cTrex \u2014 Live TV\u201d removed from Libraries \u2014 live TV only lives in Live TV",
+      "“Trex — Live TV” removed from Libraries — live TV only lives in Live TV",
       "Live TV source picker: All sources, HOME PC, Trex",
-      "New IPTV settings at Settings \u2192 Connections \u2192 IPTV: connections, turn categories on/off, Show all / Hide all, Refresh playlists, Show catch-up badge",
+      "New IPTV settings at Settings → Connections → IPTV: connections, turn categories on/off, Show all / Hide all, Refresh playlists, Show catch-up badge",
       "Catch-up badge on guide channels for channels that support it",
       "M3U category filter now works in Live TV and search"
     ],
     "changelog2250": [
       "First PlezTV release, based on Plezy 2.25.0",
-      "M3U and Xtream Codes import: Add connection \u2192 M3U / Xtream Codes",
+      "M3U and Xtream Codes import: Add connection → M3U / Xtream Codes",
       "Live TV from IPTV in the Live TV section; movies and series in the Library",
       "Country/region filter on each connection's edit screen"
     ]
@@ -1644,6 +1667,7 @@
     "serverUnavailable": "Live TV server is not available.",
     "serverNotConnected": "Live TV server is not connected.",
     "noPrograms": "No program data available",
+    "noInformationAvailable": "No information available",
     "liveStreamFailed": "Live stream failed",
     "unknownProgram": "Unknown Program",
     "unknownHub": "Unknown",
@@ -2624,6 +2648,40 @@
     "showCatchUpBadgeDescription": "Show a badge on channels that offer catch-up TV. Applies when the guide reloads.",
     "player": "Player",
     "playerSettings": "Player settings",
-    "playerSettingsDescription": "Decoder, external player and playback options"
+    "playerSettingsDescription": "Decoder, external player and playback options",
+    "epgSection": "EPG / TV guide",
+    "epgDaysToLoad": "Days to load",
+    "epgDaysToLoadDescription": "How many days of guide to load ahead",
+    "epgDaysCount": {
+      "one": "${n} day",
+      "other": "${n} days"
+    },
+    "epgUpdateInterval": "Update interval",
+    "epgUpdateIntervalDescription": "How often the guide refreshes",
+    "epgHoursCount": {
+      "one": "Every ${n} hour",
+      "other": "Every ${n} hours"
+    },
+    "epgManualOnly": "Manual only",
+    "epgPastDays": "Past days to keep",
+    "epgPastDaysDescription": "Past guide days kept for catch-up scrolling",
+    "epgPastDaysNone": "None",
+    "epgUpdateOnStart": "Update on app start",
+    "epgUpdateOnStartDescription": "Refresh the guide when the app starts",
+    "epgTimeOffset": "Time offset",
+    "epgTimeOffsetDescription": "Shift guide times when listings are out by whole hours",
+    "epgNoOffset": "No offset",
+    "epgOffsetMinutes": {
+      "one": "${n} minute",
+      "other": "${n} minutes"
+    },
+    "epgUpdateNow": "Update now",
+    "epgUpdateNowDescription": "Refresh the guide right away",
+    "epgClearGuide": "Clear guide",
+    "epgClearGuideDescription": "Delete the downloaded guide data",
+    "epgLastUpdated": "Last updated",
+    "epgNeverUpdated": "Never",
+    "epgUpdated": "Guide updated",
+    "epgCleared": "Guide cleared"
   }
 }

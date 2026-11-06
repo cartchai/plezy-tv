@@ -42,12 +42,25 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
         }
         _live.adoptSession(session);
 
-        // Show "Watch from Start" dialog when an existing capture session has >60s of history.
-        // On a fresh tune (no active recording), the buffer is empty so this won't trigger.
+        // Catch-up from a guide "No information" placeholder: start the
+        // archive at the block's own start time (Xtream /timeshift/),
+        // bypassing the watch-from-start prompt — the user already chose
+        // the slot. Ignored when the session cannot time-shift.
         int? offsetSeconds;
         final captureBuffer = session.captureBuffer;
+        final catchUpStart = widget.live!.catchUpStartEpoch;
+        if (catchUpStart != null) {
+          offsetSeconds = liveTvCatchUpOffsetSeconds(
+            catchUpStartEpoch: catchUpStart,
+            captureBuffer: captureBuffer,
+            nowEpoch: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          );
+        }
+
+        // Show "Watch from Start" dialog when an existing capture session has >60s of history.
+        // On a fresh tune (no active recording), the buffer is empty so this won't trigger.
         final programBeginsAt = session.program.beginsAt;
-        if (captureBuffer != null && programBeginsAt != null) {
+        if (offsetSeconds == null && captureBuffer != null && programBeginsAt != null) {
           final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
           final offsetProgramStart = programBeginsAt - captureBuffer.startedAt.round();
           // If a session recording started after current program start, offset of program start at will be negative.

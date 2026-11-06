@@ -1,35 +1,42 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../../connection/connection.dart';
 import '../../connection/connection_registry.dart';
+import '../../i18n/app_locale_utils.dart';
 import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
+import '../../media/iptv_live_tv.dart';
 import '../../profiles/active_profile_binder.dart';
 import '../../profiles/active_profile_provider.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../services/settings_service.dart' as settings;
+import '../../utils/formatters.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../widgets/app_icon.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_section.dart';
 import 'add_connection_screen.dart';
 import 'edit_iptv_connection_screen.dart';
 import 'playback_settings_screen.dart';
+import 'settings_utils.dart';
 
 /// IPTV settings area (Settings → IPTV), modelled on TiviMate's Settings.
 ///
 /// One screen for everything IPTV: the connections (M3U + Xtream Codes),
 /// per-connection channel-group enable/disable, playlist refresh, the
-/// guide/catch-up badge, and a link to the player settings IPTV uses.
-/// Every row here is wired to real behaviour — nothing is a dead toggle.
-/// Things TiviMate has that Plezy TV cannot do yet (EPG data itself,
-/// recording, multi-view, a parental PIN) are deliberately left out; see
-/// IPTV_FIXES_NOTES.md.
+/// guide/catch-up badge, the EPG / TV guide settings (days, interval,
+/// past days, update on start, time offset, manual update/clear), and a
+/// link to the player settings IPTV uses. Every row here is wired to real
+/// behaviour — nothing is a dead toggle.
+/// Things TiviMate has that Plezy TV cannot do yet (recording, multi-view,
+/// a parental PIN) are deliberately left out; see IPTV_FIXES_NOTES.md.
 class IptvSettingsScreen extends StatelessWidget {
   const IptvSettingsScreen({super.key});
 
@@ -104,6 +111,90 @@ class IptvSettingsScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           sliver: SliverToBoxAdapter(
             child: SettingsGroup(
+              title: t.iptv.epgSection,
+              children: [
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvEpgDaysToLoad,
+                  icon: Symbols.calendar_month_rounded,
+                  title: t.iptv.epgDaysToLoad,
+                  subtitleBuilder: (days) => t.iptv.epgDaysCount(n: days),
+                  options: [1, 2, 3, 4, 7]
+                      .map((days) => DialogOption(value: days, title: t.iptv.epgDaysCount(n: days)))
+                      .toList(),
+                ),
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvEpgUpdateIntervalHours,
+                  icon: Symbols.schedule_rounded,
+                  title: t.iptv.epgUpdateInterval,
+                  subtitleBuilder: (hours) =>
+                      hours == 0 ? t.iptv.epgManualOnly : t.iptv.epgHoursCount(n: hours),
+                  options: [6, 12, 24, 0]
+                      .map(
+                        (hours) => DialogOption(
+                          value: hours,
+                          title: hours == 0 ? t.iptv.epgManualOnly : t.iptv.epgHoursCount(n: hours),
+                        ),
+                      )
+                      .toList(),
+                ),
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvEpgPastDays,
+                  icon: Symbols.history_rounded,
+                  title: t.iptv.epgPastDays,
+                  subtitleBuilder: (days) =>
+                      days == 0 ? t.iptv.epgPastDaysNone : t.iptv.epgDaysCount(n: days),
+                  options: [0, 1, 2, 3, 7]
+                      .map(
+                        (days) => DialogOption(
+                          value: days,
+                          title: days == 0 ? t.iptv.epgPastDaysNone : t.iptv.epgDaysCount(n: days),
+                        ),
+                      )
+                      .toList(),
+                ),
+                SettingSwitchTile(
+                  pref: settings.SettingsService.iptvEpgUpdateOnStart,
+                  icon: Symbols.rocket_launch_rounded,
+                  title: t.iptv.epgUpdateOnStart,
+                  subtitle: t.iptv.epgUpdateOnStartDescription,
+                ),
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvEpgTimeOffsetMinutes,
+                  icon: Symbols.timelapse_rounded,
+                  title: t.iptv.epgTimeOffset,
+                  subtitleBuilder: (minutes) =>
+                      minutes == 0 ? t.iptv.epgNoOffset : t.iptv.epgOffsetMinutes(n: minutes),
+                  options: [-120, -60, -30, 0, 30, 60, 120]
+                      .map(
+                        (minutes) => DialogOption(
+                          value: minutes,
+                          title: minutes == 0 ? t.iptv.epgNoOffset : t.iptv.epgOffsetMinutes(n: minutes),
+                        ),
+                      )
+                      .toList(),
+                ),
+                SettingNavigationTile(
+                  icon: Symbols.refresh_rounded,
+                  title: t.iptv.epgUpdateNow,
+                  subtitle: t.iptv.epgUpdateNowDescription,
+                  onTap: () => _updateEpgNow(context),
+                ),
+                SettingNavigationTile(
+                  icon: Symbols.delete_sweep_rounded,
+                  title: t.iptv.epgClearGuide,
+                  subtitle: t.iptv.epgClearGuideDescription,
+                  onTap: () => _clearEpgGuide(context),
+                ),
+                const _EpgLastUpdatedTile(),
+              ],
+            ),
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: 24)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverToBoxAdapter(
+            child: SettingsGroup(
               title: t.iptv.player,
               children: [
                 SettingNavigationTile(
@@ -124,7 +215,9 @@ class IptvSettingsScreen extends StatelessWidget {
   /// Drop every IPTV client's in-memory catalog so the next Live TV /
   /// Library load re-fetches channels, movies and series from the
   /// provider. A rebind would recreate every server's client (including
-  /// Plex/Jellyfin); this only touches IPTV.
+  /// Plex/Jellyfin); this only touches IPTV. The EPG cache is busted too
+  /// (TiviMate's "update on playlist change": a refreshed playlist gets a
+  /// fresh guide with it).
   Future<void> _refreshPlaylists(BuildContext context) async {
     final registry = context.read<ConnectionRegistry>();
     final multiServer = context.read<MultiServerProvider>();
@@ -132,10 +225,91 @@ class IptvSettingsScreen extends StatelessWidget {
     for (final connection in connections) {
       if (connection is! M3uConnection && connection is! XtreamConnection) continue;
       final client = multiServer.getClientForServer(ServerId(connection.id));
-      if (client is IptvClient) client.clearCatalogCache();
+      if (client is IptvClient) {
+        client.clearCatalogCache();
+        final liveTv = client.liveTv;
+        if (liveTv is IptvLiveTvSupport) await liveTv.refreshEpgCache();
+      }
     }
     if (!context.mounted) return;
     showSuccessSnackBar(context, t.iptv.refreshDone);
+  }
+
+  /// "Update now": bust every IPTV client's EPG cache and force a fresh
+  /// fetch. The guide refetches lazily on its next build (scroll, window
+  /// shift or refresh), so the user sees fresh listings without a reload.
+  Future<void> _updateEpgNow(BuildContext context) async {
+    final registry = context.read<ConnectionRegistry>();
+    final multiServer = context.read<MultiServerProvider>();
+    final connections = await registry.list();
+    for (final connection in connections) {
+      if (connection is! M3uConnection && connection is! XtreamConnection) continue;
+      final client = multiServer.getClientForServer(ServerId(connection.id));
+      final liveTv = client?.liveTv;
+      if (liveTv is IptvLiveTvSupport) await liveTv.refreshEpgCache();
+    }
+    if (!context.mounted) return;
+    showSuccessSnackBar(context, t.iptv.epgUpdated);
+  }
+
+  /// "Clear guide": empty every IPTV client's EPG cache and leave the
+  /// guide empty (hour placeholders) until the next refresh.
+  Future<void> _clearEpgGuide(BuildContext context) async {
+    final registry = context.read<ConnectionRegistry>();
+    final multiServer = context.read<MultiServerProvider>();
+    final connections = await registry.list();
+    for (final connection in connections) {
+      if (connection is! M3uConnection && connection is! XtreamConnection) continue;
+      final client = multiServer.getClientForServer(ServerId(connection.id));
+      final liveTv = client?.liveTv;
+      if (liveTv is IptvLiveTvSupport) await liveTv.clearEpgCache();
+    }
+    if (!context.mounted) return;
+    showSuccessSnackBar(context, t.iptv.epgCleared);
+  }
+}
+
+/// "Last updated" status line for the EPG section: the stored timestamp of
+/// the last successful EPG fetch across all IPTV clients, or "Never" before
+/// the first load. Not tappable — it is a status, not an action.
+class _EpgLastUpdatedTile extends StatelessWidget {
+  const _EpgLastUpdatedTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ValueListenableBuilder<String>(
+      valueListenable: settings.SettingsService.instance.listenable(
+        settings.SettingsService.iptvEpgLastUpdated,
+      ),
+      builder: (context, stamp, _) {
+        final updated = DateTime.tryParse(stamp);
+        final text = updated == null
+            ? t.iptv.epgNeverUpdated
+            : '${DateFormat.MMMd(LocaleSettings.currentLocale.intlLocaleName).format(updated)} · '
+                  '${formatClockTime(updated, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context))}';
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            crossAxisAlignment: .start,
+            children: [
+              AppIcon(Symbols.update_rounded, fill: 1),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: .start,
+                  children: [
+                    Text(t.iptv.epgLastUpdated, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(text, style: theme.textTheme.bodyMedium),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 

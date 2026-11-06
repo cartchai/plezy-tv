@@ -919,6 +919,49 @@ class SettingsService extends BaseSharedPreferencesService {
   /// (Xtream `tv_archive = 1`). TiviMate's "Show catch-up icon in channel
   /// list". Default on; applies when the guide reloads.
   static const iptvShowCatchUpBadge = BoolPref('iptv_show_catch_up_badge', defaultValue: true);
+
+  /// EPG / TV guide settings (IPTV), modelled on TiviMate's Settings →
+  /// TV guide / EPG. The EPG layer honours them: the fetch window is
+  /// [now - iptvEpgPastDays, now + iptvEpgDaysToLoad], per-channel caches
+  /// expire after iptvEpgUpdateIntervalHours, and iptvEpgTimeOffsetMinutes
+  /// shifts displayed guide times (fixes listings out by whole hours when
+  /// the provider's times are not UTC as assumed).
+  /// Days of guide to load ahead: 1 / 2 / 3 / 4 / 7. Default 3 (TiviMate
+  /// recommends 3–4 days; 14 days for thousands of channels slows start-up).
+  static const iptvEpgDaysToLoad = IntPref('iptv_epg_days_to_load', defaultValue: 3);
+
+  /// Hours between EPG refreshes: 6 / 12 / 24, or 0 for manual only.
+  /// Default 24 (TiviMate's standard recommendation).
+  static const iptvEpgUpdateIntervalHours = IntPref('iptv_epg_update_interval_hours', defaultValue: 24);
+
+  /// Past days of guide to keep (only useful for catch-up scrolling):
+  /// 0 / 1 / 2 / 3 / 7. Default 1.
+  static const iptvEpgPastDays = IntPref('iptv_epg_past_days', defaultValue: 1);
+
+  /// Refresh the guide once when the app starts. Default off (TiviMate
+  /// usually leaves this off — it stops a long download on every launch).
+  /// With the in-memory EPG cache this forces one fresh fetch per channel
+  /// on the first guide open after launch even inside the update interval.
+  static const iptvEpgUpdateOnStart = BoolPref('iptv_epg_update_on_start');
+
+  /// Minutes to shift displayed guide times, per TiviMate's per-source time
+  /// offset. Default 0 (provider times assumed UTC). Range ±120 in 30-min
+  /// steps; applied in the EPG mapper, never stored with the programs.
+  static const iptvEpgTimeOffsetMinutes = IntPref('iptv_epg_time_offset_minutes', defaultValue: 0);
+
+  /// ISO-8601 timestamp of the last successful EPG fetch across all IPTV
+  /// sources, written by the EPG layer (throttled to one write per minute).
+  /// Empty before the first load. Shown as "Last updated" in IPTV settings.
+  static const iptvEpgLastUpdated = StringPref('iptv_epg_last_updated', defaultValue: '');
+
+  /// Expanded/collapsed state of the three category sections on the IPTV
+  /// connection edit screen (Live TV / Movies / TV Series). Defaults open.
+  static const iptvCategoriesLiveExpanded = BoolPref('iptv_categories_live_expanded', defaultValue: true);
+  static const iptvCategoriesMoviesExpanded = BoolPref('iptv_categories_movies_expanded', defaultValue: true);
+  static const iptvCategoriesSeriesExpanded = BoolPref('iptv_categories_series_expanded', defaultValue: true);
+
+  /// Expanded/collapsed state of the M3U groups section on the same screen.
+  static const iptvCategoriesGroupsExpanded = BoolPref('iptv_categories_groups_expanded', defaultValue: true);
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();

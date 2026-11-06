@@ -49,6 +49,10 @@ import 'package:provider/provider.dart';
 import '../../test_helpers/io_fakes.dart';
 import '../../test_helpers/prefs.dart';
 
+/// The channel every `url_launcher` platform implementation talks to; a
+/// recorded call means the flow tried to leave the app for a browser.
+const _urlLauncherChannel = MethodChannel('plugins.flutter.io/url_launcher');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -595,6 +599,135 @@ void main() {
     expect(find.text(t.settings.saveFailed), findsOneWidget);
     expect(find.text(t.settings.importSettingsSuccess), findsNothing);
   });
+
+  // Build #6 (in-app update): the Updates section only renders when the
+  // ENABLE_UPDATE_CHECK dart-define is on — the same flag the Codemagic
+  // build passes. These tests skip without it and must be run with
+  // --dart-define=ENABLE_UPDATE_CHECK=true.
+  testWidgets(
+    'update section sits directly above About and links to the GitHub releases page',
+    (tester) async {
+      final launched = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        _urlLauncherChannel,
+        (call) async {
+          switch (call.method) {
+            case 'launch':
+              launched.add((call.arguments as Map)['url'] as String);
+              return true;
+            case 'canLaunch':
+              return true;
+            default:
+              return null;
+          }
+        },
+      );
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          _urlLauncherChannel,
+          null,
+        ),
+      );
+
+      final harness = await _pumpSettingsScreen(tester);
+      addTearDown(() => harness.dispose(tester));
+
+      expect(find.text(t.settings.checkForUpdates), findsOneWidget);
+      expect(find.text(t.settings.viewReleasesOnGitHub), findsOneWidget);
+
+      final updatesTop = tester.getTopLeft(find.text(t.settings.updates)).dy;
+      final aboutTop = tester.getTopLeft(_navigationTileFor(t.settings.about)).dy;
+      expect(updatesTop, lessThan(aboutTop), reason: 'Updates must sit directly above About');
+
+      await tester.tap(find.text(t.settings.viewReleasesOnGitHub));
+      await _pumpUi(tester);
+
+      expect(launched, contains(UpdateService.releasesUrl));
+    },
+    skip: !UpdateService.isUpdateCheckAvailable,
+  );
+
+  testWidgets(
+    'up-to-date check shows the latest-version message',
+    (tester) async {
+      UpdateService.debugCheckForUpdatesOverride = () async => null;
+      addTearDown(() => UpdateService.debugCheckForUpdatesOverride = null);
+
+      final harness = await _pumpSettingsScreen(tester);
+      addTearDown(() => harness.dispose(tester));
+
+      await tester.tap(find.text(t.settings.checkForUpdates));
+      await _pumpUi(tester);
+
+      expect(find.text(t.update.latestVersion), findsOneWidget);
+    },
+    skip: !UpdateService.isUpdateCheckAvailable,
+  );
+
+  testWidgets(
+    'update available opens the dialog with version, notes and a Download APK button',
+    (tester) async {
+      const apkUrl =
+          'https://github.com/cartchai/plezy-tv/releases/download/v1.0.1/PlezTV.v1.0.1.apk';
+      UpdateService.debugCheckForUpdatesOverride = () async => <String, dynamic>{
+        'hasUpdate': true,
+        'currentVersion': '1.0.0',
+        'latestVersion': '1.0.1',
+        'releaseUrl': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1',
+        'releaseName': 'PlezTV v1.0.1',
+        'releaseNotes': '• Fixed the thing',
+        'publishedAt': '2026-11-06T00:00:00Z',
+        'apkAssetUrl': apkUrl,
+        'apkAssetName': 'PlezTV.v1.0.1.apk',
+      };
+      addTearDown(() => UpdateService.debugCheckForUpdatesOverride = null);
+
+      final launched = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        _urlLauncherChannel,
+        (call) async {
+          switch (call.method) {
+            case 'launch':
+              launched.add((call.arguments as Map)['url'] as String);
+              return true;
+            case 'canLaunch':
+              return true;
+            default:
+              return null;
+          }
+        },
+      );
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          _urlLauncherChannel,
+          null,
+        ),
+      );
+
+      final harness = await _pumpSettingsScreen(tester);
+      addTearDown(() => harness.dispose(tester));
+
+      // First tap runs the check; the row then reports the update.
+      await tester.tap(find.text(t.settings.checkForUpdates));
+      await _pumpUi(tester);
+      expect(find.text(t.settings.updateAvailable), findsOneWidget);
+
+      // Second tap opens the update dialog.
+      await tester.tap(find.text(t.settings.updateAvailable));
+      await _pumpUi(tester);
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('• Fixed the thing'), findsOneWidget);
+      expect(find.text(t.update.installApkHint), findsOneWidget);
+      expect(find.text(t.update.downloadApk), findsOneWidget);
+
+      await tester.tap(find.text(t.update.downloadApk));
+      await _pumpUi(tester);
+
+      expect(launched, contains(apkUrl));
+    },
+    skip: !UpdateService.isUpdateCheckAvailable,
+  );
 }
 
 Finder _navigationTileFor(String title) =>

@@ -36,6 +36,8 @@ mixin LiveTvActionsMixin<T extends StatefulWidget> on State<T> {
 
   /// Open the program-details bottom sheet. The poster is resolved from
   /// [posterThumb] on the server identified by [posterServerId].
+  /// [onCatchUp] starts the archive at the program's start time (guide
+  /// "No information" placeholders on catch-up channels only).
   void showProgramDetails({
     BuildContext? sheetContext,
     required LiveTvProgram program,
@@ -43,6 +45,7 @@ mixin LiveTvActionsMixin<T extends StatefulWidget> on State<T> {
     required String? posterThumb,
     required String? posterServerId,
     ValueChanged<bool>? onRecordingStateChanged,
+    VoidCallback? onCatchUp,
   }) {
     final effectiveContext = sheetContext ?? context;
     final multiServer = effectiveContext.read<MultiServerProvider>();
@@ -68,6 +71,7 @@ mixin LiveTvActionsMixin<T extends StatefulWidget> on State<T> {
       onTuneChannel: channel != null ? () => tuneChannel(channel) : null,
       client: client,
       onRecordingStateChanged: onRecordingStateChanged,
+      onCatchUp: onCatchUp,
     );
   }
 }

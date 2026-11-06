@@ -84,11 +84,21 @@ class IptvClient implements MediaServerClient {
   };
 
   XtreamApi? _api;
+
   XtreamApi get _xtreamApi => _api ??= XtreamApi(
     serverUrl: _xtream.serverUrl,
     username: _xtream.username,
     password: _xtream.password,
   );
+
+  /// Public view of the Xtream API for the live-TV support (EPG fetches).
+  XtreamApi get xtreamApi => _xtreamApi;
+
+  /// The tvg-id of the M3U entry behind [channelKey] (the key IS the tvg-id
+  /// when the entry has one), or null when the channel has no tvg-id or is
+  /// not an M3U channel. The EPG layer matches XMLTV `<programme>` rows
+  /// against this id.
+  String? tvgIdForChannelKey(String channelKey) => _m3uChannelByKey[channelKey]?.tvgId;
 
   /// Test-only override for the Xtream API, so unit tests can stub the
   /// catalog instead of hitting the network. Production code never sets this.
@@ -770,17 +780,24 @@ class IptvClient implements MediaServerClient {
         ),
       );
     }
-    final series = await _seriesItems();
-    if (series.isNotEmpty) {
-      hubs.add(
-        _recommendedHub(
-          libraryId: _seriesLibraryId,
-          title: '$_name — Series',
-          type: 'show',
-          all: series,
-          limit: limit,
-        ),
-      );
+    // Fail open per section: a series catalog failure (network, malformed
+    // rows) must not take the Movies hub down with it — the per-library
+    // fetch path already isolates the two, so the home path must too.
+    try {
+      final series = await _seriesItems();
+      if (series.isNotEmpty) {
+        hubs.add(
+          _recommendedHub(
+            libraryId: _seriesLibraryId,
+            title: '$_name — Series',
+            type: 'show',
+            all: series,
+            limit: limit,
+          ),
+        );
+      }
+    } catch (e) {
+      appLogger.w('IPTV: series hub skipped after catalog failure: $e');
     }
     return hubs;
   }

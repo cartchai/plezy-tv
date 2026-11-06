@@ -20,6 +20,9 @@ workflows:
       - name: Get Flutter packages
         script: flutter pub get
       - name: Build debug APK
-        script: flutter build apk --debug
+        # ENABLE_UPDATE_CHECK turns on the Settings → Updates section
+        # (in-app check against the fork's GitHub Releases). Without it the
+        # section is compiled out and the update row never renders.
+        script: flutter build apk --debug --dart-define=ENABLE_UPDATE_CHECK=true
     artifacts:
       - build/app/outputs/flutter-apk/app-debug.apk

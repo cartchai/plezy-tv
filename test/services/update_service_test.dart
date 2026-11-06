@@ -93,6 +93,105 @@ void main() {
     );
   });
 
+  // Build #6: the fork's tags are "PlezTV vX.Y.Z", and releases may carry
+  // no .apk asset (v2.25.1 shipped source-only). The mocked current version
+  // for this file is 1.0.0 (see setUp above).
+  MediaServerHttpClient releaseClient(Map<String, dynamic> release) {
+    final client = MediaServerHttpClient(
+      client: MockClient(
+        (_) async => http.Response(
+          jsonEncode(release),
+          200,
+          headers: {'content-type': 'application/json'},
+        ),
+      ),
+    );
+    addTearDown(client.close);
+    return client;
+  }
+
+  Future<Map<String, dynamic>?> checkRelease(Map<String, dynamic> release) {
+    return UpdateService.debugPerformUpdateCheck(
+      respectCooldown: false,
+      client: releaseClient(release),
+      throwOnFailure: true,
+    );
+  }
+
+  test('a "PlezTV vX.Y.Z" tag parses and compares as newer', () async {
+    final info = await checkRelease({
+      'tag_name': 'PlezTV v1.0.1',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1',
+      'name': 'PlezTV v1.0.1',
+      'body': '• Fixed the thing',
+      'published_at': '2026-11-06T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['hasUpdate'], isTrue);
+    expect(info['latestVersion'], '1.0.1');
+    expect(info['currentVersion'], '1.0.0');
+    expect(info['releaseNotes'], '• Fixed the thing');
+  });
+
+  test('a release carrying a dotted .apk asset exposes its download URL', () async {
+    final info = await checkRelease({
+      'tag_name': 'v1.0.1',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1',
+      'published_at': '2026-11-06T00:00:00Z',
+      // GitHub rewrites spaces to dots in stored asset names.
+      'assets': [
+        {'name': 'PlezTV.v1.0.1.apk', 'browser_download_url': 'https://github.com/cartchai/plezy-tv/releases/download/v1.0.1/PlezTV.v1.0.1.apk'},
+        {'name': 'Source code (zip)', 'browser_download_url': 'https://example.com/source.zip'},
+      ],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['apkAssetName'], 'PlezTV.v1.0.1.apk');
+    expect(info['apkAssetUrl'], 'https://github.com/cartchai/plezy-tv/releases/download/v1.0.1/PlezTV.v1.0.1.apk');
+  });
+
+  test('a release with no .apk asset still reports the update, with no download URL', () async {
+    final info = await checkRelease({
+      'tag_name': 'v1.0.1',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1',
+      'published_at': '2026-11-06T00:00:00Z',
+      'assets': [
+        {'name': 'Source code (zip)', 'browser_download_url': 'https://example.com/source.zip'},
+        {'name': 'Source code (tar.gz)', 'browser_download_url': 'https://example.com/source.tar.gz'},
+      ],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['hasUpdate'], isTrue);
+    expect(info['apkAssetUrl'], isNull);
+    expect(info['apkAssetName'], isNull);
+  });
+
+  test('a tag with no version number in it is not an update and does not throw', () async {
+    final info = await checkRelease({
+      'tag_name': 'nightly-build',
+      'html_url': 'https://example.com',
+      'published_at': '2026-11-06T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNull);
+  });
+
+  test('missing published_at and html_url do not break the update result', () async {
+    final info = await checkRelease({
+      'tag_name': 'v1.0.1',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['hasUpdate'], isTrue);
+    expect(info['releaseUrl'], UpdateService.releasesUrl);
+    expect(info['publishedAt'], '');
+  });
+
   for (final failure in failedResponses.entries) {
     test('startup ${failure.key} records cooldown before request and manual check bypasses it', () async {
       final prefs = await BaseSharedPreferencesService.sharedCache();

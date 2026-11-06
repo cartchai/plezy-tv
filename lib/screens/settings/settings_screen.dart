@@ -120,6 +120,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
   static const _kResetSettings = 'reset_settings';
   static const _kCheckForUpdates = 'check_for_updates';
   static const _kAutoCheckUpdatesOnStartup = 'auto_check_updates_on_startup';
+  static const _kViewReleasesOnGitHub = 'view_releases_on_github';
   static const _kAbout = 'about';
   static const _kWatchTogetherRelay = 'watch_together_relay';
   static const _kExportSettings = 'export_settings';
@@ -708,7 +709,27 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
                 },
         ),
         _buildAutoCheckUpdatesOnStartupTile(),
+        _buildViewReleasesTile(),
       ],
+    );
+  }
+
+  /// Link to the fork's GitHub Releases page, in the same Updates group as
+  /// the check row — the releases are where every PlezTV APK is published
+  /// for free, and where the in-app updater downloads from.
+  Widget _buildViewReleasesTile() {
+    return SettingNavigationTile(
+      focusNode: _focusTracker.get(_kViewReleasesOnGitHub),
+      icon: Symbols.open_in_new_rounded,
+      title: t.settings.viewReleasesOnGitHub,
+      subtitle: UpdateService.releasesUrl,
+      trailingIcon: Symbols.open_in_new_rounded,
+      onTap: () async {
+        final url = Uri.parse(UpdateService.releasesUrl);
+        if (await canLaunchUrl(url)) {
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+        }
+      },
     );
   }
 

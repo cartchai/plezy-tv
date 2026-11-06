@@ -515,6 +515,72 @@ void main() {
     expect(find.text(t.iptv.refreshPlaylists), findsOneWidget);
   });
 
+  testWidgets('IPTV settings screen renders the EPG section and its actions work', (tester) async {
+    CredentialVault.resetKeyForTesting();
+    await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async => db.close());
+    final registry = _FakeConnectionRegistry(db);
+    await registry.upsert(_trexConnection());
+
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          Provider<ConnectionRegistry>.value(value: registry),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The EPG / TV guide section (TiviMate model) with its defaults. The
+    // screen is a lazy sliver list, so scroll each row into view first.
+    await tester.scrollUntilVisible(find.text(t.iptv.epgSection), 200);
+    expect(find.text(t.iptv.epgSection), findsOneWidget);
+    expect(find.text(t.iptv.epgDaysToLoad), findsOneWidget);
+    expect(find.text('3 days'), findsOneWidget);
+    expect(find.text(t.iptv.epgUpdateInterval), findsOneWidget);
+    expect(find.text('Every 24 hours'), findsOneWidget);
+    expect(find.text(t.iptv.epgPastDays), findsOneWidget);
+    expect(find.text('1 day'), findsOneWidget);
+    expect(find.text(t.iptv.epgUpdateOnStart), findsOneWidget);
+    expect(find.text(t.iptv.epgTimeOffset), findsOneWidget);
+    expect(find.text('No offset'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text(t.iptv.epgUpdateNow), 200);
+    expect(find.text(t.iptv.epgUpdateNow), findsOneWidget);
+    await tester.scrollUntilVisible(find.text(t.iptv.epgClearGuide), 200);
+    expect(find.text(t.iptv.epgClearGuide), findsOneWidget);
+    await tester.scrollUntilVisible(find.text(t.iptv.epgLastUpdated), 200);
+    expect(find.text(t.iptv.epgLastUpdated), findsOneWidget);
+    expect(find.text(t.iptv.epgNeverUpdated), findsOneWidget);
+
+    // Update now + Clear guide announce themselves.
+    await tester.ensureVisible(find.text(t.iptv.epgUpdateNow));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(t.iptv.epgUpdateNow));
+    await tester.pumpAndSettle();
+    expect(find.text(t.iptv.epgUpdated), findsOneWidget);
+    await tester.ensureVisible(find.text(t.iptv.epgClearGuide));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(t.iptv.epgClearGuide));
+    // The "Guide updated" snackbar is still showing; the "Guide cleared"
+    // one queues behind it — let the first expire before asserting.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text(t.iptv.epgCleared), findsOneWidget);
+  });
+
   group('First-run IPTV onboarding', () {
     testWidgets('Auth screen offers M3U and Xtream Codes and opens their add screens', (tester) async {
       await tester.pumpWidget(

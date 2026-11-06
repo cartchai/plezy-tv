@@ -12,6 +12,7 @@ import '../../i18n/strings.g.dart';
 import '../../mixins/controller_disposer_mixin.dart';
 import '../../services/iptv/m3u_parser.dart';
 import '../../services/iptv/xtream_api.dart';
+import '../../services/settings_service.dart' as settings;
 import '../../utils/app_logger.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
@@ -29,17 +30,56 @@ class _IptvCategory {
   const _IptvCategory({required this.id, required this.name});
 }
 
-/// Edit an IPTV connection's country/region filter: a scrollable checklist
-/// of the connection's categories, each with an on/off switch. Turning a
-/// category OFF adds its id to the connection's `disabledCategoryIds`;
-/// turning it ON removes it. Saving persists the updated connection via
-/// the registry (same `upsert(expected:)` pattern as the Jellyfin edit
-/// screen); the caller rebinds, so the new filter applies immediately.
+/// Which of the three content types a section lists. M3U groups have no
+/// live/VOD/series type, so they get their own single section.
+enum _CategorySectionKind { live, movies, series, groups }
+
+/// One collapsible section of the category filter. All sections share the
+/// same `disabledCategoryIds` set: a category id that appears in more than
+/// one section reads the same state in both, and toggling it in one
+/// updates the other.
+class _IptvCategorySection {
+  final _CategorySectionKind kind;
+  final List<_IptvCategory> categories;
+
+  /// The pref that persists this section's expanded/collapsed state.
+  final settings.Pref<bool> expandedPref;
+
+  const _IptvCategorySection({
+    required this.kind,
+    required this.categories,
+    required this.expandedPref,
+  });
+}
+
+settings.Pref<bool> _expandedPrefFor(_CategorySectionKind kind) => switch (kind) {
+  _CategorySectionKind.live => settings.SettingsService.iptvCategoriesLiveExpanded,
+  _CategorySectionKind.movies => settings.SettingsService.iptvCategoriesMoviesExpanded,
+  _CategorySectionKind.series => settings.SettingsService.iptvCategoriesSeriesExpanded,
+  _CategorySectionKind.groups => settings.SettingsService.iptvCategoriesGroupsExpanded,
+};
+
+/// Edit an IPTV connection's country/region filter: collapsible sections
+/// per content type — Live TV, Movies, TV Series for Xtream; a single
+/// Groups section for M3U — each a scrollable checklist of that type's
+/// categories with an on/off switch. Turning a category OFF adds its id
+/// to the connection's `disabledCategoryIds`; turning it ON removes it.
+/// Saving persists the updated connection via the registry (same
+/// `upsert(expected:)` pattern as the Jellyfin edit screen); the caller
+/// rebinds, so the new filter applies immediately.
 ///
 /// Categories are loaded lazily and rendered with a builder, so the
 /// provider's 800+ categories never build all at once.
 class EditIptvConnectionScreen extends StatefulWidget {
   final Connection connection;
+
+  /// Test seam: when set, category fetches (the Xtream player_api calls
+  /// and the M3U playlist fetch) go through this client instead of the
+  /// network. Widget tests point it at a MockClient — real socket I/O
+  /// does not survive the test binding's faked timers. Always null in
+  /// production; tests must clear it in tearDown.
+  @visibleForTesting
+  static http.Client? debugHttpClient;
 
   const EditIptvConnectionScreen({super.key, required this.connection});
 
@@ -52,10 +92,15 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
   final _saveFocus = FocusNode(debugLabel: 'EditIptv:Save');
   final _retryFocus = FocusNode(debugLabel: 'EditIptv:Retry');
 
-  List<_IptvCategory> _categories = const [];
+  List<_IptvCategorySection> _sections = const [];
   late final Set<String> _disabled = widget.connection is M3uConnection
       ? (widget.connection as M3uConnection).disabledCategoryIds.toSet()
       : (widget.connection as XtreamConnection).disabledCategoryIds.toSet();
+
+  /// Expanded/collapsed state per section, persisted per section (see
+  /// [_expandedPrefFor]) so it survives leaving the screen.
+  final Map<_CategorySectionKind, bool> _expanded = {};
+
   bool _loadingCategories = true;
   // Kept apart from the form's errorText (used by the save path) so a
   // failed category load doesn't also render under the Save button.
@@ -74,13 +119,26 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
     super.dispose();
   }
 
-  Future<List<_IptvCategory>> _fetchCategories() async {
+  List<_IptvCategory> _sortedCategories(List<XtreamCategory> categories) {
+    final seen = <String>{};
+    final result = <_IptvCategory>[];
+    for (final category in categories) {
+      if (category.id.isEmpty || category.name.isEmpty) continue;
+      if (!seen.add(category.id)) continue;
+      result.add(_IptvCategory(id: category.id, name: category.name));
+    }
+    result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return result;
+  }
+
+  Future<List<_IptvCategorySection>> _fetchSections() async {
     final connection = widget.connection;
     if (connection is XtreamConnection) {
       final api = XtreamApi(
         serverUrl: connection.serverUrl,
         username: connection.username,
         password: connection.password,
+        httpClient: EditIptvConnectionScreen.debugHttpClient,
       );
       try {
         final lists = await Future.wait([
@@ -88,42 +146,63 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
           api.getVodCategories(),
           api.getSeriesCategories(),
         ]);
-        // A category id can appear in several lists; keep the first name.
-        final byId = <String, String>{};
-        for (final list in lists) {
-          for (final category in list) {
-            if (category.id.isEmpty || category.name.isEmpty) continue;
-            byId.putIfAbsent(category.id, () => category.name);
-          }
-        }
-        final categories = byId.entries
-            .map((e) => _IptvCategory(id: e.key, name: e.value))
-            .toList(growable: false);
-        categories.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-        return categories;
+        // The three lists stay separate — one collapsible section each.
+        // A category id can appear in several lists; each section shows
+        // its own copy, and both switches read the same disabled set.
+        return [
+          _IptvCategorySection(
+            kind: _CategorySectionKind.live,
+            categories: _sortedCategories(lists[0]),
+            expandedPref: _expandedPrefFor(_CategorySectionKind.live),
+          ),
+          _IptvCategorySection(
+            kind: _CategorySectionKind.movies,
+            categories: _sortedCategories(lists[1]),
+            expandedPref: _expandedPrefFor(_CategorySectionKind.movies),
+          ),
+          _IptvCategorySection(
+            kind: _CategorySectionKind.series,
+            categories: _sortedCategories(lists[2]),
+            expandedPref: _expandedPrefFor(_CategorySectionKind.series),
+          ),
+        ];
       } finally {
         api.close();
       }
     }
     if (connection is M3uConnection) {
-      final response = await http
-          .get(Uri.parse(connection.playlistUrl))
-          .timeout(const Duration(seconds: 30));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError('Playlist request failed with HTTP ${response.statusCode}');
+      // A client created here is closed after the fetch; the injected
+      // test client is shared and left alone.
+      final httpClient = EditIptvConnectionScreen.debugHttpClient ?? http.Client();
+      try {
+        final response = await httpClient
+            .get(Uri.parse(connection.playlistUrl))
+            .timeout(const Duration(seconds: 30));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw StateError('Playlist request failed with HTTP ${response.statusCode}');
+        }
+        // Group titles are the M3U categories; entries without a group can
+        // never be filtered (the client treats a null category as shown).
+        // M3U groups have no live/VOD/series type — one plain section.
+        final groups = <String>{};
+        for (final entry in parseM3u(response.body)) {
+          final group = entry.groupTitle?.trim();
+          if (group != null && group.isNotEmpty) groups.add(group);
+        }
+        final categories = groups
+            .map((g) => _IptvCategory(id: g, name: g))
+            .toList(growable: false);
+        categories.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        return [
+          _IptvCategorySection(
+            kind: _CategorySectionKind.groups,
+            categories: categories,
+            expandedPref: _expandedPrefFor(_CategorySectionKind.groups),
+          ),
+        ];
+      } finally {
+        if (EditIptvConnectionScreen.debugHttpClient == null) httpClient.close();
       }
-      // Group titles are the M3U categories; entries without a group can
-      // never be filtered (the client treats a null category as shown).
-      final groups = <String>{};
-      for (final entry in parseM3u(response.body)) {
-        final group = entry.groupTitle?.trim();
-        if (group != null && group.isNotEmpty) groups.add(group);
-      }
-      final categories = groups
-          .map((g) => _IptvCategory(id: g, name: g))
-          .toList(growable: false);
-      categories.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      return categories;
     }
     return const [];
   }
@@ -134,10 +213,15 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
       _loadError = null;
     });
     try {
-      final categories = await _fetchCategories();
+      // Persisted expanded/collapsed state per section (defaults: expanded).
+      final service = await settings.SettingsService.getInstance();
+      for (final kind in _CategorySectionKind.values) {
+        _expanded[kind] = service.read(_expandedPrefFor(kind));
+      }
+      final sections = await _fetchSections();
       if (!mounted) return;
       setState(() {
-        _categories = categories;
+        _sections = sections;
         _loadingCategories = false;
       });
     } catch (e, st) {
@@ -149,6 +233,38 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
       });
     }
   }
+
+  /// Toggle one section's expanded state and persist it.
+  void _toggleSection(_CategorySectionKind kind) {
+    final expanded = !(_expanded[kind] ?? true);
+    setState(() => _expanded[kind] = expanded);
+    unawaited(
+      settings.SettingsService.getInstance().then(
+        (service) => service.write(_expandedPrefFor(kind), expanded),
+      ),
+    );
+  }
+
+  String _sectionTitle(_CategorySectionKind kind) => switch (kind) {
+    _CategorySectionKind.live => t.connections.iptvFilterLiveTv,
+    _CategorySectionKind.movies => t.connections.iptvFilterMovies,
+    _CategorySectionKind.series => t.connections.iptvFilterSeries,
+    _CategorySectionKind.groups => t.connections.iptvFilterGroups,
+  };
+
+  /// Flat row list for the builder: one header row per section, then that
+  /// section's categories only while it is expanded. Keeps the lazy
+  /// builder (the provider's 800+ categories never build all at once).
+  List<Object> get _rows {
+    final rows = <Object>[];
+    for (final section in _sections) {
+      rows.add(section);
+      if (_expanded[section.kind] ?? true) rows.addAll(section.categories);
+    }
+    return rows;
+  }
+
+  Iterable<_IptvCategory> get _allCategories => _sections.expand((s) => s.categories);
 
   Future<void> _save() async {
     await runAsync<void>(
@@ -204,7 +320,8 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
                 Text(t.connections.iptvFilterIntro, style: theme.textTheme.bodyMedium),
                 // TiviMate's Manage groups has "Show all groups / Hide all
                 // groups" — the fast way to reset a big country list.
-                if (_categories.isNotEmpty) ...[
+                // Applies across all three sections at once.
+                if (_allCategories.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -217,7 +334,7 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
                       TextButton.icon(
                         onPressed: busy
                             ? null
-                            : () => setState(() => _disabled.addAll(_categories.map((c) => c.id))),
+                            : () => setState(() => _disabled.addAll(_allCategories.map((c) => c.id))),
                         icon: const AppIcon(Symbols.visibility_off_rounded, fill: 1),
                         label: Text(t.connections.iptvFilterHideAll),
                       ),
@@ -267,7 +384,7 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
               ),
             ),
           )
-        else if (_categories.isEmpty)
+        else if (_allCategories.isEmpty)
           SliverPadding(
             padding: const EdgeInsets.all(16),
             sliver: SliverToBoxAdapter(
@@ -278,9 +395,37 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: SliverList.builder(
-              itemCount: _categories.length,
+              itemCount: _rows.length,
               itemBuilder: (context, index) {
-                final category = _categories[index];
+                final row = _rows[index];
+                if (row is _IptvCategorySection) {
+                  final expanded = _expanded[row.kind] ?? true;
+                  final offCount = row.categories.where((c) => _disabled.contains(c.id)).length;
+                  return FocusableListTile(
+                    title: Text(
+                      _sectionTitle(row.kind),
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    subtitle: offCount == 0
+                        ? Text(
+                            t.connections.iptvFilterSectionCount(n: row.categories.length),
+                            style: theme.textTheme.bodySmall,
+                          )
+                        : Text(
+                            t.connections.iptvFilterSectionOff(
+                              off: offCount,
+                              total: row.categories.length,
+                            ),
+                            style: theme.textTheme.bodySmall,
+                          ),
+                    trailing: AppIcon(
+                      expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
+                      fill: 1,
+                    ),
+                    onTap: busy ? null : () => _toggleSection(row.kind),
+                  );
+                }
+                final category = row as _IptvCategory;
                 final shown = !_disabled.contains(category.id);
                 return FocusableSwitchListTile(
                   title: Text(category.name),

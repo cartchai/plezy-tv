@@ -38,6 +38,7 @@ void showProgramDetailsSheet(
   required VoidCallback? onTuneChannel,
   MediaServerClient? client,
   ValueChanged<bool>? onRecordingStateChanged,
+  VoidCallback? onCatchUp,
 }) {
   OverlaySheetController.showAdaptive(
     context,
@@ -50,6 +51,7 @@ void showProgramDetailsSheet(
         onTuneChannel: onTuneChannel,
         client: client,
         onRecordingStateChanged: onRecordingStateChanged,
+        onCatchUp: onCatchUp,
       );
     },
   );
@@ -79,6 +81,12 @@ class _ProgramDetailsSheetContent extends StatefulWidget {
   final MediaServerClient? client;
   final ValueChanged<bool>? onRecordingStateChanged;
 
+  /// Catch-up for a "No information" guide placeholder: starts the archive
+  /// at the block's own start time. Only passed for placeholders on
+  /// channels that offer catch-up; the label counts minutes since the
+  /// block started.
+  final VoidCallback? onCatchUp;
+
   const _ProgramDetailsSheetContent({
     required this.program,
     required this.channel,
@@ -86,6 +94,7 @@ class _ProgramDetailsSheetContent extends StatefulWidget {
     required this.onTuneChannel,
     required this.client,
     required this.onRecordingStateChanged,
+    this.onCatchUp,
   });
 
   @override
@@ -214,6 +223,21 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
       );
     }
 
+    if (widget.onCatchUp != null && program.beginsAt != null) {
+      final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final minutesAgo = ((nowEpoch - program.beginsAt!) ~/ 60).clamp(0, 1 << 30);
+      actions.add(
+        _SheetAction(
+          label: t.liveTv.watchFromStart(minutes: minutesAgo),
+          icon: Symbols.replay_rounded,
+          onPressed: () {
+            _closeSheet();
+            widget.onCatchUp!();
+          },
+        ),
+      );
+    }
+
     if (_canRecord && client != null && _checkedMapping) {
       final existing = _existingSubscription;
       if (existing != null) {
@@ -322,7 +346,6 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
 
     final buttons = <Widget>[];
     for (var i = 0; i < actions.length; i++) {
-      if (i > 0) buttons.add(const SizedBox(width: 8));
       buttons.add(
         _buildButton(
           actions[i],
@@ -393,7 +416,11 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
             ],
           ),
           const SizedBox(height: 16),
-          if (buttons.isNotEmpty) Row(children: buttons),
+          // Wrap, not a Row: the catch-up action ("Watch from start (N min
+          // ago)") is long, and two wide buttons overflow a narrow sheet
+          // (e.g. a phone cover screen). Buttons stay side by side when
+          // they fit and drop to the next line when they don't.
+          if (buttons.isNotEmpty) Wrap(spacing: 8, runSpacing: 8, children: buttons),
         ],
       ),
     );

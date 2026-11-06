@@ -50,12 +50,29 @@ from memory.
 | `8a1974df3` | README rewrite: PlezTV vs Plezy sections, app-store links removed |
 | `2e3f4897d` | About/auth logo `assets/plezy.png` recolored blue (was orange) |
 
-Build #5 (PlezTV v2.25.1) is in the working tree, uncommitted at the time this
-file was written: rename Plezy → PlezTV in-app (all 22 locales + slang regen),
-blue launcher icon + TV banner + adaptive foreground, About changelog,
-first-start IPTV on the Auth screen, Xtream catalog parsing moved to an
-isolate with 120s timeouts, parallel library probes, version `2.25.1+158`,
-screen tests in `test/screens/iptv/`. Detail: `IPTV_FIXES2_NOTES.md`.
+Build #5 (PlezTV v2.25.1) is committed as `136491ea2`: rename Plezy → PlezTV
+in-app (all 22 locales + slang regen), blue launcher icon + TV banner +
+adaptive foreground, About changelog, first-start IPTV on the Auth screen,
+Xtream catalog parsing moved to an isolate with 120s timeouts, parallel
+library probes, version `2.25.1+158`, screen tests in `test/screens/iptv/`.
+Detail: `IPTV_FIXES2_NOTES.md`.
+
+Build #6 (PlezTV v2.25.2) is in this commit: EPG wired lazily per visible
+guide channel (`IptvLiveTvSupport.fetchEpgForChannel`; `fetchSchedule`
+stays `[]` deliberately), subtle 3px loading line under the guide time
+navigation, Series root cause fixed (one malformed row no longer kills the
+whole catalog — `parseFlexibleJsonList` in all three catalog parsers),
+categories split into collapsible Live TV / Movies / TV Series sections on
+the edit screen, TiviMate-modelled EPG settings (days to load, update
+interval, past days, update on app start, time offset, Update now, Clear
+guide, Last updated), in-app update repointed at `cartchai/plezy-tv`
+(`codemagic.yaml` now passes `--dart-define=ENABLE_UPDATE_CHECK=true`),
+clickable "No information available" hour blocks with catch-up where the
+channel supports it, version `2.25.2+159`. Detail: `IPTV_EPG_NOTES.md`.
+Honest limits: EPG cache is in-memory (update-on-start has no observable
+effect until the cache is persisted); the update flow is browser-download
+(no native PackageInstaller); real-provider EPG shape / timeshift UTC
+still unproven — needs Matt's phone.
 
 ## Change inventory by area (for repatching)
 
@@ -113,6 +130,29 @@ screen tests in `test/screens/iptv/`. Detail: `IPTV_FIXES2_NOTES.md`.
   Flutter 3.47.9, Java 17, Mac mini M2.
 - GitHub Actions workflows deleted (the PAT used for pushes lacks
   `workflow` scope, so Actions cannot be managed from the fork).
+- Build #6: build command passes `--dart-define=ENABLE_UPDATE_CHECK=true`
+  so the Settings → Updates section renders in shipped builds.
+
+### 4. Build #6 — EPG, Series fix, categories, EPG settings, update, hour blocks
+- New files: `lib/services/iptv/xmltv_parser.dart` (isolate-safe XMLTV
+  parse), `test/services/iptv/iptv_epg_test.dart`,
+  `test/screens/livetv/guide_tab_iptv_test.dart`,
+  `test/screens/settings/edit_iptv_connection_screen_test.dart`,
+  `test/screens/video_player/live_tv_catch_up_test.dart`.
+- Touched upstream files: `lib/screens/livetv/tabs/guide_tab.dart`
+  (lazy per-row EPG, loading line, hour placeholders),
+  `lib/models/livetv_program.dart` (`isPlaceholder`),
+  `lib/screens/livetv/program_details_sheet.dart` (catch-up from a block,
+  actions in a `Wrap`), `lib/screens/video_player/live_tv_session_args.dart`
+  + `parts/playback_start.dart` + `lib/utils/live_tv_player_navigation.dart`
+  (catch-up start epoch), `lib/screens/settings/iptv_settings_screen.dart`
+  (EPG section), `lib/services/settings_service.dart` (EPG prefs),
+  `lib/services/update_service.dart` + `lib/utils/update_dialog.dart`
+  (repointed at the fork, `.apk` asset pick), `lib/screens/settings/settings_screen.dart`
+  ("View releases on GitHub" tile).
+- Progress notes: `IPTV_EPG_NOTES.md` (also covers the honest limits:
+  in-memory EPG cache, browser-download update flow, unproven provider
+  details).
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

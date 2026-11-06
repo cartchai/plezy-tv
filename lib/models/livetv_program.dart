@@ -36,6 +36,13 @@ class LiveTvProgram {
   final String? liveDvrKey;
   final String? providerIdentifier;
 
+  /// Guide placeholder: a synthesized "No information available" hour
+  /// block for a channel (or gap) with no EPG data. It is a real tappable
+  /// program entry with no invented title, description or times beyond its
+  /// own slot — the grid renders it muted and the detail sheet offers only
+  /// Watch live / Catch-up for the slot. Never set by server parsing.
+  final bool isPlaceholder;
+
   LiveTvProgram({
     this.key,
     this.ratingKey,
@@ -62,6 +69,7 @@ class LiveTvProgram {
     this.serverName,
     this.liveDvrKey,
     this.providerIdentifier,
+    this.isPlaceholder = false,
   });
 
   factory LiveTvProgram.fromJson(Map<String, dynamic> json, {Map<String, dynamic>? mediaOverride}) {

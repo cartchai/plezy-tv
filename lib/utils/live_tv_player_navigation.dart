@@ -25,6 +25,8 @@ import '../services/playback_launch_observer.dart';
 /// [channels] is the full channel list for channel up/down navigation.
 /// [startPosition] pre-answers the "watch from start" prompt shown when the
 /// channel already has recorded history.
+/// [catchUpStartEpoch] starts the archive at an epoch second instead of the
+/// live edge (guide "No information" placeholders on catch-up channels).
 Future<void> navigateToLiveTv(
   BuildContext context, {
   required MultiServerProvider multiServer,
@@ -33,6 +35,7 @@ Future<void> navigateToLiveTv(
   PlaybackLaunchObserver? launchObserver,
   bool Function()? isLaunchCurrent,
   LiveTvStartPosition startPosition = LiveTvStartPosition.ask,
+  int? catchUpStartEpoch,
 }) async {
   if (!(isLaunchCurrent?.call() ?? true) || !(launchObserver?.isCurrent ?? true)) return;
   final serverInfo = liveTvServerInfoForChannel(multiServer, channel);
@@ -75,6 +78,7 @@ Future<void> navigateToLiveTv(
         channels: normalizedChannels,
         currentChannelIndex: currentChannelIndex,
         startPosition: startPosition,
+        catchUpStartEpoch: catchUpStartEpoch,
       ),
       launchObserver: launchObserver,
       isLaunchCurrent: isLaunchCurrent,

@@ -185,9 +185,10 @@ class XtreamApi {
   /// Short EPG for one stream (up to [limit] listings). Titles and
   /// descriptions arrive Base64-encoded; they are decoded here, falling
   /// back to the raw string when decoding fails.
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4}) async {
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
     final decoded = await _getJson(
       _playerApiUri(action: 'get_short_epg', extra: {'stream_id': streamId, 'limit': '$limit'}),
+      timeout: timeout ?? const Duration(seconds: 30),
     );
     if (decoded is! Map<String, dynamic>) return const [];
     final listings = decoded['epg_listings'];
@@ -254,14 +255,18 @@ dynamic _decodeCatalogJson(String body) {
   }
 }
 
+/// One malformed row must not discard a whole catalog: the real provider's
+/// 46k-row series list contains mistyped fields (e.g. a numeric `cover`),
+/// and the old `.map(X.fromJson)` parse threw the entire list away — Movies
+/// loaded while Series showed nothing. Each row parses independently now.
 List<XtreamLiveStream> _parseLiveStreams(String body) =>
-    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamLiveStream.fromJson).toList();
+    parseFlexibleJsonList(_decodeCatalogJson(body), XtreamLiveStream.fromJson);
 
 List<XtreamVodStream> _parseVodStreams(String body) =>
-    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamVodStream.fromJson).toList();
+    parseFlexibleJsonList(_decodeCatalogJson(body), XtreamVodStream.fromJson);
 
 List<XtreamSeries> _parseSeries(String body) =>
-    XtreamApi._asObjectList(_decodeCatalogJson(body)).map(XtreamSeries.fromJson).toList();
+    parseFlexibleJsonList(_decodeCatalogJson(body), XtreamSeries.fromJson);
 
 class XtreamCategory {
   final String id;

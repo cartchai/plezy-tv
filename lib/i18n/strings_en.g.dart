@@ -417,6 +417,18 @@ class Translations$update$en {
 
 	/// en: 'Failed to check for updates'
 	String get checkFailed => 'Failed to check for updates';
+
+	/// en: 'Download APK'
+	String get downloadApk => 'Download APK';
+
+	/// en: 'This release has no APK attached yet — open the release page for details.'
+	String get noApkAttached => 'This release has no APK attached yet — open the release page for details.';
+
+	/// en: 'Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.'
+	String get installApkHint => 'Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.';
+
+	/// en: 'What’s new'
+	String get releaseNotes => 'What’s new';
 }
 
 // Path: supporter
@@ -965,6 +977,9 @@ class Translations$settings$en {
 
 	/// en: 'Notify when an update is available at launch'
 	String get autoCheckUpdatesOnStartupDescription => 'Notify when an update is available at launch';
+
+	/// en: 'View releases on GitHub'
+	String get viewReleasesOnGitHub => 'View releases on GitHub';
 
 	/// en: 'Please enter a valid number'
 	String get validationErrorEnterNumber => 'Please enter a valid number';
@@ -3160,6 +3175,27 @@ class Translations$connections$en {
 
 	/// en: 'Hide all'
 	String get iptvFilterHideAll => 'Hide all';
+
+	/// en: 'Live TV'
+	String get iptvFilterLiveTv => 'Live TV';
+
+	/// en: 'Movies'
+	String get iptvFilterMovies => 'Movies';
+
+	/// en: 'TV Series'
+	String get iptvFilterSeries => 'TV Series';
+
+	/// en: 'Groups'
+	String get iptvFilterGroups => 'Groups';
+
+	/// en: '(one) {${n} category} (other) {${n} categories}'
+	String iptvFilterSectionCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} category',
+		other: '${n} categories',
+	);
+
+	/// en: '${off} of ${total} hidden'
+	String iptvFilterSectionOff({required Object off, required Object total}) => '${off} of ${total} hidden';
 }
 
 // Path: accountPreferences
@@ -3586,6 +3622,15 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2252 => [
+		'TV guide (EPG) now loads for IPTV channels',
+		'EPG settings: how many days to load, how often it updates, past days to keep',
+		'TV/Series library now loads — one bad row no longer kills the whole catalog',
+		'Categories split into Live TV, Movies and TV/Series — each opens and closes on its own',
+		'Channels with no guide data show tappable one-hour blocks saying No information available, with catch-up where the channel supports it',
+		'Check for updates above About — downloads new releases from GitHub and installs over the top',
+		'Subtle loading line under the guide while the EPG loads',
+	];
 	List<String> get changelog2251 => [
 		'PlezTV name throughout the app',
 		'Blue app icon',
@@ -3937,6 +3982,9 @@ class Translations$liveTv$en {
 
 	/// en: 'No program data available'
 	String get noPrograms => 'No program data available';
+
+	/// en: 'No information available'
+	String get noInformationAvailable => 'No information available';
 
 	/// en: 'Live stream failed'
 	String get liveStreamFailed => 'Live stream failed';
@@ -6322,6 +6370,90 @@ class Translations$iptv$en {
 
 	/// en: 'Decoder, external player and playback options'
 	String get playerSettingsDescription => 'Decoder, external player and playback options';
+
+	/// en: 'EPG / TV guide'
+	String get epgSection => 'EPG / TV guide';
+
+	/// en: 'Days to load'
+	String get epgDaysToLoad => 'Days to load';
+
+	/// en: 'How many days of guide to load ahead'
+	String get epgDaysToLoadDescription => 'How many days of guide to load ahead';
+
+	/// en: '(one) {${n} day} (other) {${n} days}'
+	String epgDaysCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} day',
+		other: '${n} days',
+	);
+
+	/// en: 'Update interval'
+	String get epgUpdateInterval => 'Update interval';
+
+	/// en: 'How often the guide refreshes'
+	String get epgUpdateIntervalDescription => 'How often the guide refreshes';
+
+	/// en: '(one) {Every ${n} hour} (other) {Every ${n} hours}'
+	String epgHoursCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: 'Every ${n} hour',
+		other: 'Every ${n} hours',
+	);
+
+	/// en: 'Manual only'
+	String get epgManualOnly => 'Manual only';
+
+	/// en: 'Past days to keep'
+	String get epgPastDays => 'Past days to keep';
+
+	/// en: 'Past guide days kept for catch-up scrolling'
+	String get epgPastDaysDescription => 'Past guide days kept for catch-up scrolling';
+
+	/// en: 'None'
+	String get epgPastDaysNone => 'None';
+
+	/// en: 'Update on app start'
+	String get epgUpdateOnStart => 'Update on app start';
+
+	/// en: 'Refresh the guide when the app starts'
+	String get epgUpdateOnStartDescription => 'Refresh the guide when the app starts';
+
+	/// en: 'Time offset'
+	String get epgTimeOffset => 'Time offset';
+
+	/// en: 'Shift guide times when listings are out by whole hours'
+	String get epgTimeOffsetDescription => 'Shift guide times when listings are out by whole hours';
+
+	/// en: 'No offset'
+	String get epgNoOffset => 'No offset';
+
+	/// en: '(one) {${n} minute} (other) {${n} minutes}'
+	String epgOffsetMinutes({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} minute',
+		other: '${n} minutes',
+	);
+
+	/// en: 'Update now'
+	String get epgUpdateNow => 'Update now';
+
+	/// en: 'Refresh the guide right away'
+	String get epgUpdateNowDescription => 'Refresh the guide right away';
+
+	/// en: 'Clear guide'
+	String get epgClearGuide => 'Clear guide';
+
+	/// en: 'Delete the downloaded guide data'
+	String get epgClearGuideDescription => 'Delete the downloaded guide data';
+
+	/// en: 'Last updated'
+	String get epgLastUpdated => 'Last updated';
+
+	/// en: 'Never'
+	String get epgNeverUpdated => 'Never';
+
+	/// en: 'Guide updated'
+	String get epgUpdated => 'Guide updated';
+
+	/// en: 'Guide cleared'
+	String get epgCleared => 'Guide cleared';
 }
 
 // Path: appIcon.names
@@ -8396,6 +8528,10 @@ extension on Translations {
 			'update.viewRelease' => 'View Release',
 			'update.latestVersion' => 'You are on the latest version',
 			'update.checkFailed' => 'Failed to check for updates',
+			'update.downloadApk' => 'Download APK',
+			'update.noApkAttached' => 'This release has no APK attached yet — open the release page for details.',
+			'update.installApkHint' => 'Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.',
+			'update.releaseNotes' => 'What’s new',
 			'supporter.title' => 'PlezTV Supporter',
 			'supporter.intro' => 'A one-time purchase that supports PlezTV\'s development and unlocks cosmetic extras:',
 			'supporter.presetThemes' => 'Preset themes',
@@ -8578,6 +8714,7 @@ extension on Translations {
 			'settings.checkForUpdates' => 'Check for Updates',
 			'settings.autoCheckUpdatesOnStartup' => 'Automatically check for updates on startup',
 			'settings.autoCheckUpdatesOnStartupDescription' => 'Notify when an update is available at launch',
+			'settings.viewReleasesOnGitHub' => 'View releases on GitHub',
 			'settings.validationErrorEnterNumber' => 'Please enter a valid number',
 			'settings.validationErrorDuration' => ({required Object min, required Object max, required Object unit}) => 'Duration must be between ${min} and ${max} ${unit}',
 			'settings.shortcutAlreadyAssigned' => ({required Object action}) => 'Shortcut already assigned to ${action}',
@@ -8768,13 +8905,13 @@ extension on Translations {
 			'themeEditor.colors' => 'Colors',
 			'themeEditor.preview' => 'Preview',
 			'themeEditor.slots.bg' => 'Background',
+			_ => null,
+		} ?? switch (path) {
 			'themeEditor.slots.surface' => 'Surface',
 			'themeEditor.slots.outline' => 'Outline',
 			'themeEditor.slots.text' => 'Text',
 			'themeEditor.slots.textMuted' => 'Secondary text',
 			'themeEditor.slots.accent' => 'Accent',
-			_ => null,
-		} ?? switch (path) {
 			'themeEditor.opacity' => 'Opacity',
 			'themeEditor.hexHint' => '#RRGGBB or #AARRGGBB',
 			'themeEditor.fromOtherThemes' => 'From other themes',
@@ -9282,13 +9419,13 @@ extension on Translations {
 			'profiles.profileNameHint' => 'e.g. Guests, Kids, Family Room',
 			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
 			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.continueButton' => 'Continue',
 			'profiles.pinsDontMatch' => 'PINs don\'t match',
 			'profiles.tokenIdentityMismatch' => 'The Plex profile token resolved to an unexpected server',
 			'connections.sectionTitle' => 'Connections',
 			'connections.addConnection' => 'Add connection',
-			_ => null,
-		} ?? switch (path) {
 			'connections.addConnectionSubtitleNoProfile' => 'Sign in with Plex or connect a Jellyfin or Emby server',
 			'connections.addConnectionSubtitleScoped' => ({required Object displayName}) => 'Add to ${displayName}: Plex, Jellyfin, Emby, or another profile connection',
 			'connections.sessionExpiredOne' => ({required Object name}) => 'Session expired for ${name}',
@@ -9305,6 +9442,12 @@ extension on Translations {
 			'connections.iptvFilterLoadFailed' => 'Could not load the categories. Check the connection and try again.',
 			'connections.iptvFilterShowAll' => 'Show all',
 			'connections.iptvFilterHideAll' => 'Hide all',
+			'connections.iptvFilterLiveTv' => 'Live TV',
+			'connections.iptvFilterMovies' => 'Movies',
+			'connections.iptvFilterSeries' => 'TV Series',
+			'connections.iptvFilterGroups' => 'Groups',
+			'connections.iptvFilterSectionCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} category', other: '${n} categories', ), 
+			'connections.iptvFilterSectionOff' => ({required Object off, required Object total}) => '${off} of ${total} hidden',
 			'accountPreferences.sectionTitle' => 'Account preferences',
 			'accountPreferences.hubSubtitleSingle' => ({required Object account}) => 'Audio, subtitle and library options saved on ${account}',
 			'accountPreferences.hubSubtitleMultiple' => ({required Object count}) => 'Audio, subtitle and library options saved on ${count} accounts',
@@ -9529,6 +9672,13 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2252.0' => 'TV guide (EPG) now loads for IPTV channels',
+			'about.changelog2252.1' => 'EPG settings: how many days to load, how often it updates, past days to keep',
+			'about.changelog2252.2' => 'TV/Series library now loads — one bad row no longer kills the whole catalog',
+			'about.changelog2252.3' => 'Categories split into Live TV, Movies and TV/Series — each opens and closes on its own',
+			'about.changelog2252.4' => 'Channels with no guide data show tappable one-hour blocks saying No information available, with catch-up where the channel supports it',
+			'about.changelog2252.5' => 'Check for updates above About — downloads new releases from GitHub and installs over the top',
+			'about.changelog2252.6' => 'Subtle loading line under the guide while the EPG loads',
 			'about.changelog2251.0' => 'PlezTV name throughout the app',
 			'about.changelog2251.1' => 'Blue app icon',
 			'about.changelog2251.2' => 'Add IPTV on first start — no Plex needed',
@@ -9742,6 +9892,7 @@ extension on Translations {
 			'liveTv.serverUnavailable' => 'Live TV server is not available.',
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
+			'liveTv.noInformationAvailable' => 'No information available',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
 			'liveTv.unknownProgram' => 'Unknown Program',
 			'liveTv.unknownHub' => 'Unknown',
@@ -9782,6 +9933,8 @@ extension on Translations {
 			'liveTv.recordEpisode' => 'Record Episode',
 			'liveTv.recordSeries' => 'Record Series',
 			'liveTv.recordOptions' => 'Record Options',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.saveTo' => 'Save to',
 			'liveTv.recordings' => 'Recordings',
 			'liveTv.scheduledRecordings' => 'Scheduled',
@@ -9801,8 +9954,6 @@ extension on Translations {
 			'liveTv.recordingTargetMissing' => 'Couldn\'t determine recording library',
 			'liveTv.recordNotAvailable' => 'Recording not available for this program',
 			'liveTv.recordingCancelled' => 'Recording canceled',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.recordingRuleDeleted' => 'Recording rule deleted',
 			'liveTv.processRecordingRules' => 'Re-evaluate rules',
 			'liveTv.recordingInProgress' => 'Recording now',
@@ -10296,6 +10447,8 @@ extension on Translations {
 			'performanceOverlay.rawDecoder' => 'Raw Decoder',
 			'performanceOverlay.tunneling' => 'Tunneling',
 			'performanceOverlay.passthrough' => 'Passthrough',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.aspect' => 'Aspect',
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',
@@ -10315,8 +10468,6 @@ extension on Translations {
 			'performanceOverlay.primaries' => 'Primaries',
 			'performanceOverlay.transfer' => 'Transfer',
 			'performanceOverlay.renderFps' => 'Render FPS',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.displayFps' => 'Display FPS',
 			'performanceOverlay.avSync' => 'A/V Sync',
 			'performanceOverlay.dropped' => 'Dropped',
@@ -10649,6 +10800,31 @@ extension on Translations {
 			'iptv.player' => 'Player',
 			'iptv.playerSettings' => 'Player settings',
 			'iptv.playerSettingsDescription' => 'Decoder, external player and playback options',
+			'iptv.epgSection' => 'EPG / TV guide',
+			'iptv.epgDaysToLoad' => 'Days to load',
+			'iptv.epgDaysToLoadDescription' => 'How many days of guide to load ahead',
+			'iptv.epgDaysCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} day', other: '${n} days', ), 
+			'iptv.epgUpdateInterval' => 'Update interval',
+			'iptv.epgUpdateIntervalDescription' => 'How often the guide refreshes',
+			'iptv.epgHoursCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Every ${n} hour', other: 'Every ${n} hours', ), 
+			'iptv.epgManualOnly' => 'Manual only',
+			'iptv.epgPastDays' => 'Past days to keep',
+			'iptv.epgPastDaysDescription' => 'Past guide days kept for catch-up scrolling',
+			'iptv.epgPastDaysNone' => 'None',
+			'iptv.epgUpdateOnStart' => 'Update on app start',
+			'iptv.epgUpdateOnStartDescription' => 'Refresh the guide when the app starts',
+			'iptv.epgTimeOffset' => 'Time offset',
+			'iptv.epgTimeOffsetDescription' => 'Shift guide times when listings are out by whole hours',
+			'iptv.epgNoOffset' => 'No offset',
+			'iptv.epgOffsetMinutes' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} minute', other: '${n} minutes', ), 
+			'iptv.epgUpdateNow' => 'Update now',
+			'iptv.epgUpdateNowDescription' => 'Refresh the guide right away',
+			'iptv.epgClearGuide' => 'Clear guide',
+			'iptv.epgClearGuideDescription' => 'Delete the downloaded guide data',
+			'iptv.epgLastUpdated' => 'Last updated',
+			'iptv.epgNeverUpdated' => 'Never',
+			'iptv.epgUpdated' => 'Guide updated',
+			'iptv.epgCleared' => 'Guide cleared',
 			_ => null,
 		};
 	}

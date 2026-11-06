@@ -1,3 +1,4 @@
+import '../../models/livetv_capture_buffer.dart';
 import '../../models/livetv_channel.dart';
 
 /// Launch parameters for a live TV session — pure UX data. A
@@ -21,6 +22,26 @@ enum LiveTvStartPosition {
   live,
 }
 
+/// Offset (seconds from the session's capture-buffer origin) that starts
+/// playback at [catchUpStartEpoch] — the block start of a "No information"
+/// guide placeholder — or null when catch-up does not apply: no start was
+/// requested, the session has no archive buffer, or the start is at/after
+/// the live edge. The offset is clamped into the archive window, so a start
+/// older than the archive begins at the oldest available point instead of
+/// failing. Pure function, unit-tested.
+int? liveTvCatchUpOffsetSeconds({
+  required int? catchUpStartEpoch,
+  required CaptureBuffer? captureBuffer,
+  required int nowEpoch,
+}) {
+  if (catchUpStartEpoch == null || captureBuffer == null) return null;
+  var offset = catchUpStartEpoch - nowEpoch;
+  if (offset >= 0) return null;
+  final minOffset = captureBuffer.seekStartSeconds.round();
+  if (offset < minOffset) offset = minOffset;
+  return offset;
+}
+
 class LiveTvSessionArgs {
   /// The channel to start on.
   final LiveTvChannel channel;
@@ -35,10 +56,17 @@ class LiveTvSessionArgs {
   /// the player always ask.
   final LiveTvStartPosition startPosition;
 
+  /// Catch-up start (epoch seconds) for a "No information" guide
+  /// placeholder: the player opens the archive at this time instead of the
+  /// live edge. Null for a normal tune. Only set for channels that offer
+  /// catch-up; the player ignores it when the session cannot time-shift.
+  final int? catchUpStartEpoch;
+
   const LiveTvSessionArgs({
     required this.channel,
     this.channels,
     this.currentChannelIndex,
     this.startPosition = LiveTvStartPosition.ask,
+    this.catchUpStartEpoch,
   });
 }

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:auto_updater/auto_updater.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -11,11 +9,30 @@ import 'base_shared_preferences_service.dart';
 /// Service to check for new versions on GitHub
 /// Only enabled when ENABLE_UPDATE_CHECK build flag is set
 ///
-/// On macOS (non-Homebrew) and installed Windows: delegates to Sparkle/WinSparkle
-/// via auto_updater for native update dialogs and in-app installs.
-/// On all other platforms: falls back to GitHub API check + browser link dialog.
+/// Upstream Plezy delegates to Sparkle/WinSparkle on desktop; the PlezTV
+/// fork does NOT (no fork appcast exists — see the notes below), so every
+/// platform uses the GitHub API check + browser link dialog.
+///
+/// PlezTV fork notes (build #6):
+/// - The check points at the FORK repo (cartchai/plezy-tv), not upstream
+///   edde746/plezy — an update must never offer an upstream Plezy build.
+/// - The native desktop updater is disabled for the fork: there is no fork
+///   appcast yet, and the upstream feed would offer upstream builds. Until a
+///   fork appcast exists, every platform uses the GitHub API + browser flow.
+/// - On Android the flow is: check -> dialog with version + changelog ->
+///   "Download APK" opens the release's .apk asset in the browser -> the
+///   user opens the download and the system installer puts it over the
+///   current install. All current builds are debug-signed with the same
+///   debug key, so the over-the-top update keeps its signature. Switching
+///   to release signing later WILL break this path (signature mismatch) and
+///   must be handled then, not now.
 class UpdateService {
-  static const String _githubRepo = 'edde746/plezy';
+  static const String _githubRepo = 'cartchai/plezy-tv';
+
+  /// Public releases page, linked from the Settings Updates section.
+  static const String releasesUrl = 'https://github.com/cartchai/plezy-tv/releases';
+
+  /// Upstream appcast — deliberately NOT used by the fork (see class doc).
   static const String _feedUrl = 'https://cdn.jsdelivr.net/gh/edde746/plezy@appcast/appcast.xml';
 
   static const String _keySkippedVersion = 'update_skipped_version';
@@ -39,13 +56,10 @@ class UpdateService {
   static bool get isUpdateCheckAvailable => isUpdateCheckEnabled && !PlatformDetector.isPackagedInstall();
 
   /// Whether the native auto_updater (Sparkle/WinSparkle) should be used.
-  /// True on macOS (non-Homebrew) and installed Windows (has uninstaller).
-  static bool get useNativeUpdater {
-    if (!isUpdateCheckAvailable) return false;
-    if (Platform.isMacOS) return !_isHomebrewInstall();
-    if (Platform.isWindows) return _isInstalledApp() && !_isWingetInstall();
-    return false;
-  }
+  /// Fork: always false — there is no PlezTV appcast, and the upstream feed
+  /// would offer upstream Plezy builds to a PlezTV install. Every platform
+  /// uses the GitHub API + browser flow until a fork appcast exists.
+  static bool get useNativeUpdater => false;
 
   /// Initialize the native auto_updater (Sparkle/WinSparkle).
   /// Call once at startup if [useNativeUpdater] is true.
@@ -72,27 +86,6 @@ class UpdateService {
     } catch (error, stackTrace) {
       appLogger.e('Native update check failed', error: error, stackTrace: stackTrace);
     }
-  }
-
-  /// Check if the macOS app was installed via Homebrew.
-  /// Homebrew casks live under /opt/homebrew/Caskroom/ or /usr/local/Caskroom/.
-  static bool _isHomebrewInstall() {
-    final execPath = Platform.resolvedExecutable;
-    return execPath.contains('/Caskroom/') || execPath.contains('/homebrew/');
-  }
-
-  /// Check if the Windows app was installed via winget.
-  /// The Inno Setup installer writes a .winget marker file when invoked with /WINGET=1.
-  static bool _isWingetInstall() {
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-    return File('$exeDir\\.winget').existsSync();
-  }
-
-  /// Check if the Windows app is an installed copy (not portable).
-  /// The Inno Setup installer places unins000.exe next to the executable.
-  static bool _isInstalledApp() {
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-    return File('$exeDir\\unins000.exe').existsSync();
   }
 
   static Future<void> skipVersion(String version) async {
@@ -162,10 +155,16 @@ class UpdateService {
         throw StateError('Release check returned HTTP ${response.statusCode}');
       }
       final data = response.data;
-      final latestVersion = data['tag_name'] as String;
+      final rawTag = data['tag_name'] as String?;
 
-      // Remove 'v' prefix if present
-      final cleanVersion = latestVersion.startsWith('v') ? latestVersion.substring(1) : latestVersion;
+      // Tags may be "v2.25.2", "2.25.2" or "PlezTV v2.25.2" — take the
+      // first numeric x.y[.z] run. A tag with no version in it is not an
+      // update, not a crash.
+      final cleanVersion = rawTag == null ? null : _extractVersion(rawTag);
+      if (cleanVersion == null) {
+        appLogger.w('Release check: tag "$rawTag" carries no version number');
+        return null;
+      }
 
       final hasUpdate = _isNewerVersion(cleanVersion, currentVersion);
 
@@ -180,10 +179,17 @@ class UpdateService {
           'hasUpdate': true,
           'currentVersion': currentVersion,
           'latestVersion': cleanVersion,
-          'releaseUrl': data['html_url'] as String,
+          'releaseUrl': data['html_url'] as String? ?? releasesUrl,
           'releaseName': data['name'] as String? ?? 'Version $cleanVersion',
           'releaseNotes': data['body'] as String? ?? '',
-          'publishedAt': data['published_at'] as String,
+          'publishedAt': data['published_at'] as String? ?? '',
+          // The .apk asset is how Android installs over the top. GitHub
+          // stores a spaced asset name with dots (PlezTV.v2.25.2.apk), so
+          // match on the .apk suffix, never an exact filename. A release
+          // with no .apk asset (e.g. v2.25.1 shipped source-only) still
+          // reports the update — the dialog says plainly there is no APK
+          // attached yet instead of offering a dead download.
+          ..._apkAsset(data['assets']),
         };
       }
     } catch (error, stackTrace) {
@@ -208,12 +214,49 @@ class UpdateService {
     );
   }
 
+  /// Test-only override for the manual check, so widget tests can drive the
+  /// up-to-date and update-available paths without the network. Same pattern
+  /// as [debugPerformUpdateCheck] below and the *ForTesting seams elsewhere
+  /// in the codebase. Never set in production code.
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> Function()? debugCheckForUpdatesOverride;
+
   /// Check for updates on GitHub (manual check, ignores cooldown)
   /// Returns a map with update info, or null when there is no update (or the
   /// release is skipped). Throws when the check itself fails, so the caller
   /// can say so instead of reporting the latest version.
   static Future<Map<String, dynamic>?> checkForUpdates() {
+    final override = debugCheckForUpdatesOverride;
+    if (override != null) return override();
     return _performUpdateCheck(respectCooldown: false, throwOnFailure: true);
+  }
+
+  /// First numeric `x.y` or `x.y.z` run inside a release tag, or null when
+  /// the tag carries no version ("v2.25.2", "2.25.2", "PlezTV v2.25.2" all
+  /// yield "2.25.2"; "nightly-build" yields null).
+  static String? _extractVersion(String tag) {
+    final match = RegExp(r'\d+\.\d+(?:\.\d+)?').firstMatch(tag);
+    return match?.group(0);
+  }
+
+  /// The release's .apk asset, matched on the `.apk` suffix only (GitHub
+  /// rewrites spaces to dots in stored asset names). Returns
+  /// `{'apkAssetUrl': ..., 'apkAssetName': ...}` or the same keys with null
+  /// values when the release carries no .apk asset.
+  static Map<String, Object?> _apkAsset(Object? assets) {
+    String? url;
+    String? name;
+    if (assets is List) {
+      for (final asset in assets) {
+        if (asset is! Map) continue;
+        final assetName = asset['name'] as String?;
+        if (assetName == null || !assetName.toLowerCase().endsWith('.apk')) continue;
+        url = asset['browser_download_url'] as String?;
+        name = assetName;
+        break;
+      }
+    }
+    return {'apkAssetUrl': url, 'apkAssetName': name};
   }
 
   /// Check for updates on startup (respects cooldown and skipped versions)

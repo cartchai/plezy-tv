@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -243,6 +245,61 @@ https://example.com/cnn.m3u8
       expect(await client.searchItems('nn'), isEmpty);
       expect((await client.searchItems('bbc')).map((i) => i.title), ['BBC One']);
       client.close();
+    });
+  });
+  group('Catalog parsing tolerates malformed rows', () {
+    // Regression test for "Series doesn't load": the real provider's
+    // get_series payload contains rows with mistyped fields (e.g. a numeric
+    // `cover`). The old `.map(X.fromJson)` parse threw the whole 46k-row
+    // list away on the first bad row, so Movies loaded and Series showed
+    // nothing. Each row must parse independently now.
+    XtreamApi apiReturning(String body) => XtreamApi(
+      serverUrl: 'https://panel.example.com:8080',
+      username: 'user',
+      password: 'pass',
+      httpClient: MockClient((_) async => http.Response(body, 200)),
+    );
+
+    test('getSeries drops a mistyped row and keeps its siblings', () async {
+      final api = apiReturning(
+        jsonEncode([
+          {'series_id': 10, 'name': 'Alpha Show', 'category_id': '1'},
+          {'series_id': 11, 'name': 'Bad Cover', 'cover': 12345, 'category_id': '1'},
+          {'series_id': 12, 'name': 'Beta Show', 'category_id': '1'},
+        ]),
+      );
+      addTearDown(api.close);
+
+      final series = await api.getSeries();
+      expect(series.map((s) => s.name), ['Alpha Show', 'Beta Show']);
+    });
+
+    test('getVodStreams drops a mistyped row and keeps its siblings', () async {
+      final api = apiReturning(
+        jsonEncode([
+          {'stream_id': 1, 'name': 'Alpha Movie', 'container_extension': 'mp4'},
+          {'stream_id': 2, 'name': 'Bad Cover', 'cover': 7},
+          {'stream_id': 3, 'name': 'Beta Movie', 'container_extension': 'mkv'},
+        ]),
+      );
+      addTearDown(api.close);
+
+      final streams = await api.getVodStreams();
+      expect(streams.map((s) => s.name), ['Alpha Movie', 'Beta Movie']);
+    });
+
+    test('getLiveStreams drops a mistyped row and keeps its siblings', () async {
+      final api = apiReturning(
+        jsonEncode([
+          {'stream_id': 100, 'name': 'Good Channel'},
+          {'stream_id': 101, 'name': 'Bad Icon', 'stream_icon': 42},
+          {'stream_id': 102, 'name': 'Other Channel'},
+        ]),
+      );
+      addTearDown(api.close);
+
+      final streams = await api.getLiveStreams();
+      expect(streams.map((s) => s.name), ['Good Channel', 'Other Channel']);
     });
   });
 }

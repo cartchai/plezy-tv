@@ -20,15 +20,18 @@ import '../../../models/livetv_channel.dart';
 import '../../../models/livetv_program.dart';
 import '../../../models/media_grab_operation.dart';
 import '../../../providers/multi_server_provider.dart';
+import '../../../media/iptv_live_tv.dart';
 import '../../../media/media_server_client.dart';
 import '../../../theme/mono_tokens.dart';
 import '../../../utils/app_logger.dart';
 import '../live_tv_actions_mixin.dart';
 import '../live_tv_refresh_mixin.dart';
 import '../live_tv_server_iteration.dart';
+import '../../video_player/live_tv_session_args.dart';
 import '../../../utils/formatters.dart';
 import '../../../utils/live_tv_grouping.dart';
 import '../../../utils/live_tv_matching.dart';
+import '../../../utils/live_tv_player_navigation.dart';
 import '../../../utils/platform_detector.dart';
 import '../../../utils/tone_mapped_logo_image.dart';
 import '../../../widgets/app_icon.dart';
@@ -147,6 +150,24 @@ class GuideTabState extends State<GuideTab>
   /// a reset would restore the unmount (and D-pad focus loss) this flag fixes.
   bool _hasLoadedOnce = false;
   int _programLoadGeneration = 0;
+
+  // IPTV EPG, loaded lazily per visible channel (Tasks A/B/G). The
+  // server-wide fetchSchedule cannot name the channels the guide is showing,
+  // and one call per channel across a 55k-row catalog is not an option — so
+  // each visible row triggers one cached fetch for its own channel through
+  // [IptvLiveTvSupport.fetchEpgForChannel]. State is keyed by channel scope
+  // key and reset whenever the guide window changes or the EPG cache is
+  // busted (Update now / Clear guide bumps the support's epgVersion).
+  final Set<String> _iptvEpgInFlight = {};
+  final Set<String> _iptvEpgLoaded = {};
+  final Set<String> _iptvEpgFailed = {};
+  final Map<String, int> _iptvEpgVersionByServer = {};
+
+  /// Merged per-channel program lists (real programs + "No information"
+  /// hour placeholders). Cached so focus tracking — which compares programs
+  /// by identity — sees stable objects across builds; cleared whenever the
+  /// underlying programs or the window change.
+  final Map<String, List<LiveTvProgram>> _mergedProgramsCache = {};
 
   late DateTime _gridStart;
   late DateTime _gridEnd;
@@ -341,6 +362,7 @@ class GuideTabState extends State<GuideTab>
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.channels, widget.channels)) {
       _programsByChannelScope = _indexProgramsByChannel(_programs, widget.channels);
+      _mergedProgramsCache.clear();
     }
     if (widget.channels.isNotEmpty && _gridChannelIndex >= widget.channels.length) {
       _gridChannelIndex = widget.channels.length - 1;
@@ -460,6 +482,10 @@ class GuideTabState extends State<GuideTab>
 
   Future<void> _loadPrograms() async {
     if (!mounted) return;
+    // A window change (or refresh) invalidates the per-channel IPTV EPG
+    // state; visible rows re-fetch from the support's cache (no network
+    // while the settings window still covers the new grid window).
+    _resetIptvEpgState();
     final loadGeneration = ++_programLoadGeneration;
     final requestGridStart = _gridStart;
     final requestGridEnd = _gridEnd;
@@ -510,6 +536,9 @@ class GuideTabState extends State<GuideTab>
         _recordingOverrides = const {};
         _isLoading = false;
         _hasLoadedOnce = true;
+        // The server-wide index replaced per-channel lists; merged
+        // placeholder lists built from the old index are stale.
+        _mergedProgramsCache.clear();
         // Focus tracking compares by identity, so a reload orphans the
         // focused program — re-resolve it against the fresh list.
         if (_focusZone == _GuideZone.grid && _gridColumn == 1 && _focusedProgram != null) {
@@ -752,7 +781,215 @@ class GuideTabState extends State<GuideTab>
   }
 
   List<LiveTvProgram> _getProgramsForChannel(LiveTvChannel channel) {
-    return _programsByChannelScope[liveTvChannelScopeKey(channel)] ?? const [];
+    final scopeKey = liveTvChannelScopeKey(channel);
+    final cached = _mergedProgramsCache[scopeKey];
+    if (cached != null) return cached;
+    final real = _programsByChannelScope[scopeKey] ?? const <LiveTvProgram>[];
+    // Hour placeholders are an IPTV concept (missing guide data). A
+    // Plex/Jellyfin/Emby row with no programs is genuinely empty — it keeps
+    // the old behaviour (D-pad down focuses the channel cell, the row shows
+    // "No program data available") and must never gain placeholders.
+    final merged = _iptvSupportFor(channel) != null && _isChannelEpgReady(channel)
+        ? _withHourPlaceholders(channel, real)
+        : real;
+    _mergedProgramsCache[scopeKey] = merged;
+    return merged;
+  }
+
+  /// Whether this channel's EPG load has finished (with data or without),
+  /// so the row may render hour placeholders instead of a loading state.
+  /// Non-IPTV channels are ready once the server-wide load completed;
+  /// IPTV channels are ready only once their own per-channel fetch finished
+  /// (loaded or failed) — never while it is still in flight.
+  bool _isChannelEpgReady(LiveTvChannel channel) {
+    if (!_hasLoadedOnce) return false;
+    if (_iptvSupportFor(channel) == null) return true;
+    final scopeKey = liveTvChannelScopeKey(channel);
+    return _iptvEpgLoaded.contains(scopeKey) || _iptvEpgFailed.contains(scopeKey);
+  }
+
+  /// The IPTV live-TV support for [channel]'s server, or null when the
+  /// channel is not served by an IPTV connection.
+  IptvLiveTvSupport? _iptvSupportFor(LiveTvChannel channel) {
+    final serverId = channel.serverId;
+    if (serverId == null) return null;
+    final client = context.read<MultiServerProvider>().getClientForServer(ServerId(serverId));
+    final liveTv = client?.liveTv;
+    return liveTv is IptvLiveTvSupport ? liveTv : null;
+  }
+
+  /// Fill the guide window's uncovered hours with clickable "No information
+  /// available" hour blocks (Task G). Real programs are kept as-is; every
+  /// hour-aligned stretch the real programs do not cover becomes one block
+  /// per clock hour (partial hours at the window edges are clipped to the
+  /// window). A channel with no EPG at all gets one block per hour of the
+  /// whole window instead of dead empty space.
+  List<LiveTvProgram> _withHourPlaceholders(LiveTvChannel channel, List<LiveTvProgram> real) {
+    final gridStartEpoch = _gridStart.millisecondsSinceEpoch ~/ 1000;
+    final gridEndEpoch = _gridEnd.millisecondsSinceEpoch ~/ 1000;
+    if (gridEndEpoch <= gridStartEpoch) return real;
+
+    // Covered intervals, clipped to the window and merged.
+    final covered = <(int, int)>[];
+    for (final program in real) {
+      final begin = (program.beginsAt ?? gridStartEpoch).clamp(gridStartEpoch, gridEndEpoch);
+      final end = (program.endsAt ?? gridEndEpoch).clamp(gridStartEpoch, gridEndEpoch);
+      if (end > begin) covered.add((begin, end));
+    }
+    covered.sort((a, b) => a.$1.compareTo(b.$1));
+    final mergedCovered = <(int, int)>[];
+    for (final interval in covered) {
+      if (mergedCovered.isNotEmpty && interval.$1 <= mergedCovered.last.$2) {
+        final last = mergedCovered.removeLast();
+        mergedCovered.add((last.$1, interval.$2 > last.$2 ? interval.$2 : last.$2));
+      } else {
+        mergedCovered.add(interval);
+      }
+    }
+
+    final placeholders = <LiveTvProgram>[];
+    // Walk clock hours in local time; the first/last partial hours are
+    // clipped to the window edge by the loop bounds.
+    var hourStart = DateTime(_gridStart.year, _gridStart.month, _gridStart.day, _gridStart.hour);
+    var cursor = gridStartEpoch;
+    while (cursor < gridEndEpoch) {
+      final nextHour = hourStart.add(const Duration(hours: 1)).millisecondsSinceEpoch ~/ 1000;
+      final blockEnd = nextHour < gridEndEpoch ? nextHour : gridEndEpoch;
+      _addPlaceholdersForGap(channel, cursor, blockEnd, mergedCovered, placeholders);
+      cursor = blockEnd;
+      hourStart = hourStart.add(const Duration(hours: 1));
+    }
+
+    if (placeholders.isEmpty) return real;
+    return [...real, ...placeholders]..sort((a, b) => (a.beginsAt ?? 0).compareTo(b.beginsAt ?? 0));
+  }
+
+  /// Add placeholder blocks for the uncovered parts of [start, end).
+  void _addPlaceholdersForGap(
+    LiveTvChannel channel,
+    int start,
+    int end,
+    List<(int, int)> covered,
+    List<LiveTvProgram> out,
+  ) {
+    var cursor = start;
+    for (final (coverStart, coverEnd) in covered) {
+      if (coverEnd <= cursor) continue;
+      if (coverStart >= end) break;
+      if (coverStart > cursor) out.add(_hourPlaceholder(channel, cursor, coverStart));
+      if (coverEnd > cursor) cursor = coverEnd;
+      if (cursor >= end) return;
+    }
+    if (cursor < end) out.add(_hourPlaceholder(channel, cursor, end));
+  }
+
+  /// One "No information available" block. It is a real program entry (same
+  /// tap target, same detail sheet) with no invented title, description or
+  /// times beyond its own hour slot — and it is marked [LiveTvProgram.isPlaceholder]
+  /// so the grid renders it muted and the sheet offers only the actions
+  /// that make sense for the slot.
+  LiveTvProgram _hourPlaceholder(LiveTvChannel channel, int beginsAt, int endsAt) {
+    return LiveTvProgram(
+      key: 'no-info:${channel.key}:$beginsAt',
+      title: t.liveTv.noInformationAvailable,
+      beginsAt: beginsAt,
+      endsAt: endsAt,
+      channelIdentifier: channel.key,
+      serverId: channel.serverId,
+      serverName: channel.serverName,
+      isPlaceholder: true,
+    );
+  }
+
+  /// Start the lazy per-channel EPG fetch for [channel] when it is an IPTV
+  /// channel whose guide has not been loaded (or failed) for this window.
+  /// Called from the row builder, so only rows the grid actually builds —
+  /// the visible ones plus cache extent — ever fetch. A fetch in flight is
+  /// never duplicated, and a completed fetch merges its programs into the
+  /// indexed grid state so rows, focus and search all see them.
+  void _ensureIptvEpg(LiveTvChannel channel) {
+    final support = _iptvSupportFor(channel);
+    if (support == null) return;
+    final scopeKey = liveTvChannelScopeKey(channel);
+    final serverId = channel.serverId;
+    // Update now / Clear guide bumps the support version: drop this
+    // server's per-channel state so visible rows re-fetch. In-flight
+    // fetches are left alone — their completions clean themselves up.
+    if (serverId != null && _iptvEpgVersionByServer[serverId] != support.epgVersion) {
+      _iptvEpgVersionByServer[serverId] = support.epgVersion;
+      _iptvEpgLoaded.clear();
+      _iptvEpgFailed.clear();
+      _mergedProgramsCache.clear();
+    }
+    if (_iptvEpgLoaded.contains(scopeKey) || _iptvEpgInFlight.contains(scopeKey)) return;
+    // A failed channel stays failed for this window (its row shows hour
+    // placeholders); a window change or cache bust clears the failure.
+    if (_iptvEpgFailed.contains(scopeKey)) return;
+
+    _iptvEpgInFlight.add(scopeKey);
+    // The row build that triggered this runs before the next frame; a
+    // post-frame setState surfaces the loading indicator while the fetch
+    // is in flight (a setState here would throw: build in progress).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() {});
+    });
+
+    final requestStart = _gridStart;
+    final requestEnd = _gridEnd;
+    unawaited(
+      support
+          .fetchEpgForChannel(channel.key, from: requestStart, to: requestEnd)
+          .then((programs) {
+            if (!mounted) return;
+            // A window change superseded this fetch; its programs belong to
+            // the old window and must not land in the new grid — but the
+            // in-flight entry must still be cleared, or the channel would
+            // never fetch again.
+            final superseded = _gridStart != requestStart || _gridEnd != requestEnd;
+            setState(() {
+              _iptvEpgInFlight.remove(scopeKey);
+              if (superseded) return;
+              _iptvEpgLoaded.add(scopeKey);
+              _programsByChannelScope = {
+                ..._programsByChannelScope,
+                scopeKey: programs,
+              };
+              // Drop this channel's previous EPG programs from the flat
+              // list (same keys, stale window) before merging the fresh ones.
+              _programs = [
+                ..._programs.where(
+                  (p) => !(p.channelIdentifier == channel.key && (p.key?.startsWith('epg:') ?? false)),
+                ),
+                ...programs,
+              ];
+              _mergedProgramsCache.remove(scopeKey);
+            });
+          })
+          .catchError((Object _) {
+            if (!mounted) return;
+            setState(() {
+              _iptvEpgInFlight.remove(scopeKey);
+              // Fail open: the row renders hour placeholders for this
+              // window instead of retrying in a loop.
+              _iptvEpgFailed.add(scopeKey);
+              _mergedProgramsCache.remove(scopeKey);
+            });
+          }),
+    );
+  }
+
+  /// True while any visible IPTV channel's EPG is still loading — drives
+  /// the subtle header loading indicator (Task B).
+  bool get _isIptvEpgLoading => _iptvEpgInFlight.isNotEmpty;
+
+  /// Reset per-channel IPTV EPG state (window change or full reload).
+  /// In-flight fetches are NOT cleared: their completions remove
+  /// themselves, and the setState they trigger restarts the fetch for the
+  /// new window.
+  void _resetIptvEpgState() {
+    _iptvEpgLoaded.clear();
+    _iptvEpgFailed.clear();
+    _mergedProgramsCache.clear();
   }
 
   double _totalGridWidth() {
@@ -1169,6 +1406,16 @@ class GuideTabState extends State<GuideTab>
     return Column(
       children: [
         _buildTimeNavigation(theme),
+        // Subtle EPG loading indicator (Task B): a thin bar under the time
+        // navigation, visible only while a visible IPTV channel's guide is
+        // still loading. It never takes over the screen or blocks
+        // interaction, and Plex/Jellyfin/Emby loads keep their existing
+        // spinner/overlay behaviour unchanged.
+        if (_isIptvEpgLoading)
+          const SizedBox(
+            height: 3,
+            child: LinearProgressIndicator(minHeight: 3),
+          ),
         Expanded(
           child: ListenableBuilder(
             listenable: _gridHorizontalController,
@@ -1627,7 +1874,16 @@ class GuideTabState extends State<GuideTab>
     ThemeData theme, {
     required int channelIndex,
   }) {
+    // Visible rows drive the lazy IPTV EPG fetch for their own channel.
+    _ensureIptvEpg(channel);
     if (programs.isEmpty) {
+      // An IPTV row is only empty while its EPG is still loading: a ready
+      // IPTV channel always has at least one hour placeholder (Task G).
+      // The row stays blank — the thin header indicator (Task B) is the
+      // loading signal, not a "no data" message for a load still in flight.
+      // A Plex/Jellyfin/Emby row with genuinely no programs keeps the old
+      // "No program data available" bar.
+      final iptvLoading = _iptvSupportFor(channel) != null && !_isChannelEpgReady(channel);
       final tk = tokens(context);
       return SizedBox(
         height: _rowHeight,
@@ -1636,9 +1892,14 @@ class GuideTabState extends State<GuideTab>
           child: Material(
             color: Color.alphaBlend(tk.surface.withValues(alpha: 0.5), tk.bg),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(tk.radiusXs)),
-            child: Center(
-              child: Text(t.liveTv.noPrograms, style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted)),
-            ),
+            child: iptvLoading
+                ? null
+                : Center(
+                    child: Text(
+                      t.liveTv.noPrograms,
+                      style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted),
+                    ),
+                  ),
           ),
         ),
       );
@@ -1728,6 +1989,14 @@ class GuideTabState extends State<GuideTab>
           fillColor = theme.colorScheme.primary;
           titleColor = theme.colorScheme.onPrimary;
           subtitleColor = theme.colorScheme.onPrimary.withValues(alpha: 0.7);
+        } else if (program.isPlaceholder) {
+          // "No information available" hour block: deliberately muted and
+          // distinct from a real program — it carries no invented content.
+          // Focus still inverts it (branch above) so D-pad users can land
+          // on it and open its detail sheet.
+          fillColor = Color.alphaBlend(tk.surface.withValues(alpha: 0.3), tk.bg);
+          titleColor = tk.text.withValues(alpha: 0.45);
+          subtitleColor = tk.text.withValues(alpha: 0.3);
         } else if (isPast) {
           fillColor = Color.alphaBlend(tk.surface.withValues(alpha: 0.5), tk.bg);
           titleColor = tk.text.withValues(alpha: 0.5);
@@ -1779,7 +2048,11 @@ class GuideTabState extends State<GuideTab>
                         Expanded(
                           child: Text(
                             program.grandparentTitle ?? program.title,
-                            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: .w600, color: titleColor),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: .w600,
+                              color: titleColor,
+                              fontStyle: program.isPlaceholder ? FontStyle.italic : FontStyle.normal,
+                            ),
                             maxLines: 1,
                             overflow: .ellipsis,
                           ),
@@ -1817,6 +2090,32 @@ class GuideTabState extends State<GuideTab>
       posterThumb: program.thumb,
       posterServerId: channel.serverId,
       onRecordingStateChanged: (isScheduled) => _handleRecordingStateChanged(program, isScheduled),
+      onCatchUp: _catchUpActionFor(channel, program),
+    );
+  }
+
+  /// Catch-up for a "No information" hour block: only past blocks on
+  /// channels that offer catch-up (Xtream `tv_archive = 1`). The player
+  /// starts the archive at the block's own start time.
+  VoidCallback? _catchUpActionFor(LiveTvChannel channel, LiveTvProgram program) {
+    if (!program.isPlaceholder || !channel.hasCatchUp) return null;
+    final beginsAt = program.beginsAt;
+    if (beginsAt == null) return null;
+    if (beginsAt >= DateTime.now().millisecondsSinceEpoch ~/ 1000) return null;
+    return () => _catchUpToProgram(channel, program);
+  }
+
+  Future<void> _catchUpToProgram(LiveTvChannel channel, LiveTvProgram program) async {
+    final beginsAt = program.beginsAt;
+    if (beginsAt == null) return;
+    final multiServer = context.read<MultiServerProvider>();
+    await navigateToLiveTv(
+      context,
+      multiServer: multiServer,
+      channel: channel,
+      channels: liveTvChannels,
+      startPosition: LiveTvStartPosition.beginning,
+      catchUpStartEpoch: beginsAt,
     );
   }
 }
