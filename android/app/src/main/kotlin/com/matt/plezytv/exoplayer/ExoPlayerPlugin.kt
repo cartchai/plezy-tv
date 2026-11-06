@@ -2,7 +2,7 @@ package com.matt.plezytv.exoplayer
 
 import android.app.Activity
 import android.util.Log
-import com.matt.plezytv.libass.media.AssHandler
+import com.edde746.plezy.libass.media.AssHandler
 import com.matt.plezytv.mpv.MpvPlayerCore
 import com.matt.plezytv.mpv.completeMpvPropertyNotInitialized
 import com.matt.plezytv.mpv.completeMpvPropertyResult

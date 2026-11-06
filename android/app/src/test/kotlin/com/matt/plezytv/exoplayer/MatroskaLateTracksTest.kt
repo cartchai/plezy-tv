@@ -11,8 +11,8 @@ import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
-import com.matt.plezytv.libass.media.AssHandler
-import com.matt.plezytv.libass.media.parser.AssSubtitleParserFactory
+import com.edde746.plezy.libass.media.AssHandler
+import com.edde746.plezy.libass.media.parser.AssSubtitleParserFactory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue

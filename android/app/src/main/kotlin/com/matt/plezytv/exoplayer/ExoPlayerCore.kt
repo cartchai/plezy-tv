@@ -69,9 +69,9 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 import com.matt.plezytv.AndroidRuntimeDiagnostics
-import com.matt.plezytv.libass.media.AssHandler
-import com.matt.plezytv.libass.media.parser.AssSubtitleParserFactory
-import com.matt.plezytv.libass.media.widget.AssSubtitleSurfaceView
+import com.edde746.plezy.libass.media.AssHandler
+import com.edde746.plezy.libass.media.parser.AssSubtitleParserFactory
+import com.edde746.plezy.libass.media.widget.AssSubtitleSurfaceView
 import com.matt.plezytv.shared.AudioFocusManager
 import com.matt.plezytv.shared.DeviceQuirks
 import com.matt.plezytv.shared.FlutterOverlayHelper

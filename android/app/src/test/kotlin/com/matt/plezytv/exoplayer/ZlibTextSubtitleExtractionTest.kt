@@ -12,7 +12,7 @@ import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.text.CueDecoder
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
-import com.matt.plezytv.libass.media.AssHandler
+import com.edde746.plezy.libass.media.AssHandler
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

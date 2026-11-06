@@ -9,8 +9,8 @@ import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.SeekMap
 import androidx.media3.extractor.TrackOutput
 import androidx.media3.extractor.text.SubtitleParser
-import com.matt.plezytv.libass.media.AssHandler
-import com.matt.plezytv.libass.media.extractor.AssMatroskaExtractor
+import com.edde746.plezy.libass.media.AssHandler
+import com.edde746.plezy.libass.media.extractor.AssMatroskaExtractor
 import java.io.EOFException
 import java.util.zip.DataFormatException
 import java.util.zip.Inflater
