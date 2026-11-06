@@ -1,4 +1,4 @@
-package com.edde746.plezy.exoplayer
+package com.matt.plezytv.exoplayer
 
 import android.net.Uri
 import android.os.Handler
@@ -14,8 +14,8 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mkv.MatroskaExtractor
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
 import androidx.test.platform.app.InstrumentationRegistry
-import com.edde746.plezy.libass.media.AssHandler
-import com.edde746.plezy.libass.media.parser.AssSubtitleParserFactory
+import com.matt.plezytv.libass.media.AssHandler
+import com.matt.plezytv.libass.media.parser.AssSubtitleParserFactory
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit

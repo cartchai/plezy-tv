@@ -1,4 +1,4 @@
-package com.edde746.plezy.exoplayer
+package com.matt.plezytv.exoplayer
 
 import android.net.Uri
 import android.os.Handler

@@ -111,7 +111,7 @@ static _jbyteArray byteArray(const std::vector<uint8_t>& bytes) {
 static jint convert(
     JNIEnv& env, _jbyteArray& payload, _jbyteArray& output, jint output_offset = 0, jint output_capacity = -1) {
   if (output_capacity < 0) output_capacity = static_cast<jint>(output.bytes.size());
-  return Java_com_edde746_plezy_exoplayer_DoviBridge_nativeConvertDv7RpuToDv81(
+  return Java_com_matt_plezytv_exoplayer_DoviBridge_nativeConvertDv7RpuToDv81(
       &env, nullptr, &payload, 0, static_cast<jint>(payload.bytes.size()), &output, output_offset, output_capacity, 2);
 }
 

@@ -1,0 +1,25 @@
+# Plezy TV — Codemagic cloud build (codemagic.yaml)
+#
+# Why this file exists (2026-11-05): the local Gradle build is blocked
+# (the daemon dies after ~10 min with "The first result from the daemon
+# was empty"), so the fork builds in the cloud via Codemagic, the same
+# route proven for TVmagic. The Workflow Editor has NO Java version
+# setting, so this YAML pins the whole build: Flutter 3.47.9 and Java 17
+# (Plezy uses Java 17, NOT 21 — do NOT raise it). Pick the
+# "Android Debug" workflow (not the editor's Default).
+# The file must live in the repo root.
+workflows:
+  android-debug:
+    name: Android Debug
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.47.9
+      java: 17
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Build debug APK
+        script: flutter build apk --debug
+    artifacts:
+      - build/app/outputs/flutter-apk/app-debug.apk

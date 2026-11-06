@@ -1,4 +1,4 @@
-package com.edde746.plezy.car
+package com.matt.plezytv.car
 
 import android.content.pm.PackageManager
 import androidx.test.ext.junit.runners.AndroidJUnit4

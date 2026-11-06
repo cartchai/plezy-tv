@@ -285,7 +285,7 @@ val downloadLibdovi = tasks.register("downloadLibdovi") {
 }
 
 android {
-  namespace = "com.edde746.plezy"
+  namespace = "com.matt.plezytv"
   compileSdk = flutter.compileSdkVersion
   buildToolsVersion = "36.1.0"
   ndkVersion = "29.0.14206865"
@@ -301,7 +301,7 @@ android {
   }
 
   defaultConfig {
-    applicationId = "com.edde746.plezy"
+    applicationId = "com.matt.plezytv"
     minSdk = 25 // Fire OS 6.x (API 25); the mpv-android AAR shares the same floor
     targetSdk = flutter.targetSdkVersion
     versionCode = flutter.versionCode

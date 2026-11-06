@@ -8,7 +8,7 @@ import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.edde746.plezy.exoplayer.PlezyRenderersFactory
+import com.matt.plezytv.exoplayer.PlezyRenderersFactory
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith

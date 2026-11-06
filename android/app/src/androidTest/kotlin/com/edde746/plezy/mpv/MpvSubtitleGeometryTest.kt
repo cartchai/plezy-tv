@@ -1,4 +1,4 @@
-package com.edde746.plezy.mpv
+package com.matt.plezytv.mpv
 
 import android.app.Activity
 import android.content.Intent
@@ -8,7 +8,7 @@ import android.view.Choreographer
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.edde746.plezy.shared.PlayerDelegate
+import com.matt.plezytv.shared.PlayerDelegate
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit

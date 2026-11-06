@@ -1,8 +1,8 @@
-package com.edde746.plezy.mpv
+package com.matt.plezytv.mpv
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.edde746.plezy.shared.PlayerDelegate
+import com.matt.plezytv.shared.PlayerDelegate
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean

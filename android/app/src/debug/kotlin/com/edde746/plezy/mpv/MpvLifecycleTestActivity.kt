@@ -1,4 +1,4 @@
-package com.edde746.plezy.mpv
+package com.matt.plezytv.mpv
 
 import android.app.Activity
 import android.os.Bundle

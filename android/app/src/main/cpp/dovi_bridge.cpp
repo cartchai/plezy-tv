@@ -21,7 +21,7 @@ static constexpr jint MAX_RPU_INPUT_SIZE = 8192;
 static constexpr size_t MAX_RPU_OUTPUT_SIZE = 16384;
 static constexpr int MAX_ERROR_LOG_LENGTH = 256;
 
-extern "C" JNIEXPORT jint JNICALL Java_com_edde746_plezy_exoplayer_DoviBridge_nativeConvertDv7RpuToDv81(
+extern "C" JNIEXPORT jint JNICALL Java_com_matt_plezytv_exoplayer_DoviBridge_nativeConvertDv7RpuToDv81(
     JNIEnv* env, jclass, jbyteArray payload, jint payload_offset, jint payload_length, jbyteArray output,
     jint output_offset, jint output_capacity, jint mode) {
 #if !DOVI_REAL_LINKED
@@ -118,7 +118,7 @@ extern "C" JNIEXPORT jint JNICALL Java_com_edde746_plezy_exoplayer_DoviBridge_na
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_edde746_plezy_exoplayer_DoviBridge_nativeIsConversionPathReady(JNIEnv*, jclass) {
+Java_com_matt_plezytv_exoplayer_DoviBridge_nativeIsConversionPathReady(JNIEnv*, jclass) {
 #if DOVI_REAL_LINKED
   return JNI_TRUE;
 #else
@@ -127,6 +127,6 @@ Java_com_edde746_plezy_exoplayer_DoviBridge_nativeIsConversionPathReady(JNIEnv*,
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_edde746_plezy_exoplayer_DoviBridge_nativeGetBridgeVersion(JNIEnv* env, jclass) {
+Java_com_matt_plezytv_exoplayer_DoviBridge_nativeGetBridgeVersion(JNIEnv* env, jclass) {
   return env->NewStringUTF(BRIDGE_VERSION);
 }
