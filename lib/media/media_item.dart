@@ -109,6 +109,12 @@ sealed class MediaItem with _$MediaItem {
         serverName: serverName,
         raw: raw,
       ),
+      // No IPTV item case yet — the IPTV client (Stage 2) will add a
+      // MediaItem.iptv union case and replace this throw. No IPTV
+      // connections can exist until then, so this is unreachable in practice.
+      MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError(
+        'MediaItem has no IPTV case yet (backend: ${backend.id})',
+      ),
     };
   }
 
@@ -299,6 +305,11 @@ sealed class MediaItem with _$MediaItem {
       MediaBackend.plex => _$PlexMediaItemFromJson(json),
       MediaBackend.jellyfin => _$JellyfinMediaItemFromJson(json),
       MediaBackend.emby => _$JellyfinMediaItemFromJson(json).copyWith(dialect: MediaBrowserDialect.emby),
+      // No IPTV item case yet — see the factory above. No IPTV items are
+      // persisted until the IPTV client adds a MediaItem.iptv case.
+      MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError(
+        'MediaItem has no IPTV case yet (backend: ${MediaBackend.fromString(json['backend'] as String?).id})',
+      ),
     };
   }
 

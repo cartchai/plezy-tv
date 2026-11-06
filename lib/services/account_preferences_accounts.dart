@@ -72,6 +72,8 @@ AccountPreferenceResolution resolveAccountPreferenceAccounts({
         row: row,
         connection: connection,
       ),
+      // IPTV has no server-side account preferences.
+      M3uConnection() || XtreamConnection() => null,
       null => null,
     };
     if (account == null) continue;

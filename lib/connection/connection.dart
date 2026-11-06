@@ -365,3 +365,226 @@ class JellyfinConnection extends Connection {
     return tag == null || tag.isEmpty ? null : tag;
   }
 }
+
+/// An M3U playlist connection — a user-supplied playlist URL.
+///
+/// Live TV channels and on-demand items come from the playlist itself.
+/// The user gives the library a [name] at import time; that name becomes
+/// the library title. [disabledCategoryIds] is the country/region filter:
+/// category ids the user turned off are hidden from Live TV and Library.
+class M3uConnection extends Connection {
+  @override
+  final String id;
+
+  @override
+  final DateTime createdAt;
+
+  @override
+  final DateTime? lastAuthenticatedAt;
+
+  /// User-given library name (chosen at import). Shown as the library title.
+  final String name;
+
+  /// The M3U playlist URL.
+  final String playlistUrl;
+
+  /// Optional XMLTV guide URL for EPG (M3U alone has no guide).
+  final String? epgUrl;
+
+  /// Category ids the user turned off (country/region filter). Hidden from
+  /// Live TV and Library.
+  final List<String> disabledCategoryIds;
+
+  M3uConnection({
+    required this.id,
+    required this.name,
+    required this.playlistUrl,
+    this.epgUrl,
+    this.disabledCategoryIds = const [],
+    required this.createdAt,
+    this.lastAuthenticatedAt,
+  });
+
+  @override
+  MediaBackend get kind => MediaBackend.m3u;
+
+  @override
+  String get displayName => name;
+
+  @override
+  String get displayLabel => name;
+
+  @override
+  String? get displaySubtitle => 'M3U · ${_truncateUrl(playlistUrl)}';
+
+  static String _truncateUrl(String url) {
+    if (url.length <= 40) return url;
+    return '${url.substring(0, 37)}…';
+  }
+
+  M3uConnection copyWith({
+    String? id,
+    String? name,
+    String? playlistUrl,
+    String? epgUrl,
+    bool clearEpgUrl = false,
+    List<String>? disabledCategoryIds,
+    DateTime? createdAt,
+    DateTime? lastAuthenticatedAt,
+  }) {
+    return M3uConnection(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      playlistUrl: playlistUrl ?? this.playlistUrl,
+      epgUrl: clearEpgUrl ? null : (epgUrl ?? this.epgUrl),
+      disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
+      createdAt: createdAt ?? this.createdAt,
+      lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
+    );
+  }
+
+  @override
+  Map<String, Object?> toConfigJson() {
+    return {
+      'name': name,
+      'playlistUrl': playlistUrl,
+      'epgUrl': epgUrl,
+      'disabledCategoryIds': disabledCategoryIds,
+    };
+  }
+
+  factory M3uConnection.fromConfigJson({
+    required String id,
+    required Map<String, Object?> json,
+    required DateTime createdAt,
+    DateTime? lastAuthenticatedAt,
+  }) {
+    final rawDisabled = json['disabledCategoryIds'];
+    final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
+    return M3uConnection(
+      id: id,
+      name: json['name'] as String? ?? 'M3U',
+      playlistUrl: json['playlistUrl'] as String? ?? '',
+      epgUrl: json['epgUrl'] as String?,
+      disabledCategoryIds: disabled,
+      createdAt: createdAt,
+      lastAuthenticatedAt: lastAuthenticatedAt,
+    );
+  }
+}
+
+/// An Xtream Codes connection — server URL + username + password.
+///
+/// Live TV, VOD and series come from the Xtream `player_api.php` API.
+/// The user gives the library a [name] at import time; that name becomes
+/// the library title. [disabledCategoryIds] is the country/region filter:
+/// category ids the user turned off are hidden from Live TV and Library.
+/// The password is persisted via the registry's encrypted config JSON, the
+/// same protection Jellyfin access tokens get.
+class XtreamConnection extends Connection {
+  @override
+  final String id;
+
+  @override
+  final DateTime createdAt;
+
+  @override
+  final DateTime? lastAuthenticatedAt;
+
+  /// User-given library name (chosen at import). Shown as the library title.
+  final String name;
+
+  /// Xtream server base URL, no trailing slash.
+  final String serverUrl;
+
+  /// Xtream username.
+  final String username;
+
+  /// Xtream password (encrypted at rest by the connection registry).
+  final String password;
+
+  /// Category ids the user turned off (country/region filter). Hidden from
+  /// Live TV and Library.
+  final List<String> disabledCategoryIds;
+
+  XtreamConnection({
+    required this.id,
+    required this.name,
+    required String serverUrl,
+    required this.username,
+    required this.password,
+    this.disabledCategoryIds = const [],
+    required this.createdAt,
+    this.lastAuthenticatedAt,
+  }) : serverUrl = canonicalizeBaseUrl(serverUrl);
+
+  @override
+  MediaBackend get kind => MediaBackend.xtream;
+
+  @override
+  String get displayName => name;
+
+  @override
+  String get displayLabel => name;
+
+  @override
+  String? get displaySubtitle => '$username · ${_truncateUrl(serverUrl)}';
+
+  static String _truncateUrl(String url) {
+    if (url.length <= 40) return url;
+    return '${url.substring(0, 37)}…';
+  }
+
+  XtreamConnection copyWith({
+    String? id,
+    String? name,
+    String? serverUrl,
+    String? username,
+    String? password,
+    List<String>? disabledCategoryIds,
+    DateTime? createdAt,
+    DateTime? lastAuthenticatedAt,
+  }) {
+    return XtreamConnection(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      serverUrl: serverUrl ?? this.serverUrl,
+      username: username ?? this.username,
+      password: password ?? this.password,
+      disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
+      createdAt: createdAt ?? this.createdAt,
+      lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
+    );
+  }
+
+  @override
+  Map<String, Object?> toConfigJson() {
+    return {
+      'name': name,
+      'serverUrl': serverUrl,
+      'username': username,
+      'password': password,
+      'disabledCategoryIds': disabledCategoryIds,
+    };
+  }
+
+  factory XtreamConnection.fromConfigJson({
+    required String id,
+    required Map<String, Object?> json,
+    required DateTime createdAt,
+    DateTime? lastAuthenticatedAt,
+  }) {
+    final rawDisabled = json['disabledCategoryIds'];
+    final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
+    return XtreamConnection(
+      id: id,
+      name: json['name'] as String? ?? 'Xtream',
+      serverUrl: json['serverUrl'] as String? ?? '',
+      username: json['username'] as String? ?? '',
+      password: json['password'] as String? ?? '',
+      disabledCategoryIds: disabled,
+      createdAt: createdAt,
+      lastAuthenticatedAt: lastAuthenticatedAt,
+    );
+  }
+}

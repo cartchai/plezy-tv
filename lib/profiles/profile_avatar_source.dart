@@ -95,6 +95,8 @@ String? connectionAvatarUrl({
       tag: primaryImageTag,
     ),
     PlexAccountConnection() => _plexHomeUserThumb(plexHomeByConnectionId[connection.id], link.userIdentifier),
+    // IPTV has no server user image.
+    M3uConnection() || XtreamConnection() => null,
   };
 }
 

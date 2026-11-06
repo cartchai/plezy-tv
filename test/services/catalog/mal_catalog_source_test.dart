@@ -112,6 +112,8 @@ Future<void> _expectNativeLibraryMatch(
     MediaBackend.plex => testPlexClient(handler: respond),
     MediaBackend.jellyfin => testJellyfinClient(handler: respond),
     MediaBackend.emby => testEmbyClient(handler: respond),
+    // IPTV has no test client; the loop above never passes m3u/xtream here.
+    MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError('No test client for IPTV backend ${backend.id}'),
   };
   final manager = MultiServerManager()..debugRegisterClientForTesting(client);
   final multiServer = MultiServerProvider(manager, DataAggregationService(manager));
@@ -402,7 +404,9 @@ void main() {
         await db.close();
       });
 
-      for (final backend in MediaBackend.values) {
+      // Only the server backends have test clients; IPTV (m3u/xtream) has
+      // no native library matching in this test.
+      for (final backend in [MediaBackend.plex, MediaBackend.jellyfin, MediaBackend.emby]) {
         test('Kimi no Na wa. finds only the ID-verified native-title copy on ${backend.name}', () async {
           handlers.add(
             (_) => _json(_pageBody([_node(id: 32281, title: 'Kimi no Na wa.', ja: '君の名は。', mediaType: 'movie')])),

@@ -9,18 +9,24 @@ import 'media_browser_dialect.dart';
 enum MediaBackend {
   plex,
   jellyfin,
-  emby;
+  emby,
+  m3u,
+  xtream;
 
   String get id => switch (this) {
     MediaBackend.plex => 'plex',
     MediaBackend.jellyfin => 'jellyfin',
     MediaBackend.emby => 'emby',
+    MediaBackend.m3u => 'm3u',
+    MediaBackend.xtream => 'xtream',
   };
 
   static MediaBackend fromId(String id) => switch (id) {
     'plex' => MediaBackend.plex,
     'jellyfin' => MediaBackend.jellyfin,
     'emby' => MediaBackend.emby,
+    'm3u' => MediaBackend.m3u,
+    'xtream' => MediaBackend.xtream,
     _ => throw ArgumentError('Unknown MediaBackend id: $id'),
   };
 
@@ -31,12 +37,14 @@ enum MediaBackend {
   ///   surfaces corrupted cache rows or schema drift instead of silently
   ///   misclassifying Jellyfin items as Plex.
   static MediaBackend fromString(String? id) {
-    if (id != null && id != 'plex' && id != 'jellyfin' && id != 'emby') {
+    if (id != null && id != 'plex' && id != 'jellyfin' && id != 'emby' && id != 'm3u' && id != 'xtream') {
       appLogger.w('Unknown MediaBackend id "$id"; defaulting to plex');
     }
     return switch (id) {
       'jellyfin' => MediaBackend.jellyfin,
       'emby' => MediaBackend.emby,
+      'm3u' => MediaBackend.m3u,
+      'xtream' => MediaBackend.xtream,
       _ => MediaBackend.plex,
     };
   }
@@ -48,9 +56,13 @@ enum MediaBackend {
   bool get usesMediaBrowserApi => dialect != null;
 
   /// The MediaBrowser dialect this backend speaks, or `null` for Plex.
+  /// M3U and Xtream are not MediaBrowser backends either — they speak the
+  /// IPTV playlist / Xtream Codes APIs, so they also return `null` here.
   MediaBrowserDialect? get dialect => switch (this) {
     MediaBackend.plex => null,
     MediaBackend.jellyfin => MediaBrowserDialect.jellyfin,
     MediaBackend.emby => MediaBrowserDialect.emby,
+    MediaBackend.m3u => null,
+    MediaBackend.xtream => null,
   };
 }

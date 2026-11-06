@@ -161,6 +161,18 @@ class ConnectionRegistry {
           lastAuthenticatedAt: lastAuth,
           dialect: kind.dialect!,
         ),
+        MediaBackend.m3u => M3uConnection.fromConfigJson(
+          id: row.id,
+          json: revealed.config,
+          createdAt: createdAt,
+          lastAuthenticatedAt: lastAuth,
+        ),
+        MediaBackend.xtream => XtreamConnection.fromConfigJson(
+          id: row.id,
+          json: revealed.config,
+          createdAt: createdAt,
+          lastAuthenticatedAt: lastAuth,
+        ),
       };
       _decryptedConfigs[connection] = revealed.config;
       if (revealed.migrated) {

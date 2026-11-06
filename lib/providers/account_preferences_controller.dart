@@ -437,6 +437,10 @@ class AccountPreferencesController extends ChangeNotifier with DisposableChangeN
         final token = selected.plexToken;
         if (token == null || token.isEmpty) return null;
         return PlexAccountPreferencesSource(authToken: token, serviceFactory: _plexServiceFactory);
+      case MediaBackend.m3u:
+      case MediaBackend.xtream:
+        // IPTV has no server-side account preferences.
+        return null;
     }
   }
 

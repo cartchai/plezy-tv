@@ -785,6 +785,8 @@ class DownloadProvider extends ChangeNotifier with DisposableChangeNotifierMixin
       final synthesizedRaw = switch (meta.backend) {
         MediaBackend.plex => <String, dynamic>{'key': '/library/metadata/$showRatingKey'},
         MediaBackend.jellyfin || MediaBackend.emby => <String, dynamic>{'Id': showRatingKey, 'Type': 'Series'},
+        // IPTV downloads are out of scope for v1; no raw shape is needed.
+        MediaBackend.m3u || MediaBackend.xtream => <String, dynamic>{},
       };
       return MediaItem(
         id: showRatingKey,

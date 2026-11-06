@@ -39,6 +39,8 @@ class CachedPlaybackMetadataService {
           backend: backend,
           mediaIndex: mediaIndex,
         ),
+        // IPTV has no cached server-side media source info.
+        MediaBackend.m3u || MediaBackend.xtream => null,
       };
     } catch (e) {
       appLogger.d('Cached media source info unavailable for $cacheServerId:$itemId', error: e);
@@ -71,6 +73,8 @@ class CachedPlaybackMetadataService {
           creditsPattern: creditsPattern,
           forceChapterFallback: forceChapterFallback,
         ),
+        // IPTV has no cached server-side playback extras.
+        MediaBackend.m3u || MediaBackend.xtream => null,
       };
     } catch (e) {
       appLogger.d('Cached playback extras unavailable for $cacheServerId:$itemId', error: e);

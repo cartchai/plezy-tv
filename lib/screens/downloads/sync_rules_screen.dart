@@ -174,6 +174,12 @@ class _SyncRuleTileState extends State<_SyncRuleTile> {
           if (serverMachineId == rule.serverId && serverName.isNotEmpty) {
             return _RuleServerInfo(label: serverName, isKnown: true);
           }
+        case M3uConnection(:final id, :final name) || XtreamConnection(:final id, :final name):
+          // An IPTV serverId is the connection id; the label is the
+          // user-given library name.
+          if (id == rule.serverId && name.isNotEmpty) {
+            return _RuleServerInfo(label: name, isKnown: true);
+          }
       }
     }
 

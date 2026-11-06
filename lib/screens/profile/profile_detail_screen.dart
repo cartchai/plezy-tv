@@ -233,6 +233,8 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> with Controll
     return switch (conn) {
       PlexAccountConnection(:final servers) => servers.map((s) => s.clientIdentifier).toSet(),
       JellyfinConnection(:final serverMachineId) => {serverMachineId},
+      // An IPTV serverId is the connection id.
+      M3uConnection(:final id) || XtreamConnection(:final id) => {id},
     };
   }
 

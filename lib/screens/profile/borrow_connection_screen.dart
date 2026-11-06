@@ -254,6 +254,9 @@ class _BorrowConnectionScreenState extends State<BorrowConnectionScreen> {
           await _borrowPlex(cand);
         case JellyfinConnection():
           await _borrowJellyfin(cand);
+        case M3uConnection() || XtreamConnection():
+          // Borrowing an IPTV connection is not supported yet.
+          break;
       }
     } catch (e, st) {
       // Without this, a throw from the verify/borrow steps (network, DB)

@@ -330,6 +330,9 @@ class CompanionRemoteProvider with ChangeNotifier, DisposableChangeNotifierMixin
           );
         case JellyfinConnection():
           addContext(await _createMediaBrowserAuthContext(connection: connection));
+        case M3uConnection() || XtreamConnection():
+          // IPTV has no companion remote auth context.
+          break;
       }
     }
 

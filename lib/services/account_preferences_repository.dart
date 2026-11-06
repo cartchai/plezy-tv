@@ -64,6 +64,8 @@ class AccountPreferencesRepository {
     MediaBackend.jellyfin => AccountPreferencesCapabilities.jellyfin,
     MediaBackend.emby => AccountPreferencesCapabilities.emby,
     MediaBackend.plex => AccountPreferencesCapabilities.plex,
+    // IPTV has no server-side account preferences.
+    MediaBackend.m3u || MediaBackend.xtream => AccountPreferencesCapabilities.unsupported,
   };
 
   /// Last known reachability of [ref] — false once a read failed to resolve a

@@ -67,7 +67,8 @@ abstract class LibraryAlphaBarStrategy {
         libraryKey: libraryKey,
         isShared: isShared,
       ),
-      MediaBackend.jellyfin || MediaBackend.emby => const MediaBrowserAlphaBarStrategy(),
+      MediaBackend.jellyfin || MediaBackend.emby || MediaBackend.m3u || MediaBackend.xtream =>
+        const MediaBrowserAlphaBarStrategy(),
     };
   }
 }

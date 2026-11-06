@@ -191,5 +191,9 @@ MediaItem testMediaItem({
       backendFolderKey: backendFolderKey,
       raw: raw,
     ),
+    // No MediaItem.iptv case yet — the IPTV client (Stage 2) adds it.
+    MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError(
+      'No test MediaItem for IPTV backend ${backend.id}',
+    ),
   };
 }

@@ -245,5 +245,7 @@ Set<ServerId> _serverIdsForConnection(Connection connection) {
       for (final server in servers) ?ServerId.tryParse(server.clientIdentifier),
     },
     JellyfinConnection(:final serverMachineId) => {?ServerId.tryParse(serverMachineId)},
+    // An IPTV client's serverId is the connection id.
+    M3uConnection(:final id) || XtreamConnection(:final id) => {?ServerId.tryParse(id)},
   };
 }

@@ -502,6 +502,9 @@ class ActiveProfileBinder {
           expected.addAll(plexMembership(account));
         case JellyfinConnection(:final serverMachineId):
           expected.add(serverMachineId);
+        case M3uConnection(:final id) || XtreamConnection(:final id):
+          // An IPTV client's serverId is the connection id.
+          expected.add(id);
         case null:
           break;
       }
@@ -655,6 +658,10 @@ class ActiveProfileBinder {
         case JellyfinConnection():
           expected.add(conn.serverMachineId);
           futures.add(_bindMediaBrowser(conn, profileId: profile.id, generation: generation));
+        case M3uConnection() || XtreamConnection():
+          // IPTV binding is added in Stage 2 with the IPTV client. Until
+          // then an IPTV connection is stored but produces no client.
+          appLogger.w('ActiveProfileBinder: IPTV connection ${conn.id} has no client yet; skipping bind.');
       }
     }
     final results = await Future.wait(futures);

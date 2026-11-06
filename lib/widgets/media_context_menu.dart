@@ -215,6 +215,8 @@ bool isMediaDeletionAllowed({
   null => false,
   MediaBackend.jellyfin || MediaBackend.emby => resolvedItemPermission == true,
   MediaBackend.plex => isAdminActionAllowed,
+  // IPTV items cannot be deleted from the provider.
+  MediaBackend.m3u || MediaBackend.xtream => false,
 };
 
 /// A reusable wrapper widget that adds a context menu (long press / right click)
