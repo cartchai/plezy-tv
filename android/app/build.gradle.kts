@@ -334,6 +334,21 @@ android {
   }
 
   signingConfigs {
+    // Fixed debug key (build #7): the committed app/debug.keystore is the
+    // standard Android debug identity (CN=Android Debug, passwords
+    // "android") — a debug keystore is not a secret. Without this, Gradle
+    // generates a fresh debug key on every build machine, so each
+    // Codemagic build signed with a DIFFERENT certificate and Android
+    // refused to install one build over the previous one (v2.25.2 would
+    // not install over v2.25.1). With one fixed key, every build signs
+    // identically and updates install over the top. Builds stay debug —
+    // only the key is fixed; release signing is untouched.
+    getByName("debug") {
+      storeFile = file("debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
     create("release") {
       val keystorePropertiesFile = rootProject.file("key.properties")
       if (keystorePropertiesFile.exists()) {

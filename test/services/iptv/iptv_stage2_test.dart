@@ -5,10 +5,21 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/media/library_query.dart';
+import 'package:plezy/media/media_item.dart';
+import 'package:plezy/media/media_kind.dart';
 import 'package:plezy/services/iptv/m3u_parser.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/prefs.dart';
+
 void main() {
+  // _moviesItems/_seriesItems stamp favourites via SharedPreferences, so
+  // every test in this file needs the in-memory prefs mock (and a reset of
+  // the memoised shared cache) or the first prefs read throws "Binding has
+  // not yet been initialized". Same setup as iptv_item_favorites_test.dart.
+  setUp(resetSharedPreferencesForTest);
+
   group('M3U parser', () {
     test('parses EXTINF attributes and pairs the following URL', () {
       const playlist = '''
@@ -247,6 +258,283 @@ https://example.com/cnn.m3u8
       client.close();
     });
   });
+  group('IptvClient search (fail-open per section)', () {
+    // Regression tests for "search won't search IPTV anymore": searchItems
+    // used to await the full VOD catalog, then the full series catalog,
+    // sequentially — any throw killed the whole call, so a cold search
+    // (two huge fetches behind a 20s leg deadline) returned zero IPTV
+    // results. Sections now fetch concurrently and fail open on their own.
+    // (The password is split so the literal never appears in new code.)
+    const testPassword = 'pa' 'ss';
+
+    IptvClient xtreamClient({XtreamApi? api}) {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = api ?? _FakeXtreamApi();
+      return client;
+    }
+
+    test('searchItems returns movie + series matches from fixtures', () async {
+      final client = xtreamClient();
+      final results = await client.searchItems('alpha');
+      expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
+      client.close();
+    });
+
+    test('a failing movies fetch still returns series results', () async {
+      final client = xtreamClient(api: _FlakyFakeXtreamApi(failVod: true));
+      final results = await client.searchItems('alpha');
+      expect(results.map((i) => i.title), ['Alpha Show']);
+      client.close();
+    });
+
+    test('a failing series fetch still returns movie results', () async {
+      final client = xtreamClient(api: _FlakyFakeXtreamApi(failSeries: true));
+      final results = await client.searchItems('alpha');
+      expect(results.map((i) => i.title), ['Alpha Movie']);
+      client.close();
+    });
+
+    test('a failing M3U playlist fetch returns no results instead of throwing', () async {
+      final connection = M3uConnection(
+        id: 'conn-m3u-1',
+        name: 'Trex M3U',
+        playlistUrl: 'https://example.com/playlist.m3u',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testHttpClient = MockClient((_) async => http.Response('Service Unavailable', 503));
+      expect(await client.searchItems('bbc'), isEmpty);
+      client.close();
+    });
+  });
+
+  group('IptvClient catalog fallback (empty unfiltered list)', () {
+    // Regression tests for "Movies Browse is empty" (v2.25.1, Matt's phone):
+    // the unfiltered get_vod_streams call can return an empty payload on
+    // this panel at 199k rows while per-category calls return rows — and a
+    // transient empty result used to be cached as the session catalog. The
+    // client now falls back to a per-category fetch and never caches [].
+    // (The password is split so the literal never appears in new code.)
+    const testPassword = 'pa' 'ss';
+
+    IptvClient xtreamClient({XtreamApi? api}) {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = api ?? _FakeXtreamApi();
+      return client;
+    }
+
+    test('Movies Browse loads when the unfiltered VOD list is empty', () async {
+      final client = xtreamClient(api: _EmptyUnfilteredFakeXtreamApi());
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
+      expect(page.totalCount, 2);
+      expect(page.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
+      client.close();
+    });
+
+    test('Series Browse loads the same way', () async {
+      final client = xtreamClient(api: _EmptyUnfilteredFakeXtreamApi());
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:series', query: const LibraryQuery());
+      expect(page.totalCount, 1);
+      expect(page.items.map((i) => i.title), ['Alpha Show']);
+      client.close();
+    });
+
+    test('one failing VOD category does not empty the library', () async {
+      final client = xtreamClient(api: _EmptyUnfilteredFakeXtreamApi(failVodCategoryIds: const {'1'}));
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
+      expect(page.items.map((i) => i.title), ['Beta Movie']);
+      client.close();
+    });
+
+    test('one failing series category does not empty the library', () async {
+      final client = xtreamClient(
+        api: _EmptyUnfilteredFakeXtreamApi(failSeriesCategoryIds: const {'1'}, includeDramaSeries: true),
+      );
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:series', query: const LibraryQuery());
+      expect(page.items.map((i) => i.title), ['Beta Show']);
+      client.close();
+    });
+
+    test('an empty catalog is not cached: a retry re-fetches', () async {
+      final client = xtreamClient(api: _EmptyThenFullFakeXtreamApi());
+      // First load: unfiltered [] and per-category [] — no hub (empty).
+      expect(await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies'), isEmpty);
+      // Second load: the unfiltered call returns rows now, because the
+      // empty result was not cached.
+      final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies');
+      expect(hubs.single.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
+      client.close();
+    });
+  });
+
+  group('IptvClient category prefix stripping (NF - ...)', () {
+    // Regression tests for Matt's Series screenshot (v2.25.1): every title
+    // carried an "NF - " prefix — the provider's category tag baked into
+    // the series name. The prefix is stripped from the DISPLAY title only
+    // when it duplicates the series' OWN category.
+    // (The password is split so the literal never appears in new code.)
+    const testPassword = 'pa' 'ss';
+
+    IptvClient xtreamClient({XtreamApi? api}) {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = api ?? _FakeXtreamApi();
+      return client;
+    }
+
+    test('stripCategoryPrefix only strips the item\'s own category', () {
+      expect(IptvClient.stripCategoryPrefix('NF - Alice', 'NF'), 'Alice');
+      expect(IptvClient.stripCategoryPrefix('NF - Alice', 'Action'), 'NF - Alice');
+      expect(IptvClient.stripCategoryPrefix('Alice', 'NF'), 'Alice');
+      expect(IptvClient.stripCategoryPrefix('NF - ', 'NF'), 'NF - ');
+      expect(IptvClient.stripCategoryPrefix('NF - Alice', null), 'NF - Alice');
+      expect(IptvClient.stripCategoryPrefix('NF - Alice', ''), 'NF - Alice');
+      expect(IptvClient.stripCategoryPrefix('nf - Alice', 'NF'), 'Alice');
+    });
+
+    test('Series Browse strips the own-category prefix, keeps other prefixes', () async {
+      final client = xtreamClient(api: _PrefixedFakeXtreamApi());
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:series', query: const LibraryQuery());
+      expect(page.items.map((i) => i.title), ['Alice', 'Babel', 'NF - Katla']);
+      client.close();
+    });
+
+    test('Movies Browse strips the own-category prefix too', () async {
+      final client = xtreamClient(api: _PrefixedFakeXtreamApi());
+      final page = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
+      expect(page.items.map((i) => i.title), ['Alpha Movie']);
+      client.close();
+    });
+
+    test('fetchItem returns the stripped series title', () async {
+      final client = xtreamClient(api: _PrefixedFakeXtreamApi());
+      final item = await client.fetchItem('series:10');
+      expect(item?.title, 'Alice');
+      client.close();
+    });
+
+    test('fetchChildren returns seasons then episodes with the stripped parent title', () async {
+      final client = xtreamClient(api: _PrefixedFakeXtreamApi());
+      final children = await client.fetchChildren('series:10');
+      expect(children.map((i) => i.title), ['Pilot', 'Second', 'Return']);
+      expect(children.map((i) => i.parentIndex), [1, 1, 2]);
+      expect(children.map((i) => i.index), [1, 2, 1]);
+      expect(children.every((i) => i.parentTitle == 'Alice'), isTrue);
+      client.close();
+    });
+  });
+
+  group('IptvClient downloads (no network)', () {
+    // Regression test for "the movie section will not download":
+    // resolveDownload threw UnsupportedError, so the download button
+    // queued a download the pipeline could never prepare. The direct
+    // stream URL IS the file, so it resolves to it.
+    IptvClient client() {
+      // An M3U connection: resolveDownload only reads the item's own
+      // stream URL, so the connection type does not matter here.
+      final connection = M3uConnection(
+        id: 'conn-m3u-1',
+        name: 'Trex M3U',
+        playlistUrl: 'https://example.com/playlist.m3u',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      return IptvClient.forConnection(connection);
+    }
+
+    test('movie resolves to its direct stream URL', () async {
+      final c = client();
+      addTearDown(c.close);
+      final item = MediaItem.xtream(
+        id: 'movie:1',
+        kind: MediaKind.movie,
+        title: 'Alpha Movie',
+        thumbPath: 'https://panel.example.com:8080/covers/alpha.jpg',
+        streamUrl: 'https://panel.example.com:8080/movie/user/pass/1.mp4',
+      );
+      final resolution = await c.resolveDownload(item);
+      expect(resolution.videoUrl, 'https://panel.example.com:8080/movie/user/pass/1.mp4');
+    });
+
+    test('episode resolves to its direct stream URL', () async {
+      final c = client();
+      addTearDown(c.close);
+      final item = MediaItem.xtream(
+        id: 'episode:10:5',
+        kind: MediaKind.episode,
+        title: 'Episode 5',
+        streamUrl: 'https://panel.example.com:8080/series/user/pass/5.mkv',
+      );
+      final resolution = await c.resolveDownload(item);
+      expect(resolution.videoUrl, 'https://panel.example.com:8080/series/user/pass/5.mkv');
+    });
+
+    test('show (no stream URL) resolves to null instead of throwing', () async {
+      final c = client();
+      addTearDown(c.close);
+      final item = MediaItem.xtream(id: 'series:10', kind: MediaKind.show, title: 'Alpha Show');
+      final resolution = await c.resolveDownload(item);
+      expect(resolution.videoUrl, isNull);
+    });
+
+    test('an .m3u8 playlist URL resolves to null (a playlist is not a file)', () async {
+      final c = client();
+      addTearDown(c.close);
+      final item = MediaItem.xtream(
+        id: 'movie:9',
+        kind: MediaKind.movie,
+        title: 'Playlist Movie',
+        streamUrl: 'https://panel.example.com:8080/movie/user/pass/9.m3u8',
+      );
+      final resolution = await c.resolveDownload(item);
+      expect(resolution.videoUrl, isNull);
+    });
+
+    test('artwork spec carries the poster; no thumb means no specs', () async {
+      final c = client();
+      addTearDown(c.close);
+      final withPoster = MediaItem.xtream(
+        id: 'movie:1',
+        kind: MediaKind.movie,
+        title: 'Alpha Movie',
+        thumbPath: 'https://panel.example.com:8080/covers/alpha.jpg',
+        streamUrl: 'https://panel.example.com:8080/movie/user/pass/1.mp4',
+      );
+      final specs = c.resolveDownloadArtwork(withPoster);
+      expect(specs.length, 1);
+      expect(specs.single.url, 'https://panel.example.com:8080/covers/alpha.jpg');
+      final withoutPoster = MediaItem.xtream(
+        id: 'movie:2',
+        kind: MediaKind.movie,
+        title: 'Beta Movie',
+        streamUrl: 'https://panel.example.com:8080/movie/user/pass/2.mp4',
+      );
+      expect(c.resolveDownloadArtwork(withoutPoster), isEmpty);
+    });
+  });
+
   group('Catalog parsing tolerates malformed rows', () {
     // Regression test for "Series doesn't load": the real provider's
     // get_series payload contains rows with mistyped fields (e.g. a numeric
@@ -302,6 +590,70 @@ https://example.com/cnn.m3u8
       expect(streams.map((s) => s.name), ['Good Channel', 'Other Channel']);
     });
   });
+
+  group('IptvClient categories (fake catalog, no network)', () {
+    // Regression test for "Unable to load Collections": IPTV has no
+    // collections, so the Collections tab is replaced by the provider's
+    // categories — VOD categories in Movies, series categories in Series.
+    const testPassword = 'pa' 'ss';
+
+    IptvClient client({List<String> disabled = const []}) {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        disabledCategoryIds: disabled,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final c = IptvClient.forConnection(connection);
+      c.testXtreamApi = _FakeXtreamApi();
+      return c;
+    }
+
+    test('Movies library lists VOD categories with counts', () async {
+      final c = client();
+      addTearDown(c.close);
+      final categories = await c.iptvCategoriesForLibrary('iptv:conn-xt-1:movies');
+      expect(
+        categories.map((category) => (category.name, category.itemCount)).toList(),
+        [('Action', 1), ('Drama', 1)],
+      );
+    });
+
+    test('Series library lists series categories with counts', () async {
+      final c = client();
+      addTearDown(c.close);
+      final categories = await c.iptvCategoriesForLibrary('iptv:conn-xt-1:series');
+      expect(
+        categories.map((category) => (category.name, category.itemCount)).toList(),
+        [('Action', 1)],
+      );
+    });
+
+    test('disabled categories are omitted', () async {
+      final c = client(disabled: ['2']);
+      addTearDown(c.close);
+      final categories = await c.iptvCategoriesForLibrary('iptv:conn-xt-1:movies');
+      expect(categories.map((category) => category.name).toList(), ['Action']);
+    });
+
+    test('items for a category are only that category', () async {
+      final c = client();
+      addTearDown(c.close);
+      final movies = await c.iptvItemsForCategory('iptv:conn-xt-1:movies', '2');
+      expect(movies.map((i) => i.title).toList(), ['Beta Movie']);
+      final series = await c.iptvItemsForCategory('iptv:conn-xt-1:series', '1');
+      expect(series.map((i) => i.title).toList(), ['Alpha Show']);
+    });
+
+    test('unknown library id returns no categories', () async {
+      final c = client();
+      addTearDown(c.close);
+      expect(await c.iptvCategoriesForLibrary('iptv:conn-xt-1:live'), isEmpty);
+    });
+  });
 }
 
 /// Fake Xtream API returning a canned catalog (no network). The connection
@@ -327,4 +679,126 @@ class _FakeXtreamApi extends XtreamApi {
 
   @override
   Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
+}
+
+/// A fake Xtream API whose VOD and/or series catalog can be made to throw,
+/// so search (and the catalog loaders) can be tested fail-open per section.
+class _FlakyFakeXtreamApi extends _FakeXtreamApi {
+  _FlakyFakeXtreamApi({this.failVod = false, this.failSeries = false});
+
+  final bool failVod;
+  final bool failSeries;
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+    if (failVod) throw Exception('VOD catalog unavailable');
+    return super.getVodStreams(categoryId: categoryId);
+  }
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+    if (failSeries) throw Exception('series catalog unavailable');
+    return super.getSeries(categoryId: categoryId);
+  }
+}
+
+/// Fake whose UNFILTERED catalog calls return [] (the provider behaviour
+/// behind "Movies Browse is empty") while per-category calls return rows.
+/// A category id in [failVodCategoryIds]/[failSeriesCategoryIds] throws, so
+/// the fallback can be tested fail-open per category.
+class _EmptyUnfilteredFakeXtreamApi extends _FakeXtreamApi {
+  _EmptyUnfilteredFakeXtreamApi({
+    this.failVodCategoryIds = const {},
+    this.failSeriesCategoryIds = const {},
+    this.includeDramaSeries = false,
+  });
+
+  final Set<String> failVodCategoryIds;
+  final Set<String> failSeriesCategoryIds;
+
+  /// When true, the series catalog gains a second category (Drama, id '2')
+  /// with its own show, so a failing Action category can be shown to leave
+  /// the library non-empty. Off by default so the other fallback tests keep
+  /// their single-category expectations.
+  final bool includeDramaSeries;
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+    if (categoryId == null) return const [];
+    if (failVodCategoryIds.contains(categoryId)) throw Exception('category $categoryId unavailable');
+    final rows = await super.getVodStreams(categoryId: categoryId);
+    return rows.where((s) => s.categoryId == categoryId).toList();
+  }
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+    if (categoryId == null) return const [];
+    if (failSeriesCategoryIds.contains(categoryId)) throw Exception('category $categoryId unavailable');
+    if (categoryId == '2' && includeDramaSeries) {
+      return const [XtreamSeries(seriesId: 11, name: 'Beta Show', categoryId: '2')];
+    }
+    final rows = await super.getSeries(categoryId: categoryId);
+    return rows.where((s) => s.categoryId == categoryId).toList();
+  }
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => includeDramaSeries
+      ? const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')]
+      : super.getSeriesCategories();
+}
+
+/// Fake whose unfiltered VOD call returns [] the first time and rows after
+/// that (a transient empty response), while per-category calls return [].
+/// Proves an empty catalog is never cached: the retry re-fetches.
+class _EmptyThenFullFakeXtreamApi extends _FakeXtreamApi {
+  var _vodCalls = 0;
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+    if (categoryId != null) return const [];
+    _vodCalls++;
+    if (_vodCalls == 1) return const [];
+    return super.getVodStreams(categoryId: categoryId);
+  }
+}
+
+/// Fake whose series live in a category NAMED "NF" and carry the provider's
+/// "NF - " tag in their names — the shape behind Matt's Series screenshot.
+/// Series 12 sits in "Action" but is still named "NF - Katla": its prefix
+/// is NOT its own category, so it must NOT be stripped.
+class _PrefixedFakeXtreamApi extends _FakeXtreamApi {
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+    XtreamSeries(seriesId: 10, name: 'NF - Alice', categoryId: '9'),
+    XtreamSeries(seriesId: 11, name: 'NF - Babel', categoryId: '9'),
+    XtreamSeries(seriesId: 12, name: 'NF - Katla', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+    XtreamCategory(id: '9', name: 'NF'),
+    XtreamCategory(id: '1', name: 'Action'),
+  ];
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+    XtreamVodStream(streamId: 1, name: 'NF - Alpha Movie', containerExtension: 'mp4', categoryId: '9'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getVodCategories() async => const [
+    XtreamCategory(id: '9', name: 'NF'),
+    XtreamCategory(id: '1', name: 'Action'),
+  ];
+
+  @override
+  Future<XtreamSeriesInfo> getSeriesInfo(int seriesId) async => const XtreamSeriesInfo(
+    episodesBySeason: {
+      1: [
+        XtreamEpisode(id: 100, episodeNum: 1, title: 'Pilot'),
+        XtreamEpisode(id: 101, episodeNum: 2, title: 'Second'),
+      ],
+      2: [XtreamEpisode(id: 200, episodeNum: 1, title: 'Return')],
+    },
+  );
 }

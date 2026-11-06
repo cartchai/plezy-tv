@@ -122,8 +122,44 @@ class LiveTvProgram {
       premiere: pickBool('premiere'),
       subscriptionId: json['subscriptionID']?.toString(),
       grandparentSubscriptionId: json['grandparentSubscriptionID']?.toString(),
+      serverId: json['serverId'] as String?,
+      serverName: json['serverName'] as String?,
+      liveDvrKey: json['liveDvrKey'] as String?,
+      providerIdentifier: json['providerIdentifier'] as String?,
     );
   }
+
+  /// Round-trip for the persisted IPTV EPG cache: writes exactly the keys
+  /// [fromJson] reads, so a stored program parses back identically.
+  /// Placeholders are never cached (they are synthesized at render), so
+  /// [isPlaceholder] is deliberately not written.
+  Map<String, dynamic> toJson() => {
+    if (key != null) 'key': key,
+    if (ratingKey != null) 'ratingKey': ratingKey,
+    if (guid != null) 'guid': guid,
+    'title': title,
+    if (summary != null) 'summary': summary,
+    if (type != null) 'type': type,
+    if (year != null) 'year': year,
+    if (beginsAt != null) 'beginsAt': beginsAt,
+    if (endsAt != null) 'endsAt': endsAt,
+    if (grandparentTitle != null) 'grandparentTitle': grandparentTitle,
+    if (parentTitle != null) 'parentTitle': parentTitle,
+    if (index != null) 'index': index,
+    if (parentIndex != null) 'parentIndex': parentIndex,
+    if (thumb != null) 'thumb': thumb,
+    if (art != null) 'art': art,
+    if (channelIdentifier != null) 'channelIdentifier': channelIdentifier,
+    if (channelCallSign != null) 'channelCallSign': channelCallSign,
+    if (live != null) 'live': live,
+    if (premiere != null) 'premiere': premiere,
+    if (subscriptionId != null) 'subscriptionID': subscriptionId,
+    if (grandparentSubscriptionId != null) 'grandparentSubscriptionID': grandparentSubscriptionId,
+    if (serverId != null) 'serverId': serverId,
+    if (serverName != null) 'serverName': serverName,
+    if (liveDvrKey != null) 'liveDvrKey': liveDvrKey,
+    if (providerIdentifier != null) 'providerIdentifier': providerIdentifier,
+  };
 
   LiveTvProgram copyWith({ServerId? serverId, String? serverName, String? liveDvrKey, String? providerIdentifier}) {
     return LiveTvProgram(

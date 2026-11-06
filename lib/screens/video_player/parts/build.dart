@@ -105,41 +105,45 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
   Widget _buildPlaybackFailure(String message, {required VoidCallback onRetry}) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(
-              mainAxisSize: .min,
-              children: [
-                const AppIcon(Symbols.error_rounded, color: Colors.white70, size: 44, fill: 1),
-                const SizedBox(height: 16),
-                Text(
-                  message,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: .center,
-                  children: [
-                    FocusableButton(
-                      focusNode: _initializationErrorFocusNode,
-                      onPressed: onRetry,
-                      child: FilledButton(onPressed: onRetry, child: Text(t.common.retry)),
-                    ),
-                    const SizedBox(width: 12),
-                    FocusableButton(
-                      onPressed: () => unawaited(_handleBackButton()),
-                      child: OutlinedButton(
-                        onPressed: () => unawaited(_handleBackButton()),
-                        child: Text(t.common.back),
+      // A long playback error (a full URL, a stack trace) must scroll
+      // instead of overflowing the failure screen.
+      body: SingleChildScrollView(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: .min,
+                children: [
+                  const AppIcon(Symbols.error_rounded, color: Colors.white70, size: 44, fill: 1),
+                  const SizedBox(height: 16),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: .center,
+                    children: [
+                      FocusableButton(
+                        focusNode: _initializationErrorFocusNode,
+                        onPressed: onRetry,
+                        child: FilledButton(onPressed: onRetry, child: Text(t.common.retry)),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 12),
+                      FocusableButton(
+                        onPressed: () => unawaited(_handleBackButton()),
+                        child: OutlinedButton(
+                          onPressed: () => unawaited(_handleBackButton()),
+                          child: Text(t.common.back),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

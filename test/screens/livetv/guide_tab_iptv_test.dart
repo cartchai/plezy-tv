@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,11 +8,13 @@ import 'package:plezy/connection/connection.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/media/iptv_live_tv.dart';
 import 'package:plezy/models/livetv_channel.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/livetv/tabs/guide_tab.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
+import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:provider/provider.dart';
 
@@ -67,6 +70,15 @@ class _EpgControllableApi extends XtreamApi {
     final completer = Completer<List<XtreamEpgProgram>>();
     pending[streamId] = completer;
     return completer.future;
+  }
+
+  // The login's xmltv.php feed is the primary EPG source (Task 7), but
+  // these tests control the EPG through get_short_epg's Completers — the
+  // feed must fail fast here so the flow falls back to getShortEpg
+  // without ever touching the network or the compute isolate.
+  @override
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
+    throw Exception('xmltv feed unavailable in guide tests');
   }
 
   void complete(String streamId, List<XtreamEpgProgram> programs) =>
@@ -139,8 +151,15 @@ final class _IptvGuideHarness {
   }
 
   /// Pump until the guide has asked for the EPG of [count] channels.
+  /// The EPG fetch reads the persisted cache from disk (real dart:io),
+  /// which never completes inside `testWidgets`' fake async zone on a
+  /// plain pump — yield to the real event loop first so the file I/O can
+  /// land, then pump to rebuild.
   Future<void> waitForEpgCalls(WidgetTester tester, int count) async {
     for (var i = 0; i < 10 && api.epgCalls < count; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
       await tester.pump();
     }
     expect(api.epgCalls, count);
@@ -152,9 +171,25 @@ final class _IptvGuideHarness {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() => initializeDateFormatting('en'));
-  setUp(() {
+
+  late Directory epgTempDir;
+
+  setUp(() async {
     resetSharedPreferencesForTest();
     LocaleSettings.setLocaleSync(AppLocale.en);
+    // fetchEpgForChannel reads EPG settings first: prime SettingsService
+    // here, or the prefs read started from inside the widget load never
+    // completes on pumps (fake async). And the persisted EPG cache
+    // resolves its directory through path_provider (no mock in widget
+    // tests), so point it at a temp dir.
+    await SettingsService.getInstance();
+    epgTempDir = await Directory.systemTemp.createTemp('plezy_epg_guide_');
+    IptvLiveTvSupport.debugEpgCacheDirectoryProvider = () async => epgTempDir;
+  });
+
+  tearDown(() async {
+    IptvLiveTvSupport.debugEpgCacheDirectoryProvider = null;
+    if (await epgTempDir.exists()) await epgTempDir.delete(recursive: true);
   });
 
   testWidgets('loading indicator shows while the EPG is in flight, never hour blocks', (tester) async {

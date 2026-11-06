@@ -9,3 +9,11 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+# Exception: the committed DEBUG keystore (app/debug.keystore) is the
+# standard Android debug identity (CN=Android Debug, passwords "android")
+# — a debug keystore is not a secret. It exists so every CI build signs
+# with the SAME key and APKs install over the top of each other; without
+# it each Codemagic machine generates its own fresh debug key and every
+# build refuses to update the previous one. Release keystores stay
+# ignored — never commit one.
+!app/debug.keystore

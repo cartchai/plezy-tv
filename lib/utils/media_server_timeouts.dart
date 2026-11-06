@@ -52,6 +52,16 @@ class MediaServerTimeouts {
   /// budget as [libraryLookup], which searches the same libraries.
   static const searchServerDeadline = Duration(seconds: 20);
 
+  /// Per-server deadline for one IPTV (M3U/Xtream) leg of a global search.
+  /// IPTV has no server-side search: the client fetches the provider's full
+  /// catalogs (199k VOD rows, 46k series) and matches locally, so a cold
+  /// search over a slow connection legitimately takes longer than a Plex /
+  /// Jellyfin / Emby server-side search. 60s gives the two catalog fetches
+  /// room to finish (they run concurrently) without holding back the other
+  /// servers' results forever. The people leg keeps [searchServerDeadline]:
+  /// IPTV `searchPeople` throws immediately, so it never needs the budget.
+  static const iptvSearchServerDeadline = Duration(seconds: 60);
+
   /// Per-server deadline for one server's library list
   /// (`DataAggregationService.getMediaLibrariesFromAllServers`). A server
   /// that misses it counts as failed and is retried on the next pass instead

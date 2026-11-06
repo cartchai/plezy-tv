@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:plezy/database/app_database.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/media_server_client.dart';
+import 'package:plezy/models/download_models.dart';
 import 'package:plezy/providers/download_provider.dart';
 import 'package:plezy/utils/global_key_utils.dart';
 
@@ -82,7 +83,10 @@ extension DownloadFixtures on AppDatabase {
 }
 
 /// A collection-navigation fixture with no auto-download rules.
-/// Operations outside that read contract deliberately throw.
+/// Operations outside that read contract deliberately throw, except
+/// [getProgress]: the detail screen's download button reads progress to
+/// decide its state, and null ("not downloading") is the honest answer
+/// for a fixture in which no download is ever in progress.
 class NoSyncRulesDownloadProvider extends ChangeNotifier implements DownloadProvider {
   @override
   bool hasSyncRule(String globalKey) => false;
@@ -90,6 +94,15 @@ class NoSyncRulesDownloadProvider extends ChangeNotifier implements DownloadProv
   @override
   String syncRuleKeyForClient(MediaServerClient client, String ratingKey, {ServerId? serverId}) =>
       buildGlobalKey(serverId ?? client.serverId, ratingKey);
+
+  @override
+  DownloadProgress? getProgress(String globalKey) => null;
+
+  @override
+  bool isQueueing(String globalKey) => false;
+
+  @override
+  bool isDownloaded(String globalKey) => false;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

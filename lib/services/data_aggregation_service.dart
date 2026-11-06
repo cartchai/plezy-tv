@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../media/ids.dart';
 
+import '../media/media_backend.dart';
 import '../media/media_hub.dart';
 import '../media/media_item.dart';
 import '../media/media_item_merge.dart';
@@ -822,7 +823,12 @@ class DataAggregationService {
           excludedLibraryIds: excludedLibraryIds,
         );
         final items = await _withinServerDeadline(
-          MediaServerTimeouts.searchServerDeadline,
+          // IPTV has no server-side search: the client fetches the full
+          // catalogs and matches locally, so its titles leg gets the longer
+          // IPTV budget. The people leg keeps the standard deadline.
+          client.backend == MediaBackend.m3u || client.backend == MediaBackend.xtream
+              ? MediaServerTimeouts.iptvSearchServerDeadline
+              : MediaServerTimeouts.searchServerDeadline,
           operation: 'Search on $serverId',
           parent: abort,
           run: (legAbort) =>

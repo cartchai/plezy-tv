@@ -1305,7 +1305,8 @@
       "recommended": "Recommended",
       "browse": "Browse",
       "collections": "Collections",
-      "playlists": "Playlists"
+      "playlists": "Playlists",
+      "categories": "Categories"
     },
     "groupings": {
       "title": "Grouping",
@@ -1381,6 +1382,11 @@
       "dateLastYear": "Past year",
       "dateOlderThanDays": "Older than ${count} days",
       "dateOlderThanYear": "Older than a year"
+    },
+    "noCategories": "No categories in this library",
+    "categoryItemCount": {
+      "one": "${n} item",
+      "other": "${n} items"
     }
   },
   "about": {
@@ -1390,6 +1396,16 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2253": [
+      "IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick",
+      "Movies and TV libraries have a Categories tab with the provider's own categories",
+      "Movies can be downloaded now",
+      "The TV guide is saved on the phone, so it loads faster and survives a restart",
+      "The guide now comes from your login, like TiviMate",
+      "Search finds IPTV movies and shows again",
+      "Movies browse loads again, and series titles no longer carry the category tag",
+      "This version needs one fresh install (uninstall, then install) — after that, updates install over the top"
+    ],
     "changelog2252": [
       "TV guide (EPG) now loads for IPTV channels",
       "EPG settings: how many days to load, how often it updates, past days to keep",
@@ -2630,6 +2646,15 @@
   },
   "iptv": {
     "title": "IPTV",
+    "favorites": {
+      "title": "IPTV favourites",
+      "liveTv": "Live TV",
+      "movies": "Movies",
+      "tvSeries": "TV / Series",
+      "empty": "Nothing favourited yet",
+      "emptyHint": "Tap the heart on a channel, movie or show to keep it here.",
+      "channelUnavailable": "That channel is no longer available"
+    },
     "settingsDescription": "Playlists, channel groups, guide and catch-up",
     "intro": "IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.",
     "connections": "Connections",

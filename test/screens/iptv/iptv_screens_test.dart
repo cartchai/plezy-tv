@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/media/iptv_live_tv.dart';
 import 'package:plezy/media/live_tv_support.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_kind.dart';
@@ -36,6 +38,7 @@ import 'package:plezy/screens/auth_screen.dart';
 import 'package:plezy/screens/settings/about_screen.dart';
 import 'package:plezy/screens/settings/iptv_settings_screen.dart';
 import 'package:plezy/services/credential_vault.dart';
+import 'package:plezy/services/iptv/iptv_item_favorites_repository.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
@@ -129,6 +132,37 @@ class _FakeXtreamApi extends XtreamApi {
   @override
   Future<List<XtreamCategory>> getLiveCategories() async =>
       const [XtreamCategory(id: '1', name: 'News')];
+
+  // EPG: the guide fetches these for every visible channel. The real
+  // implementations hit the network (xmltv.php has a 120s timeout), so
+  // they must be stubbed here — a real HTTP call never completes inside
+  // `testWidgets`' fake async zone and the guide's loading indicator
+  // would spin `pumpAndSettle` into its timeout.
+  @override
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async =>
+      '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
+
+  @override
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async => const [];
+}
+
+/// In-memory favourites store for widget tests. The production store
+/// reads SharedPreferences, whose platform round-trip never completes
+/// inside `testWidgets`' fake async zone when the read is started from a
+/// widget load — the tab would spin its loading indicator forever. This
+/// store completes synchronously (a plain async function), so the item
+/// load finishes on pumps. Persistence itself is covered by the unit
+/// tests in `iptv_item_favorites_test.dart`.
+class _InMemoryItemFavoritesRepository implements IptvItemFavoritesRepository {
+  Map<String, IptvFavoriteItem> _items = {};
+
+  @override
+  Future<Map<String, IptvFavoriteItem>> read({required String key}) async => Map.of(_items);
+
+  @override
+  Future<void> write(String key, Map<String, IptvFavoriteItem> items) async {
+    _items = Map.of(items);
+  }
 }
 
 /// The REAL IptvClient, pointed at the fake catalog. Anything this client
@@ -136,6 +170,7 @@ class _FakeXtreamApi extends XtreamApi {
 IptvClient _trexClient() {
   final client = IptvClient.xtream(xtreamConnection: _trexConnection());
   client.testXtreamApi = _FakeXtreamApi();
+  client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
   return client;
 }
 
@@ -266,15 +301,45 @@ class _FakeConnectionRegistry extends ConnectionRegistry {
   Stream<List<Connection>> watchConnections() => Stream.value([_trexConnection()]);
 }
 
+/// Pump the Live TV screen until it stops changing, yielding to the REAL
+/// event loop between frames. The guide's EPG fetch reads the persisted
+/// cache from disk (real dart:io) and `pumpAndSettle` never yields to real
+/// async, so a plain `pumpAndSettle` times out while the fetch is still
+/// in flight even though the screen would settle fine. This mirrors the
+/// frame-by-frame pumping the screen actually needs (a few frames after
+/// the file I/O lands).
+Future<void> pumpLiveTvSettled(WidgetTester tester) async {
+  for (var i = 0; i < 8; i++) {
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pump();
+  }
+  await tester.pump();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() => initializeDateFormatting('en'));
+
+  late Directory epgTempDir;
 
   setUp(() async {
     resetSharedPreferencesForTest();
     LocaleSettings.setLocaleSync(AppLocale.en);
     await SettingsService.getInstance();
     await StorageService.getInstance();
+    // The persisted EPG cache resolves its directory through
+    // path_provider, whose platform channel has no mock in widget tests
+    // — a guide fetch would hang on it forever. Point it at a temp dir
+    // (same seam the EPG cache unit tests use).
+    epgTempDir = await Directory.systemTemp.createTemp('plezy_epg_screens_');
+    IptvLiveTvSupport.debugEpgCacheDirectoryProvider = () async => epgTempDir;
+  });
+
+  tearDown(() async {
+    IptvLiveTvSupport.debugEpgCacheDirectoryProvider = null;
+    if (await epgTempDir.exists()) await epgTempDir.delete(recursive: true);
   });
 
   testWidgets('Libraries screen lists Trex Movies + Series but no Trex Live TV library', (tester) async {
@@ -454,7 +519,10 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    // The EPG fetch reads the persisted cache from disk (real dart:io),
+    // which never completes inside `testWidgets`' fake async zone on a
+    // plain pump — use the real-async settle helper, not pumpAndSettle.
+    await pumpLiveTvSettled(tester);
 
     // The source picker is there with both sources.
     expect(find.text(t.liveTv.allSources), findsOneWidget);
@@ -466,7 +534,7 @@ void main() {
 
     // Pick Trex: only Trex channels remain.
     await tester.tap(find.widgetWithText(ChoiceChip, 'Trex'));
-    await tester.pumpAndSettle();
+    await pumpLiveTvSettled(tester);
     expect(find.text('Trex News'), findsWidgets);
     expect(find.text('Trex Sports'), findsWidgets);
     expect(find.text('A&E US Eastern'), findsNothing);
@@ -474,7 +542,7 @@ void main() {
 
     // Pick HOME PC: only Plex channels remain.
     await tester.tap(find.widgetWithText(ChoiceChip, 'HOME PC'));
-    await tester.pumpAndSettle();
+    await pumpLiveTvSettled(tester);
     expect(find.text('A&E US Eastern'), findsWidgets);
     expect(find.text('ABC (KABC) Los Angeles'), findsWidgets);
     expect(find.text('Trex News'), findsNothing);

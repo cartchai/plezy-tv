@@ -204,8 +204,10 @@ class XtreamApi {
   }
 
   /// Full XMLTV guide (large — callers fetch it only when the guide is
-  /// actually being browsed).
-  Future<String> getXmltv() => _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'));
+  /// actually being browsed). 120s: the file runs to megabytes and a slow
+  /// connection legitimately takes a while to deliver it.
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) =>
+      _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'), timeout: timeout);
 
   /// M3U playlist export for this account.
   Future<String> getM3u({String type = 'm3u_plus', String output = 'ts'}) => _getText(

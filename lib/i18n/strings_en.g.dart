@@ -3594,6 +3594,15 @@ class Translations$libraries$en {
 	late final Translations$libraries$filterCategories$en filterCategories = Translations$libraries$filterCategories$en.internal(_root);
 	late final Translations$libraries$sortLabels$en sortLabels = Translations$libraries$sortLabels$en.internal(_root);
 	late final Translations$libraries$advancedFilters$en advancedFilters = Translations$libraries$advancedFilters$en.internal(_root);
+
+	/// en: 'No categories in this library'
+	String get noCategories => 'No categories in this library';
+
+	/// en: '(one) {${n} item} (other) {${n} items}'
+	String categoryItemCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} item',
+		other: '${n} items',
+	);
 }
 
 // Path: about
@@ -3622,6 +3631,16 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2253 => [
+		'IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick',
+		'Movies and TV libraries have a Categories tab with the provider\'s own categories',
+		'Movies can be downloaded now',
+		'The TV guide is saved on the phone, so it loads faster and survives a restart',
+		'The guide now comes from your login, like TiviMate',
+		'Search finds IPTV movies and shows again',
+		'Movies browse loads again, and series titles no longer carry the category tag',
+		'This version needs one fresh install (uninstall, then install) — after that, updates install over the top',
+	];
 	List<String> get changelog2252 => [
 		'TV guide (EPG) now loads for IPTV channels',
 		'EPG settings: how many days to load, how often it updates, past days to keep',
@@ -6314,6 +6333,8 @@ class Translations$iptv$en {
 	/// en: 'IPTV'
 	String get title => 'IPTV';
 
+	late final Translations$iptv$favorites$en favorites = Translations$iptv$favorites$en.internal(_root);
+
 	/// en: 'Playlists, channel groups, guide and catch-up'
 	String get settingsDescription => 'Playlists, channel groups, guide and catch-up';
 
@@ -7012,6 +7033,9 @@ class Translations$libraries$tabs$en {
 
 	/// en: 'Playlists'
 	String get playlists => 'Playlists';
+
+	/// en: 'Categories'
+	String get categories => 'Categories';
 }
 
 // Path: libraries.groupings
@@ -8385,6 +8409,36 @@ class Translations$services$libraryFilter$en {
 	String get noLibraries => 'No libraries available';
 }
 
+// Path: iptv.favorites
+class Translations$iptv$favorites$en {
+	Translations$iptv$favorites$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'IPTV favourites'
+	String get title => 'IPTV favourites';
+
+	/// en: 'Live TV'
+	String get liveTv => 'Live TV';
+
+	/// en: 'Movies'
+	String get movies => 'Movies';
+
+	/// en: 'TV / Series'
+	String get tvSeries => 'TV / Series';
+
+	/// en: 'Nothing favourited yet'
+	String get empty => 'Nothing favourited yet';
+
+	/// en: 'Tap the heart on a channel, movie or show to keep it here.'
+	String get emptyHint => 'Tap the heart on a channel, movie or show to keep it here.';
+
+	/// en: 'That channel is no longer available'
+	String get channelUnavailable => 'That channel is no longer available';
+}
+
 /// The flat map containing all translations for locale <en>.
 /// Only for edge cases! For simple maps, use the map function of this library.
 ///
@@ -9599,6 +9653,7 @@ extension on Translations {
 			'libraries.tabs.browse' => 'Browse',
 			'libraries.tabs.collections' => 'Collections',
 			'libraries.tabs.playlists' => 'Playlists',
+			'libraries.tabs.categories' => 'Categories',
 			'libraries.groupings.title' => 'Grouping',
 			'libraries.groupings.all' => 'All',
 			'libraries.groupings.movies' => 'Movies',
@@ -9666,12 +9721,22 @@ extension on Translations {
 			'libraries.advancedFilters.dateLastYear' => 'Past year',
 			'libraries.advancedFilters.dateOlderThanDays' => ({required Object count}) => 'Older than ${count} days',
 			'libraries.advancedFilters.dateOlderThanYear' => 'Older than a year',
+			'libraries.noCategories' => 'No categories in this library',
+			'libraries.categoryItemCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} item', other: '${n} items', ), 
 			'about.title' => 'About',
 			'about.openSourceLicenses' => 'Open Source Licenses',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2253.0' => 'IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick',
+			'about.changelog2253.1' => 'Movies and TV libraries have a Categories tab with the provider\'s own categories',
+			'about.changelog2253.2' => 'Movies can be downloaded now',
+			'about.changelog2253.3' => 'The TV guide is saved on the phone, so it loads faster and survives a restart',
+			'about.changelog2253.4' => 'The guide now comes from your login, like TiviMate',
+			'about.changelog2253.5' => 'Search finds IPTV movies and shows again',
+			'about.changelog2253.6' => 'Movies browse loads again, and series titles no longer carry the category tag',
+			'about.changelog2253.7' => 'This version needs one fresh install (uninstall, then install) — after that, updates install over the top',
 			'about.changelog2252.0' => 'TV guide (EPG) now loads for IPTV channels',
 			'about.changelog2252.1' => 'EPG settings: how many days to load, how often it updates, past days to keep',
 			'about.changelog2252.2' => 'TV/Series library now loads — one bad row no longer kills the whole catalog',
@@ -9922,6 +9987,8 @@ extension on Translations {
 			'liveTv.reorderFavorites' => 'Reorder Favorites',
 			'liveTv.noFavoriteChannels' => 'No favorite channels',
 			'liveTv.noFavoriteChannelsHint' => 'Show all channels, then long-press a channel to add it to your favorites.',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.showAllChannels' => 'Show All Channels',
 			'liveTv.favoritesLoadFailed' => 'Could not load favorites. Check your connection and try again.',
 			'liveTv.favoritesUpdateFailed' => 'Could not update favorites. Check your connection and try again.',
@@ -9933,8 +10000,6 @@ extension on Translations {
 			'liveTv.recordEpisode' => 'Record Episode',
 			'liveTv.recordSeries' => 'Record Series',
 			'liveTv.recordOptions' => 'Record Options',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.saveTo' => 'Save to',
 			'liveTv.recordings' => 'Recordings',
 			'liveTv.scheduledRecordings' => 'Scheduled',
@@ -10436,6 +10501,8 @@ extension on Translations {
 			'videoSettings.audioOutputDolbyAudio' => 'Dolby Audio',
 			'videoSettings.audioOutputSurround' => 'Surround',
 			'videoSettings.audioOutputSpatial' => 'Spatial Audio',
+			_ => null,
+		} ?? switch (path) {
 			'videoSettings.audioOutputStereo' => 'Stereo',
 			'videoSettings.audioNormalization' => 'Normalize Loudness',
 			'videoSettings.audioNormalizationDisablesPassthrough' => 'Decodes audio to PCM; passthrough is off while this is on',
@@ -10447,8 +10514,6 @@ extension on Translations {
 			'performanceOverlay.rawDecoder' => 'Raw Decoder',
 			'performanceOverlay.tunneling' => 'Tunneling',
 			'performanceOverlay.passthrough' => 'Passthrough',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.aspect' => 'Aspect',
 			'performanceOverlay.rotation' => 'Rotation',
 			'performanceOverlay.dvSource' => 'DV Source',
@@ -10781,6 +10846,13 @@ extension on Translations {
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
 			'iptv.title' => 'IPTV',
+			'iptv.favorites.title' => 'IPTV favourites',
+			'iptv.favorites.liveTv' => 'Live TV',
+			'iptv.favorites.movies' => 'Movies',
+			'iptv.favorites.tvSeries' => 'TV / Series',
+			'iptv.favorites.empty' => 'Nothing favourited yet',
+			'iptv.favorites.emptyHint' => 'Tap the heart on a channel, movie or show to keep it here.',
+			'iptv.favorites.channelUnavailable' => 'That channel is no longer available',
 			'iptv.settingsDescription' => 'Playlists, channel groups, guide and catch-up',
 			'iptv.intro' => 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.',
 			'iptv.connections' => 'Connections',

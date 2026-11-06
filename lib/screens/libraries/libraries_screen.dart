@@ -11,6 +11,8 @@ import '../../focus/input_mode_tracker.dart';
 import '../../mixins/tab_navigation_mixin.dart';
 import '../../mixins/tab_visibility_aware.dart';
 import '../../media/ids.dart';
+import '../../media/iptv_client.dart';
+import '../../media/media_backend.dart';
 import '../../media/media_library.dart';
 import '../../providers/hidden_libraries_provider.dart';
 import '../../providers/libraries_provider.dart';
@@ -27,19 +29,28 @@ import '../../widgets/library_management_sheet.dart';
 import '../../services/storage_service.dart';
 import '../../mixins/refreshable.dart';
 import '../../i18n/strings.g.dart';
+import '../iptv/iptv_favorites_screen.dart';
 import 'library_server_label.dart';
 import 'state_messages.dart';
 import 'tabs/library_browse_tab.dart';
+import 'tabs/library_categories_tab.dart';
 import 'tabs/library_recommended_tab.dart';
 import 'tabs/library_collections_tab.dart';
 import 'tabs/library_playlists_tab.dart';
 import 'tabs/base_library_tab.dart';
 
-enum LibraryTabType { recommended, browse, collections, playlists }
+enum LibraryTabType { recommended, browse, collections, playlists, categories }
 
 List<LibraryTabType> visibleLibraryTabs(MediaLibrary library) {
   if (library.isShared) return [LibraryTabType.browse, LibraryTabType.playlists];
-  return LibraryTabType.values;
+  // IPTV has no collections (a Plex concept — its fetch threw and the tab
+  // showed "Unable to load Collections"). The provider's own categories
+  // take that slot instead: VOD categories in Movies, series categories
+  // in TV/Series. Every other backend keeps Collections.
+  if (library.backend == MediaBackend.m3u || library.backend == MediaBackend.xtream) {
+    return [LibraryTabType.recommended, LibraryTabType.browse, LibraryTabType.categories, LibraryTabType.playlists];
+  }
+  return LibraryTabType.values.where((t) => t != LibraryTabType.categories).toList();
 }
 
 class LibrariesScreen extends StatefulWidget {
@@ -66,6 +77,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   final _browseTabKey = GlobalKey();
   final _collectionsTabKey = GlobalKey();
   final _playlistsTabKey = GlobalKey();
+  final _categoriesTabKey = GlobalKey();
 
   String? _selectedLibraryGlobalKey;
 
@@ -83,11 +95,14 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   final _libraryDropdownKey = GlobalKey<AppMenuButtonState<String>>();
 
-  List<LibraryTabType> _visibleTabs = LibraryTabType.values;
-  List<FocusNode> _tabFocusNodes = List.generate(
-    LibraryTabType.values.length,
-    (i) => FocusNode(debugLabel: 'tab_chip_${LibraryTabType.values[i].name}'),
-  );
+  List<LibraryTabType> _visibleTabs =
+      LibraryTabType.values.where((t) => t != LibraryTabType.categories).toList();
+  // One focus node per VISIBLE tab (not per enum value): the TabController
+  // length comes from this list, so generating from `values.length` would
+  // leave the controller one longer than the TabBarView once a tab type
+  // exists that is hidden for the current library (categories). Built in
+  // initState from _visibleTabs, and rebuilt by _updateVisibleTabs.
+  late List<FocusNode> _tabFocusNodes;
 
   @override
   List<FocusNode> get tabChipFocusNodes => _tabFocusNodes;
@@ -127,6 +142,10 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   @override
   void initState() {
     super.initState();
+    _tabFocusNodes = List.generate(
+      _visibleTabs.length,
+      (i) => FocusNode(debugLabel: 'tab_chip_${_visibleTabs[i].name}'),
+    );
     initTabNavigation();
 
     _scheduleInitializeWithLibraries();
@@ -317,6 +336,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       LibraryTabType.browse => _browseTabKey.currentState,
       LibraryTabType.collections => _collectionsTabKey.currentState,
       LibraryTabType.playlists => _playlistsTabKey.currentState,
+      LibraryTabType.categories => _categoriesTabKey.currentState,
     };
   }
 
@@ -407,6 +427,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     LibraryTabType.browse => t.libraries.tabs.browse,
     LibraryTabType.collections => t.libraries.tabs.collections,
     LibraryTabType.playlists => t.libraries.tabs.playlists,
+    LibraryTabType.categories => t.libraries.tabs.categories,
   };
 
   Widget _buildTabContent(
@@ -447,6 +468,14 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       ),
       LibraryTabType.playlists => LibraryPlaylistsTab(
         key: _playlistsTabKey,
+        library: library,
+        isActive: isActive,
+        suppressAutoFocus: suppressAutoFocus,
+        onDataLoaded: () => _handleTabDataLoaded(tabIndex),
+        onBack: focusTabBar,
+      ),
+      LibraryTabType.categories => LibraryCategoriesTab(
+        key: _categoriesTabKey,
         library: library,
         isActive: isActive,
         suppressAutoFocus: suppressAutoFocus,
@@ -793,12 +822,33 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       return provider.getClientForServer(serverId)?.capabilities.folderGrouping ?? false;
     });
 
+    // IPTV clients behind the visible libraries — the Favourites heart in
+    // the app bar aggregates favourites across exactly these connections.
+    // Hidden libraries are excluded (visibleLibraries already filters them).
+    final iptvClients = <IptvClient>[];
+    final multiServer = context.read<MultiServerProvider>();
+    for (final library in visibleLibraries) {
+      if (library.backend != MediaBackend.m3u && library.backend != MediaBackend.xtream) continue;
+      final serverId = serverIdOrNull(library.serverId);
+      if (serverId == null) continue;
+      final client = multiServer.getClientForServer(serverId);
+      if (client is IptvClient && !iptvClients.contains(client)) iptvClients.add(client);
+    }
+
     List<FocusableAction> appBarActions() => [
       if (allLibraries.isNotEmpty)
         FocusableAction(
           icon: Symbols.edit_rounded,
           tooltip: t.libraries.manageLibraries,
           onPressed: _showLibraryManagementSheet,
+        ),
+      if (iptvClients.isNotEmpty)
+        FocusableAction(
+          icon: Symbols.favorite_rounded,
+          tooltip: t.iptv.favorites.title,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => IptvFavoritesScreen(clients: iptvClients)),
+          ),
         ),
       if (showBrowseOptionsAction)
         FocusableAction(

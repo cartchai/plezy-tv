@@ -74,6 +74,29 @@ effect until the cache is persisted); the update flow is browser-download
 (no native PackageInstaller); real-provider EPG shape / timeshift UTC
 still unproven — needs Matt's phone.
 
+Build #7 (PlezTV v2.25.3) is in this commit: IPTV favourites section
+(`IptvFavoritesScreen`, heart in the Libraries app bar; VOD/series
+favourites now persist via `IptvItemFavoritesRepository`, key
+`iptv_fav_items:<connectionId>` — `setFavorite` was a no-op before),
+Collections tab replaced by the provider's Categories tab for IPTV
+libraries only (`LibraryCategoriesTab`; Plex/Jellyfin/Emby keep
+Collections), IPTV downloads fixed (`resolveDownload` returns the direct
+stream URL instead of throwing `UnsupportedError`), EPG cache persisted
+to disk (per-channel JSON under `iptv_epg/`, so update-on-start now
+works), Xtream EPG now comes from the login's `xmltv.php` feed
+(TiviMate-style; `getShortEpg` is the fallback), IPTV search fixed
+(per-section fail-open + concurrent fetch + 60s IPTV search deadline),
+Movies Browse empty fixed (per-category fallback when the unfiltered VOD
+fetch returns `[]`; empty catalogs are never cached), series/movie titles
+strip the category prefix when it duplicates their own category
+("NF - Alice" → "Alice"), and ONE fixed debug keystore committed
+(`android/app/debug.keystore`, `signingConfigs.debug` wired to it) so
+every build signs with the same key — v2.25.3 will NOT install over
+v2.25.1/v2.25.2, one uninstall + fresh install required, after which
+updates install over the top. Version `2.25.3+160`.
+Detail: `IPTV_BUILD7_NOTES.md`. Reference: `PLEZY_REFERENCE.md` (full
+codebase reference + fork-vs-upstream inventory, written this round).
+
 ## Change inventory by area (for repatching)
 
 ### 1. Rebrand / rename
@@ -132,6 +155,15 @@ still unproven — needs Matt's phone.
   `workflow` scope, so Actions cannot be managed from the fork).
 - Build #6: build command passes `--dart-define=ENABLE_UPDATE_CHECK=true`
   so the Settings → Updates section renders in shipped builds.
+- Build #7: ONE fixed debug keystore committed
+  (`android/app/debug.keystore`, `.gitignore` exception
+  `!app/debug.keystore`) + `signingConfigs.debug` wired to it in
+  `android/app/build.gradle.kts`. Every Codemagic build now signs with
+  the same key (SHA-256
+  `32:1A:E6:3C:35:33:C7:98:EE:7D:0A:F3:82:DE:3C:83:54:BF:62:A2:E5:EC:A8:7C:8F:D5:9D:02:A4:05:23:6F`).
+  Before this, each Codemagic build generated its own fresh debug key,
+  so no build installed over the previous one. Release keystores stay
+  ignored; never commit one.
 
 ### 4. Build #6 — EPG, Series fix, categories, EPG settings, update, hour blocks
 - New files: `lib/services/iptv/xmltv_parser.dart` (isolate-safe XMLTV
@@ -153,6 +185,36 @@ still unproven — needs Matt's phone.
 - Progress notes: `IPTV_EPG_NOTES.md` (also covers the honest limits:
   in-memory EPG cache, browser-download update flow, unproven provider
   details).
+
+### 5. Build #7 — favourites, Categories tab, downloads, persisted EPG, xmltv.php EPG, search, Movies Browse, prefix strip, fixed key
+- New files: `lib/services/iptv/iptv_item_favorites_repository.dart`,
+  `lib/screens/iptv/iptv_favorites_screen.dart`,
+  `lib/screens/libraries/tabs/library_categories_tab.dart`,
+  `test/services/iptv/iptv_item_favorites_test.dart`,
+  `test/services/iptv/iptv_epg_cache_test.dart`,
+  `test/screens/iptv/iptv_favorites_screen_test.dart`,
+  `test/screens/libraries/library_categories_tab_test.dart`,
+  `android/app/debug.keystore` (fixed debug signing key — see §3).
+- Touched upstream files: `lib/media/iptv_client.dart` (favourites
+  persistence, `resolveDownload`, Categories support, per-section
+  fail-open search, per-category catalog fallback, category-prefix
+  strip), `lib/media/iptv_live_tv.dart` (persisted per-channel EPG
+  cache, xmltv.php primary + `getShortEpg` fallback, per-channel
+  update-on-start), `lib/models/livetv_program.dart` (`toJson`),
+  `lib/screens/libraries/libraries_screen.dart` (new `categories` tab
+  type, favourites heart action, tab-focus-nodes fix),
+  `lib/services/data_aggregation_service.dart` (60s IPTV search
+  deadline), `lib/utils/media_server_timeouts.dart`
+  (`iptvSearchServerDeadline`), `lib/services/iptv/xtream_api.dart`
+  (`getXmltv` timeout), `lib/screens/video_player/parts/build.dart`
+  (playback-failure scroll fix), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (favourites keys, changelog 2.25.3),
+  `lib/screens/settings/about_screen.dart` (changelog entry),
+  `pubspec.yaml` (version `2.25.3+160`), `android/.gitignore`
+  (keystore exception).
+- Progress notes: `IPTV_BUILD7_NOTES.md`. Reference:
+  `PLEZY_REFERENCE.md` (full codebase reference + fork-vs-upstream
+  inventory, 295 files / +11,052/−3,045 vs base at build #6).
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
