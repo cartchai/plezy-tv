@@ -1112,7 +1112,9 @@
     "iptvFilterIntro": "Turn off a country or region to hide its channels and on-demand titles.",
     "iptvFilterEmpty": "No categories found for this connection.",
     "iptvFilterLoading": "Loading categories…",
-    "iptvFilterLoadFailed": "Could not load the categories. Check the connection and try again."
+    "iptvFilterLoadFailed": "Could not load the categories. Check the connection and try again.",
+    "iptvFilterShowAll": "Show all",
+    "iptvFilterHideAll": "Hide all"
   },
   "accountPreferences": {
     "sectionTitle": "Account preferences",
@@ -1711,7 +1713,11 @@
     "failedToStartChannel": "Could not start the live channel",
     "failedToBuildStreamUrl": "Could not build the stream URL",
     "playbackStartFailed": "Couldn't start the channel: ${reason}",
-    "channelSwitchFailed": "Couldn't switch channel: ${reason}"
+    "channelSwitchFailed": "Couldn't switch channel: ${reason}",
+    "source": "Source",
+    "allSources": "All sources",
+    "noChannelsFromSource": "No channels loaded from ${name}",
+    "noChannelsFromSourceHint": "The playlist may still be loading, or the provider did not return any channels. Try reloading the guide."
   },
   "collections": {
     "title": "Collections",
@@ -2579,5 +2585,27 @@
     "openAsProfile": "Open as ${name}",
     "copy": "Copy",
     "copied": "Link copied"
+  },
+  "iptv": {
+    "title": "IPTV",
+    "settingsDescription": "Playlists, channel groups, guide and catch-up",
+    "intro": "IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.",
+    "connections": "Connections",
+    "addConnection": "Add IPTV connection",
+    "addConnectionDescription": "Add an M3U playlist or Xtream Codes account",
+    "noConnections": "No IPTV connections yet",
+    "noConnectionsHint": "Add an M3U playlist or Xtream Codes account to watch live TV.",
+    "categoriesOff": "${count} categories off",
+    "categoriesAllOn": "All categories on",
+    "playlist": "Playlist",
+    "refreshPlaylists": "Refresh playlists",
+    "refreshPlaylistsDescription": "Re-fetch channels, movies and series from your providers",
+    "refreshDone": "Playlists refreshed",
+    "guideAndCatchUp": "Guide & catch-up",
+    "showCatchUpBadge": "Show catch-up badge",
+    "showCatchUpBadgeDescription": "Show a badge on channels that offer catch-up TV. Applies when the guide reloads.",
+    "player": "Player",
+    "playerSettings": "Player settings",
+    "playerSettingsDescription": "Decoder, external player and playback options"
   }
 }

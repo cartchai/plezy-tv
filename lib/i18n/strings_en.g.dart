@@ -95,6 +95,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$services$en services = Translations$services$en.internal(_root);
 	late final Translations$addServer$en addServer = Translations$addServer$en.internal(_root);
 	late final Translations$deepLinks$en deepLinks = Translations$deepLinks$en.internal(_root);
+	late final Translations$iptv$en iptv = Translations$iptv$en.internal(_root);
 }
 
 // Path: app
@@ -3153,6 +3154,12 @@ class Translations$connections$en {
 
 	/// en: 'Could not load the categories. Check the connection and try again.'
 	String get iptvFilterLoadFailed => 'Could not load the categories. Check the connection and try again.';
+
+	/// en: 'Show all'
+	String get iptvFilterShowAll => 'Show all';
+
+	/// en: 'Hide all'
+	String get iptvFilterHideAll => 'Hide all';
 }
 
 // Path: accountPreferences
@@ -4145,6 +4152,18 @@ class Translations$liveTv$en {
 
 	/// en: 'Couldn't switch channel: ${reason}'
 	String channelSwitchFailed({required Object reason}) => 'Couldn\'t switch channel: ${reason}';
+
+	/// en: 'Source'
+	String get source => 'Source';
+
+	/// en: 'All sources'
+	String get allSources => 'All sources';
+
+	/// en: 'No channels loaded from ${name}'
+	String noChannelsFromSource({required Object name}) => 'No channels loaded from ${name}';
+
+	/// en: 'The playlist may still be loading, or the provider did not return any channels. Try reloading the guide.'
+	String get noChannelsFromSourceHint => 'The playlist may still be loading, or the provider did not return any channels. Try reloading the guide.';
 }
 
 // Path: collections
@@ -6213,6 +6232,75 @@ class Translations$deepLinks$en {
 
 	/// en: 'Link copied'
 	String get copied => 'Link copied';
+}
+
+// Path: iptv
+class Translations$iptv$en {
+	Translations$iptv$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: 'IPTV'
+	String get title => 'IPTV';
+
+	/// en: 'Playlists, channel groups, guide and catch-up'
+	String get settingsDescription => 'Playlists, channel groups, guide and catch-up';
+
+	/// en: 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.'
+	String get intro => 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.';
+
+	/// en: 'Connections'
+	String get connections => 'Connections';
+
+	/// en: 'Add IPTV connection'
+	String get addConnection => 'Add IPTV connection';
+
+	/// en: 'Add an M3U playlist or Xtream Codes account'
+	String get addConnectionDescription => 'Add an M3U playlist or Xtream Codes account';
+
+	/// en: 'No IPTV connections yet'
+	String get noConnections => 'No IPTV connections yet';
+
+	/// en: 'Add an M3U playlist or Xtream Codes account to watch live TV.'
+	String get noConnectionsHint => 'Add an M3U playlist or Xtream Codes account to watch live TV.';
+
+	/// en: '${count} categories off'
+	String categoriesOff({required Object count}) => '${count} categories off';
+
+	/// en: 'All categories on'
+	String get categoriesAllOn => 'All categories on';
+
+	/// en: 'Playlist'
+	String get playlist => 'Playlist';
+
+	/// en: 'Refresh playlists'
+	String get refreshPlaylists => 'Refresh playlists';
+
+	/// en: 'Re-fetch channels, movies and series from your providers'
+	String get refreshPlaylistsDescription => 'Re-fetch channels, movies and series from your providers';
+
+	/// en: 'Playlists refreshed'
+	String get refreshDone => 'Playlists refreshed';
+
+	/// en: 'Guide & catch-up'
+	String get guideAndCatchUp => 'Guide & catch-up';
+
+	/// en: 'Show catch-up badge'
+	String get showCatchUpBadge => 'Show catch-up badge';
+
+	/// en: 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.'
+	String get showCatchUpBadgeDescription => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.';
+
+	/// en: 'Player'
+	String get player => 'Player';
+
+	/// en: 'Player settings'
+	String get playerSettings => 'Player settings';
+
+	/// en: 'Decoder, external player and playback options'
+	String get playerSettingsDescription => 'Decoder, external player and playback options';
 }
 
 // Path: appIcon.names
@@ -9194,6 +9282,8 @@ extension on Translations {
 			'connections.iptvFilterEmpty' => 'No categories found for this connection.',
 			'connections.iptvFilterLoading' => 'Loading categories…',
 			'connections.iptvFilterLoadFailed' => 'Could not load the categories. Check the connection and try again.',
+			'connections.iptvFilterShowAll' => 'Show all',
+			'connections.iptvFilterHideAll' => 'Hide all',
 			'accountPreferences.sectionTitle' => 'Account preferences',
 			'accountPreferences.hubSubtitleSingle' => ({required Object account}) => 'Audio, subtitle and library options saved on ${account}',
 			'accountPreferences.hubSubtitleMultiple' => ({required Object count}) => 'Audio, subtitle and library options saved on ${count} accounts',
@@ -9690,10 +9780,10 @@ extension on Translations {
 			'liveTv.recordShow' => 'Record show',
 			'liveTv.recordSettings.startEarly' => 'Start early (seconds)',
 			'liveTv.recordSettings.endLate' => 'End late (seconds)',
-			'liveTv.recordSettings.newOnly' => 'Only new episodes',
-			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			_ => null,
 		} ?? switch (path) {
+			'liveTv.recordSettings.newOnly' => 'Only new episodes',
+			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
@@ -9705,6 +9795,10 @@ extension on Translations {
 			'liveTv.failedToBuildStreamUrl' => 'Could not build the stream URL',
 			'liveTv.playbackStartFailed' => ({required Object reason}) => 'Couldn\'t start the channel: ${reason}',
 			'liveTv.channelSwitchFailed' => ({required Object reason}) => 'Couldn\'t switch channel: ${reason}',
+			'liveTv.source' => 'Source',
+			'liveTv.allSources' => 'All sources',
+			'liveTv.noChannelsFromSource' => ({required Object name}) => 'No channels loaded from ${name}',
+			'liveTv.noChannelsFromSourceHint' => 'The playlist may still be loading, or the provider did not return any channels. Try reloading the guide.',
 			'collections.title' => 'Collections',
 			'collections.collection' => 'Collection',
 			'collections.empty' => 'Collection is empty',
@@ -10200,14 +10294,14 @@ extension on Translations {
 			'performanceOverlay.cacheLimit' => 'Cache Limit',
 			'performanceOverlay.speed' => 'Speed',
 			'performanceOverlay.player' => 'Player',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.playMethod' => 'Play Method',
 			'performanceOverlay.memory' => 'Memory',
 			'performanceOverlay.uiFps' => 'UI FPS',
 			'performanceOverlay.fps' => 'FPS',
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
@@ -10500,6 +10594,26 @@ extension on Translations {
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
+			'iptv.title' => 'IPTV',
+			'iptv.settingsDescription' => 'Playlists, channel groups, guide and catch-up',
+			'iptv.intro' => 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.',
+			'iptv.connections' => 'Connections',
+			'iptv.addConnection' => 'Add IPTV connection',
+			'iptv.addConnectionDescription' => 'Add an M3U playlist or Xtream Codes account',
+			'iptv.noConnections' => 'No IPTV connections yet',
+			'iptv.noConnectionsHint' => 'Add an M3U playlist or Xtream Codes account to watch live TV.',
+			'iptv.categoriesOff' => ({required Object count}) => '${count} categories off',
+			'iptv.categoriesAllOn' => 'All categories on',
+			'iptv.playlist' => 'Playlist',
+			'iptv.refreshPlaylists' => 'Refresh playlists',
+			'iptv.refreshPlaylistsDescription' => 'Re-fetch channels, movies and series from your providers',
+			'iptv.refreshDone' => 'Playlists refreshed',
+			'iptv.guideAndCatchUp' => 'Guide & catch-up',
+			'iptv.showCatchUpBadge' => 'Show catch-up badge',
+			'iptv.showCatchUpBadgeDescription' => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.',
+			'iptv.player' => 'Player',
+			'iptv.playerSettings' => 'Player settings',
+			'iptv.playerSettingsDescription' => 'Decoder, external player and playback options',
 			_ => null,
 		};
 	}

@@ -202,6 +202,28 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
                 Text(t.connections.iptvFilterTitle, style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Text(t.connections.iptvFilterIntro, style: theme.textTheme.bodyMedium),
+                // TiviMate's Manage groups has "Show all groups / Hide all
+                // groups" — the fast way to reset a big country list.
+                if (_categories.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: busy ? null : () => setState(() => _disabled.clear()),
+                        icon: const AppIcon(Symbols.visibility_rounded, fill: 1),
+                        label: Text(t.connections.iptvFilterShowAll),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: busy
+                            ? null
+                            : () => setState(() => _disabled.addAll(_categories.map((c) => c.id))),
+                        icon: const AppIcon(Symbols.visibility_off_rounded, fill: 1),
+                        label: Text(t.connections.iptvFilterHideAll),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../connection/connection.dart';
@@ -89,8 +90,19 @@ class IptvClient implements MediaServerClient {
     password: _xtream.password,
   );
 
-  final http.Client _http = http.Client();
+  /// Test-only override for the Xtream API, so unit tests can stub the
+  /// catalog instead of hitting the network. Production code never sets this.
+  @visibleForTesting
+  set testXtreamApi(XtreamApi api) => _api = api;
+
+  http.Client _http = http.Client();
   final Object _authSessionId = Object();
+
+  /// Test-only override for the HTTP client, so unit tests can serve a
+  /// canned M3U playlist instead of hitting the network. Production code
+  /// never sets this.
+  @visibleForTesting
+  set testHttpClient(http.Client client) => _http = client;
   bool _offline = false;
   late final IptvLiveTvSupport _liveTv = IptvLiveTvSupport(this);
 
@@ -112,6 +124,9 @@ class IptvClient implements MediaServerClient {
 
   String _libraryId(String suffix) => 'iptv:${connection.id}:$suffix';
 
+  /// Internal attribution id for M3U channel items (fetchItem/searchItems).
+  /// It is NOT a library anymore — fetchLibraries never returns it — so
+  /// the library picker never shows a Live TV row.
   String get _liveLibraryId => _libraryId(liveLibrarySuffix);
   String get _moviesLibraryId => _libraryId(moviesLibrarySuffix);
   String get _seriesLibraryId => _libraryId(seriesLibrarySuffix);
@@ -153,6 +168,21 @@ class IptvClient implements MediaServerClient {
   void close() {
     _api?.close();
     _http.close();
+  }
+
+  /// Drop the in-memory catalog caches so the next browse/guide load
+  /// re-fetches channels, movies and series from the provider (the
+  /// "Refresh playlists" action in IPTV settings). An in-flight fetch is
+  /// not cancelled; its result is simply discarded.
+  void clearCatalogCache() {
+    _liveStreamsFuture = null;
+    _vodStreamsFuture = null;
+    _seriesFuture = null;
+    _vodCategoriesFuture = null;
+    _seriesCategoriesFuture = null;
+    _m3uEntriesFuture = null;
+    _xtreamChannelByKey.clear();
+    _m3uChannelByKey.clear();
   }
 
   @override
@@ -275,17 +305,12 @@ class IptvClient implements MediaServerClient {
 
   @override
   Future<List<MediaLibrary>> fetchLibraries() async {
+    // Live TV is NOT a library: channels are served only through liveTv
+    // (the Live TV tab). Only on-demand catalogs become libraries, so the
+    // library picker never shows a "Live TV" row. M3U has no on-demand
+    // catalog, so it exposes no libraries at all.
     final name = _name;
-    final libraries = <MediaLibrary>[
-      MediaLibrary(
-        id: _liveLibraryId,
-        backend: backend,
-        title: '$name — Live TV',
-        kind: MediaKind.unknown,
-        serverId: connection.id,
-        serverName: name,
-      ),
-    ];
+    final libraries = <MediaLibrary>[];
     if (_isXtream) {
       if (!await _allCategoriesDisabled(_vodCategories)) {
         libraries.add(
@@ -395,6 +420,40 @@ class IptvClient implements MediaServerClient {
     return out;
   }
 
+  /// Full Movies catalog as items, with disabled categories removed.
+  /// Shared by the paged browse and the Recommended hub so both agree.
+  Future<List<MediaItem>> _moviesItems() async {
+    final streams = await _vodStreams();
+    return streams.where((s) => !_isDisabled(s.categoryId)).map(_movieItem).toList();
+  }
+
+  /// Full Series catalog as items, with disabled categories removed.
+  Future<List<MediaItem>> _seriesItems() async {
+    final series = await _seriesList();
+    return series.where((s) => !_isDisabled(s.categoryId)).map(_seriesItem).toList();
+  }
+
+  MediaHub _recommendedHub({
+    required String libraryId,
+    required String title,
+    required String type,
+    required List<MediaItem> all,
+    required int limit,
+  }) {
+    final items = all.take(limit).toList();
+    return MediaHub(
+      id: 'iptv:$libraryId:recommended',
+      title: title,
+      type: type,
+      items: items,
+      size: all.length,
+      more: all.length > items.length,
+      libraryId: libraryId,
+      serverId: connection.id,
+      serverName: _name,
+    );
+  }
+
   @override
   Future<LibraryPage<MediaItem>> fetchLibraryPagedContent(
     String libraryId, {
@@ -402,21 +461,13 @@ class IptvClient implements MediaServerClient {
     MediaKind? libraryKind,
     AbortController? abort,
   }) async {
-    // Live channels are served only through liveTv, never as library rows.
-    if (libraryId == _liveLibraryId) {
-      return const LibraryPage(items: [], totalCount: 0);
-    }
     if (!_isXtream) return const LibraryPage(items: [], totalCount: 0);
     abort?.throwIfAborted();
     if (libraryId == _moviesLibraryId) {
-      final streams = await _vodStreams();
-      final items = streams.where((s) => !_isDisabled(s.categoryId)).map(_movieItem).toList();
-      return _page(_applyQueryFilters(items, query), query);
+      return _page(_applyQueryFilters(await _moviesItems(), query), query);
     }
     if (libraryId == _seriesLibraryId) {
-      final series = await _seriesList();
-      final items = series.where((s) => !_isDisabled(s.categoryId)).map(_seriesItem).toList();
-      return _page(_applyQueryFilters(items, query), query);
+      return _page(_applyQueryFilters(await _seriesItems(), query), query);
     }
     return const LibraryPage(items: [], totalCount: 0);
   }
@@ -638,6 +689,8 @@ class IptvClient implements MediaServerClient {
       final entries = await _m3uEntries();
       for (final entry in entries) {
         if (results.length >= limit) break;
+        // Disabled groups (country/region filter) stay out of search too.
+        if (_isDisabled(entry.groupTitle)) continue;
         if (entry.name.toLowerCase().contains(needle)) {
           results.add(
             MediaItem.m3u(
@@ -681,8 +734,37 @@ class IptvClient implements MediaServerClient {
     int limit = defaultHubPreviewLimit,
     bool includePlaybackHubs = true,
     HubFetchDiagnostics? diagnostics,
-  }) {
-    throw UnsupportedError('IPTV: fetchGlobalHubs not supported');
+  }) async {
+    // Home shows one Recommended-style hub per on-demand library, titled
+    // with the library name so two IPTV sources stay distinguishable.
+    // M3U has no on-demand catalog, so it contributes nothing.
+    if (!_isXtream) return const [];
+    final hubs = <MediaHub>[];
+    final movies = await _moviesItems();
+    if (movies.isNotEmpty) {
+      hubs.add(
+        _recommendedHub(
+          libraryId: _moviesLibraryId,
+          title: '$_name — Movies',
+          type: 'movie',
+          all: movies,
+          limit: limit,
+        ),
+      );
+    }
+    final series = await _seriesItems();
+    if (series.isNotEmpty) {
+      hubs.add(
+        _recommendedHub(
+          libraryId: _seriesLibraryId,
+          title: '$_name — Series',
+          type: 'show',
+          all: series,
+          limit: limit,
+        ),
+      );
+    }
+    return hubs;
   }
 
   @override
@@ -693,8 +775,26 @@ class IptvClient implements MediaServerClient {
     bool includePlaybackHubs = true,
     MediaKind? libraryKind,
     HubFetchDiagnostics? diagnostics,
-  }) {
-    throw UnsupportedError('IPTV: fetchLibraryHubs not supported');
+  }) async {
+    // The Recommended tab renders whatever hubs come back; throwing here
+    // surfaced as "Unable to load Recommended", so always return the one
+    // hub the library actually has (or nothing when it has none).
+    if (!_isXtream) return const [];
+    if (libraryId == _moviesLibraryId) {
+      final movies = await _moviesItems();
+      if (movies.isEmpty) return const [];
+      return [
+        _recommendedHub(libraryId: libraryId, title: 'Recommended', type: 'movie', all: movies, limit: limit),
+      ];
+    }
+    if (libraryId == _seriesLibraryId) {
+      final series = await _seriesItems();
+      if (series.isEmpty) return const [];
+      return [
+        _recommendedHub(libraryId: libraryId, title: 'Recommended', type: 'show', all: series, limit: limit),
+      ];
+    }
+    return const [];
   }
 
   @override
@@ -723,13 +823,36 @@ class IptvClient implements MediaServerClient {
   }
 
   @override
-  Future<List<MediaItem>> fetchMoreHubItems(String hubId, {int? limit}) {
-    throw UnsupportedError('IPTV: fetchMoreHubItems not supported');
+  Future<List<MediaItem>> fetchMoreHubItems(String hubId, {int? limit}) async {
+    // Hubs built by [_recommendedHub] carry their library id, so expanding
+    // one just re-runs that library's catalog (already cached in memory).
+    if (!_isXtream) return const [];
+    final all = await _itemsForHubId(hubId);
+    if (all == null) return const [];
+    return limit == null ? all : all.take(limit).toList();
   }
 
   @override
-  Future<LibraryPage<MediaItem>> fetchMoreHubItemsPage(String hubId, {int? start, int? size, AbortController? abort}) {
-    throw UnsupportedError('IPTV: fetchMoreHubItemsPage not supported');
+  Future<LibraryPage<MediaItem>> fetchMoreHubItemsPage(
+    String hubId, {
+    int? start,
+    int? size,
+    AbortController? abort,
+  }) async {
+    if (!_isXtream) return const LibraryPage(items: [], totalCount: 0);
+    final all = await _itemsForHubId(hubId);
+    if (all == null) return const LibraryPage(items: [], totalCount: 0);
+    final offset = (start ?? 0).clamp(0, all.length);
+    final end = size == null ? all.length : (offset + size).clamp(0, all.length);
+    return LibraryPage(items: all.sublist(offset, end), totalCount: all.length, offset: offset);
+  }
+
+  /// Full item list for a hub built by [_recommendedHub], or null when the
+  /// hub id is not one of ours.
+  Future<List<MediaItem>?> _itemsForHubId(String hubId) async {
+    if (hubId.contains(_moviesLibraryId)) return _moviesItems();
+    if (hubId.contains(_seriesLibraryId)) return _seriesItems();
+    return null;
   }
 
   // Watch state / favorites are local-only for IPTV (no server API). The
@@ -1023,6 +1146,8 @@ class IptvClient implements MediaServerClient {
             thumb: stream.streamIcon,
             serverId: connection.id,
             serverName: _name,
+            // Visible catch-up badge in the guide (tv_archive = 1).
+            hasCatchUp: stream.tvArchive,
           ),
         );
       }
@@ -1031,6 +1156,9 @@ class IptvClient implements MediaServerClient {
     final entries = await _m3uEntries();
     final channels = <LiveTvChannel>[];
     for (final entry in entries) {
+      // M3U categories are group titles; a disabled group hides its
+      // channels from Live TV (same as Xtream's category filter above).
+      if (_isDisabled(entry.groupTitle)) continue;
       final key = entry.tvgId ?? entry.url;
       _m3uChannelByKey[key] = entry;
       channels.add(

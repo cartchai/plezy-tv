@@ -44,6 +44,10 @@ class GuideTab extends StatefulWidget {
   final VoidCallback? onNavigateUp;
   final VoidCallback? onBack;
 
+  /// Show the catch-up badge on channels that offer catch-up TV
+  /// ([LiveTvChannel.hasCatchUp]). Wired to the IPTV settings toggle.
+  final bool showCatchUpBadge;
+
   const GuideTab({
     super.key,
     required this.channels,
@@ -51,6 +55,7 @@ class GuideTab extends StatefulWidget {
     this.onToggleFavorite,
     this.onNavigateUp,
     this.onBack,
+    this.showCatchUpBadge = true,
   });
 
   @override
@@ -1588,6 +1593,7 @@ class GuideTabState extends State<GuideTab>
           onLongPress: widget.onToggleFavorite != null ? () => widget.onToggleFavorite!(channel) : null,
           isFocused: isFocused,
           isFavorite: widget.isFavoriteChannel?.call(channel) ?? false,
+          showCatchUpBadge: widget.showCatchUpBadge,
           fallbackBuilder: () => _buildChannelNameFallback(channel, theme),
         );
       },
@@ -1895,6 +1901,7 @@ class _ChannelCell extends StatefulWidget {
   final VoidCallback? onLongPress;
   final bool isFocused;
   final bool isFavorite;
+  final bool showCatchUpBadge;
   final Widget Function() fallbackBuilder;
 
   const _ChannelCell({
@@ -1908,6 +1915,7 @@ class _ChannelCell extends StatefulWidget {
     this.onLongPress,
     required this.isFocused,
     this.isFavorite = false,
+    this.showCatchUpBadge = true,
     required this.fallbackBuilder,
   });
 
@@ -1976,6 +1984,18 @@ class _ChannelCellState extends State<_ChannelCell> {
                           right: 0,
                           child: AppIcon(
                             Symbols.star_rounded,
+                            size: 14,
+                            color: widget.isFocused ? theme.colorScheme.onPrimary : theme.colorScheme.primary,
+                          ),
+                        ),
+                      // Catch-up badge (top-left, mirroring the favorite
+                      // star): the channel offers catch-up TV.
+                      if (widget.showCatchUpBadge && widget.channel.hasCatchUp)
+                        Positioned(
+                          top: 2,
+                          left: 0,
+                          child: AppIcon(
+                            Symbols.history_rounded,
                             size: 14,
                             color: widget.isFocused ? theme.colorScheme.onPrimary : theme.colorScheme.primary,
                           ),

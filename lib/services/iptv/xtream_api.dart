@@ -131,8 +131,11 @@ class XtreamApi {
   }
 
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+    // The full live list is tens of thousands of rows; give it a minute
+    // on slow connections instead of the 30s default.
     final decoded = await _getJson(
       _playerApiUri(action: 'get_live_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
+      timeout: const Duration(seconds: 60),
     );
     return _asObjectList(decoded).map(XtreamLiveStream.fromJson).toList();
   }
@@ -140,6 +143,7 @@ class XtreamApi {
   Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
     final decoded = await _getJson(
       _playerApiUri(action: 'get_vod_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
+      timeout: const Duration(seconds: 60),
     );
     return _asObjectList(decoded).map(XtreamVodStream.fromJson).toList();
   }
@@ -147,6 +151,7 @@ class XtreamApi {
   Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
     final decoded = await _getJson(
       _playerApiUri(action: 'get_series', extra: categoryId == null ? null : {'category_id': categoryId}),
+      timeout: const Duration(seconds: 60),
     );
     return _asObjectList(decoded).map(XtreamSeries.fromJson).toList();
   }

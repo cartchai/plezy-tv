@@ -80,6 +80,11 @@ class LiveTvChannel {
   @JsonKey(includeFromJson: false, includeToJson: false)
   final String? favoriteStoreKey;
 
+  /// True when the channel offers catch-up TV (Xtream `tv_archive = 1`).
+  /// Set by the IPTV client at channel-build time; never serialized.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  final bool hasCatchUp;
+
   LiveTvChannel({
     required this.key,
     this.identifier,
@@ -98,6 +103,7 @@ class LiveTvChannel {
     this.liveTvSourceTitle,
     this.favoriteSource,
     this.favoriteStoreKey,
+    this.hasCatchUp = false,
   });
 
   factory LiveTvChannel.fromJson(Map<String, dynamic> json) => _$LiveTvChannelFromJson(json);
@@ -109,6 +115,7 @@ class LiveTvChannel {
     String? liveTvSourceTitle,
     String? favoriteSource,
     String? favoriteStoreKey,
+    bool? hasCatchUp,
   }) {
     return LiveTvChannel(
       key: key,
@@ -128,6 +135,7 @@ class LiveTvChannel {
       liveTvSourceTitle: liveTvSourceTitle ?? this.liveTvSourceTitle,
       favoriteSource: favoriteSource ?? this.favoriteSource,
       favoriteStoreKey: favoriteStoreKey ?? this.favoriteStoreKey,
+      hasCatchUp: hasCatchUp ?? this.hasCatchUp,
     );
   }
 

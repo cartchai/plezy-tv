@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/services/iptv/m3u_parser.dart';
@@ -78,7 +80,7 @@ https://example.com/cnn.ts
   });
 
   group('IptvClient libraries (no network)', () {
-    test('M3U exposes only the Live TV library', () async {
+    test('M3U exposes no libraries (live TV lives in the Live TV tab)', () async {
       final connection = M3uConnection(
         id: 'conn-m3u-1',
         name: 'Trex M3U',
@@ -87,15 +89,13 @@ https://example.com/cnn.ts
       );
       final client = IptvClient.forConnection(connection);
       final libraries = await client.fetchLibraries();
-      expect(libraries.length, 1);
-      expect(libraries.single.id, 'iptv:conn-m3u-1:live');
-      expect(libraries.single.title, 'Trex M3U — Live TV');
+      expect(libraries, isEmpty);
       expect(client.backend.id, 'm3u');
       expect(client.liveTv.dvr, isNull);
       client.close();
     });
 
-    test('Xtream exposes Live TV + Movies + Series libraries', () async {
+    test('Xtream exposes Movies + Series libraries, no Live TV library', () async {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
@@ -106,11 +106,7 @@ https://example.com/cnn.ts
       );
       final client = IptvClient.forConnection(connection);
       final libraries = await client.fetchLibraries();
-      expect(libraries.map((l) => l.id), [
-        'iptv:conn-xt-1:live',
-        'iptv:conn-xt-1:movies',
-        'iptv:conn-xt-1:series',
-      ]);
+      expect(libraries.map((l) => l.id), ['iptv:conn-xt-1:movies', 'iptv:conn-xt-1:series']);
       expect(client.backend.id, 'xtream');
       expect(client.capabilities.liveTv, isTrue);
       expect(client.capabilities.liveTvDvr, isFalse);
@@ -119,4 +115,159 @@ https://example.com/cnn.ts
       client.close();
     });
   });
+
+  group('IptvClient hubs (fake catalog, no network)', () {
+    test('fetchLibraryHubs returns a non-empty Recommended hub for Movies', () async {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: 'pass',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = _FakeXtreamApi();
+      final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies');
+      expect(hubs.length, 1);
+      expect(hubs.single.title, 'Recommended');
+      expect(hubs.single.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
+      expect(hubs.single.more, isFalse);
+      expect(hubs.single.libraryId, 'iptv:conn-xt-1:movies');
+      client.close();
+    });
+
+    test('fetchLibraryHubs returns a non-empty Recommended hub for Series', () async {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: 'pass',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = _FakeXtreamApi();
+      final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:series', libraryName: 'Trex — Series');
+      expect(hubs.length, 1);
+      expect(hubs.single.items.map((i) => i.title), ['Alpha Show']);
+      client.close();
+    });
+
+    test('fetchLibraryHubs honours the disabled-category filter', () async {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: 'pass',
+        disabledCategoryIds: const ['2'],
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = _FakeXtreamApi();
+      final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies');
+      // 'Beta Movie' is in disabled category '2', so only 'Alpha Movie' remains.
+      expect(hubs.single.items.map((i) => i.title), ['Alpha Movie']);
+      client.close();
+    });
+
+    test('fetchGlobalHubs returns one hub per on-demand library', () async {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: 'pass',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = _FakeXtreamApi();
+      final hubs = await client.fetchGlobalHubs();
+      expect(hubs.map((h) => h.title), ['Trex — Movies', 'Trex — Series']);
+      client.close();
+    });
+
+    test('fetchMoreHubItems expands a Recommended hub', () async {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: 'pass',
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = _FakeXtreamApi();
+      final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies', limit: 1);
+      expect(hubs.single.items.length, 1);
+      expect(hubs.single.more, isTrue);
+      final expanded = await client.fetchMoreHubItems(hubs.single.id);
+      expect(expanded.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
+      client.close();
+    });
+  });
+
+  group('M3U category filter (fake HTTP, no network)', () {
+    const playlist = '''
+#EXTM3U
+#EXTINF:-1 tvg-id="BBC.One" group-title="UK",BBC One
+https://example.com/bbc.m3u8
+#EXTINF:-1 tvg-id="CNN" group-title="US",CNN
+https://example.com/cnn.m3u8
+''';
+
+    IptvClient clientWithPlaylist({List<String> disabled = const []}) {
+      final connection = M3uConnection(
+        id: 'conn-m3u-1',
+        name: 'Trex M3U',
+        playlistUrl: 'https://example.com/playlist.m3u',
+        disabledCategoryIds: disabled,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testHttpClient = MockClient((_) async => http.Response(playlist, 200));
+      return client;
+    }
+
+    test('iptvChannels hides a disabled group', () async {
+      final client = clientWithPlaylist(disabled: const ['US']);
+      final channels = await client.iptvChannels();
+      expect(channels.map((c) => c.title), ['BBC One']);
+      client.close();
+    });
+
+    test('searchItems hides a disabled group', () async {
+      final client = clientWithPlaylist(disabled: const ['US']);
+      // 'CNN' matches 'nn' but sits in disabled group 'US'.
+      expect(await client.searchItems('nn'), isEmpty);
+      expect((await client.searchItems('bbc')).map((i) => i.title), ['BBC One']);
+      client.close();
+    });
+  });
+}
+
+/// Fake Xtream API returning a canned catalog (no network). The connection
+/// still builds real stream URLs from the fake's server/credentials.
+class _FakeXtreamApi extends XtreamApi {
+  _FakeXtreamApi()
+    : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pass');
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+    XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
+    XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+    XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getVodCategories() async =>
+      const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
 }

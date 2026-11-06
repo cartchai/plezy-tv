@@ -261,6 +261,11 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
   List<({ServerId serverId, String displayName})> _namedServers(List<String> ids) =>
       ids.map((id) => (serverId: ServerId(id), displayName: _serverManager.serverDisplayName(ServerId(id)))).toList();
 
+  /// Display name for a live-TV server id (the connection/server name, e.g.
+  /// "HOME PC" or "Trex"). Falls back to the raw id when the client doesn't
+  /// expose a name. Used by the Live TV source picker.
+  String liveTvServerName(String serverId) => _serverManager.serverDisplayName(ServerId(serverId));
+
   void clearAllConnections() {
     _serverManager.disconnectAll();
     _serverManager.setVisibleServerIds(null);

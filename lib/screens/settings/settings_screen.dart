@@ -56,6 +56,7 @@ import 'add_connection_screen.dart';
 import 'account_preferences_screen.dart';
 import 'appearance_settings_screen.dart';
 import 'general_settings_screen.dart';
+import 'iptv_settings_screen.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
 import 'playback_settings_screen.dart';
@@ -103,6 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
   static const _kPlayback = 'playback';
   static const _kManageLibraries = 'manage_libraries';
   static const _kServices = 'services';
+  static const _kIptv = 'iptv';
   static const _kDownloadLocation = 'download_location';
   static const _kDownloadOnWifiOnly = 'download_on_wifi_only';
   static const _kAutoRemoveWatchedDownloads = 'auto_remove_watched_downloads';
@@ -369,6 +371,13 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
             final active = context.read<ActiveProfileProvider>().active;
             Navigator.push(context, MaterialPageRoute(builder: (_) => AddConnectionScreen(targetProfile: active)));
           },
+        ),
+        SettingNavigationTile(
+          focusNode: _focusTracker.get(_kIptv),
+          icon: Symbols.live_tv_rounded,
+          title: t.iptv.title,
+          subtitle: t.iptv.settingsDescription,
+          destinationBuilder: (context) => const IptvSettingsScreen(),
         ),
         _buildProfilesTile(context),
         if (context.select<AccountPreferencesController, bool>((c) => c.accounts.isNotEmpty))

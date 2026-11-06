@@ -77,6 +77,21 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   bool _isLoading = true;
   String? _error;
 
+  /// Saved in initState: dispose() cannot use context.read (the widget is
+  /// already deactivated), so the provider reference lives here.
+  late final MultiServerProvider _multiServer;
+
+  /// Live TV source the guide shows: a server id, or null for all sources.
+  /// When more than one live-TV server is connected (e.g. Plex + an IPTV
+  /// playlist), the picker above the guide switches between them.
+  String? _selectedLiveTvServerId;
+
+  /// Live-TV server ids seen at the last channel load. A listener on the
+  /// provider reloads channels when a server binds late (e.g. an IPTV
+  /// connection finishing its health probe after this screen opened).
+  Set<String> _knownLiveTvServerIds = {};
+  bool _reloadAfterLoad = false;
+
   // Favorites
   bool _showFavoritesOnly = false;
   Set<String> _favoriteKeys = {};
@@ -108,6 +123,22 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     favorites: _favoriteChannels,
     sourceForChannel: _sourceForChannel,
   );
+
+  /// Guide channels after the source picker: only the selected server's
+  /// channels when one is picked, otherwise every loaded channel.
+  List<LiveTvChannel> get _sourceFilteredChannels {
+    final selected = _selectedLiveTvServerId;
+    if (selected == null) return _filteredChannels;
+    return _filteredChannels.where((c) => c.serverId == selected).toList();
+  }
+
+  /// True when a source is picked but none of its channels loaded — a
+  /// provider fetch failure, not an empty playlist — so the guide shows a
+  /// reload action instead of a bare grid.
+  bool get _selectedSourceHasNoChannels {
+    final selected = _selectedLiveTvServerId;
+    return selected != null && !_channels.any((c) => c.serverId == selected);
+  }
 
   /// True when the favorites filter removed every loaded channel, so the guide
   /// tab shows an explanatory empty state instead of a bare timeline.
@@ -146,7 +177,11 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     super.initState();
     suppressAutoFocus = true;
     _showFavoritesOnly = context.settingsRead(SettingsService.liveTvDefaultFavorites);
-    final initialTabs = _tabStateFor(context.read<MultiServerProvider>());
+    final provider = context.read<MultiServerProvider>();
+    _multiServer = provider;
+    _knownLiveTvServerIds = provider.liveTvServers.map((s) => s.serverId).toSet();
+    provider.addListener(_onLiveTvServersChanged);
+    final initialTabs = _tabStateFor(provider);
     _visibleTabs = initialTabs.tabs;
     _canProcessRules = initialTabs.canProcessRules;
     initTabNavigation();
@@ -155,12 +190,37 @@ class _LiveTvScreenState extends State<LiveTvScreen>
 
   @override
   void dispose() {
+    _multiServer.removeListener(_onLiveTvServersChanged);
     _guideTabFocusNode.dispose();
     _whatsOnTabFocusNode.dispose();
     _recordingsTabFocusNode.dispose();
     _guideEmptyStateActionFocusNode.dispose();
     disposeTabNavigation();
     super.dispose();
+  }
+
+  /// Reload channels when the live-TV server set changes (a late-bound
+  /// IPTV connection, or one going offline). Deferred a frame: the
+  /// provider can notify mid-build, and [_loadChannels] calls setState.
+  void _onLiveTvServersChanged() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final currentIds = _multiServer.liveTvServers.map((s) => s.serverId).toSet();
+      if (setEquals(currentIds, _knownLiveTvServerIds)) return;
+      _knownLiveTvServerIds = currentIds;
+      // Drop a selection whose server went away, so the guide falls back
+      // to all sources instead of an empty list.
+      if (_selectedLiveTvServerId != null && !currentIds.contains(_selectedLiveTvServerId)) {
+        _selectedLiveTvServerId = null;
+      }
+      if (_channelsLoadFuture != null) {
+        // A load is already running without the new server; run one more
+        // pass when it finishes (see [_loadChannels]).
+        _reloadAfterLoad = true;
+      } else {
+        unawaited(_loadChannels());
+      }
+    });
   }
 
   @override
@@ -343,6 +403,12 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     late final Future<void> load;
     load = _loadChannelsOnce().whenComplete(() {
       if (identical(_channelsLoadFuture, load)) _channelsLoadFuture = null;
+      // A server bound while this load was running: fetch once more so its
+      // channels are included instead of waiting for a manual refresh.
+      if (_reloadAfterLoad) {
+        _reloadAfterLoad = false;
+        unawaited(_loadChannels());
+      }
     });
     _channelsLoadFuture = load;
     return load;
@@ -833,27 +899,41 @@ class _LiveTvScreenState extends State<LiveTvScreen>
 
   Widget _buildTabContent(LiveTvTab tab, List<LiveTvChannel> guideChannels) {
     return switch (tab) {
-      LiveTvTab.guide =>
-        guideChannels.isEmpty && _channels.isNotEmpty
-            ? EmptyStateWidget(
-                icon: Symbols.star_outline_rounded,
-                message: t.liveTv.noFavoriteChannels,
-                subtitle: t.liveTv.noFavoriteChannelsHint,
-                actionLabel: t.liveTv.showAllChannels,
-                actionIcon: Symbols.list_rounded,
-                actionFocusNode: _guideEmptyStateActionFocusNode,
-                onAction: _showAllChannelsFromEmptyState,
-                onActionNavigateUp: focusTabBar,
-                onActionBack: onTabBarBack,
-              )
-            : GuideTab(
-                key: _guideTabKey,
-                channels: guideChannels,
-                isFavoriteChannel: _isFavoriteChannel,
-                onToggleFavorite: _toggleFavorite,
-                onNavigateUp: focusTabBar,
-                onBack: onTabBarBack,
+      LiveTvTab.guide => _selectedSourceHasNoChannels
+          ? EmptyStateWidget(
+              icon: Symbols.live_tv_rounded,
+              message: t.liveTv.noChannelsFromSource(
+                name: context.read<MultiServerProvider>().liveTvServerName(_selectedLiveTvServerId!),
               ),
+              subtitle: t.liveTv.noChannelsFromSourceHint,
+              actionLabel: t.liveTv.reloadGuide,
+              actionIcon: Symbols.refresh_rounded,
+              actionFocusNode: _guideEmptyStateActionFocusNode,
+              onAction: () => unawaited(_loadChannels()),
+              onActionNavigateUp: focusTabBar,
+              onActionBack: onTabBarBack,
+            )
+          : guideChannels.isEmpty && _channels.isNotEmpty
+              ? EmptyStateWidget(
+                  icon: Symbols.star_outline_rounded,
+                  message: t.liveTv.noFavoriteChannels,
+                  subtitle: t.liveTv.noFavoriteChannelsHint,
+                  actionLabel: t.liveTv.showAllChannels,
+                  actionIcon: Symbols.list_rounded,
+                  actionFocusNode: _guideEmptyStateActionFocusNode,
+                  onAction: _showAllChannelsFromEmptyState,
+                  onActionNavigateUp: focusTabBar,
+                  onActionBack: onTabBarBack,
+                )
+              : GuideTab(
+                  key: _guideTabKey,
+                  channels: guideChannels,
+                  showCatchUpBadge: context.settingsRead(SettingsService.iptvShowCatchUpBadge),
+                  isFavoriteChannel: _isFavoriteChannel,
+                  onToggleFavorite: _toggleFavorite,
+                  onNavigateUp: focusTabBar,
+                  onBack: onTabBarBack,
+                ),
       LiveTvTab.whatsOn => WhatsOnTab(
         key: _whatsOnTabKey,
         channels: _channels,
@@ -881,7 +961,7 @@ class _LiveTvScreenState extends State<LiveTvScreen>
       return Center(child: Text(t.liveTv.noChannels));
     }
 
-    final guideChannels = _filteredChannels;
+    final guideChannels = _sourceFilteredChannels;
 
     return Column(
       children: [
@@ -891,6 +971,7 @@ class _LiveTvScreenState extends State<LiveTvScreen>
             alignment: .centerLeft,
             child: TabChipStrip(children: _buildTabChipItems()),
           ),
+        _buildSourcePicker(),
         Expanded(
           child: TabBarView(
             controller: tabController,
@@ -898,6 +979,48 @@ class _LiveTvScreenState extends State<LiveTvScreen>
           ),
         ),
       ],
+    );
+  }
+
+  /// Source picker chips, shown only when more than one live-TV server is
+  /// connected. Picks which server's channels the guide shows; What's On
+  /// and Recordings are unaffected. Plex entries are deduped by server id
+  /// (one entry per DVR, but one source to pick).
+  Widget _buildSourcePicker() {
+    final multiServer = context.read<MultiServerProvider>();
+    final seenIds = <String>{};
+    final servers = <LiveTvServerInfo>[];
+    for (final server in multiServer.liveTvServers) {
+      if (seenIds.add(server.serverId)) servers.add(server);
+    }
+    if (servers.length < 2) return const SizedBox.shrink();
+    final selected = _selectedLiveTvServerId;
+    return SingleChildScrollView(
+      scrollDirection: .horizontal,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Row(
+          children: [
+            Text(t.liveTv.source, style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: Text(t.liveTv.allSources),
+              selected: selected == null,
+              showCheckmark: false,
+              onSelected: (_) => setState(() => _selectedLiveTvServerId = null),
+            ),
+            for (final server in servers) ...[
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(multiServer.liveTvServerName(server.serverId)),
+                selected: selected == server.serverId,
+                showCheckmark: false,
+                onSelected: (_) => setState(() => _selectedLiveTvServerId = server.serverId),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

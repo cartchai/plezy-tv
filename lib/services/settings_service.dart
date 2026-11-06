@@ -914,6 +914,11 @@ class SettingsService extends BaseSharedPreferencesService {
   /// per machine, so reset-only in the registry.
   static const audioOutputDevice = StringPref('audio_output_device', defaultValue: 'auto');
   static const liveTvDefaultFavorites = BoolPref('live_tv_default_favorites');
+
+  /// Show the catch-up badge on Live TV guide channels that offer catch-up
+  /// (Xtream `tv_archive = 1`). TiviMate's "Show catch-up icon in channel
+  /// list". Default on; applies when the guide reloads.
+  static const iptvShowCatchUpBadge = BoolPref('iptv_show_catch_up_badge', defaultValue: true);
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();
@@ -1600,6 +1605,7 @@ class SettingsService extends BaseSharedPreferencesService {
     cellularQualityPreset,
     musicQualityPreset,
     liveTvDefaultFavorites,
+    iptvShowCatchUpBadge,
     matchRefreshRate,
     matchDynamicRange,
     displaySwitchDelay,
