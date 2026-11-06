@@ -17,9 +17,12 @@ import '../../profiles/active_profile_provider.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../utils/formatters.dart';
+import '../../utils/iptv_initials.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
+import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
+import '../../widgets/iptv_initials_checklist.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_section.dart';
 import 'add_connection_screen.dart';
@@ -341,7 +344,12 @@ class _IptvConnectionsList extends StatelessWidget {
           );
         }
         return Column(
-          children: [for (final connection in connections) _IptvConnectionTile(connection: connection)],
+          children: [
+            for (final connection in connections) ...[
+              _IptvConnectionTile(connection: connection),
+              _IptvConnectionInitials(connection: connection),
+            ],
+          ],
         );
       },
     );
@@ -389,6 +397,92 @@ class _IptvConnectionTile extends StatelessWidget {
           unawaited(context.read<ActiveProfileBinder>().rebindIfActive(activeId));
         }
       },
+    );
+  }
+}
+
+/// The name-initials filter for one IPTV connection (build #8 Task 4),
+/// grouped with the categories on the IPTV settings screen: the initials
+/// that keep repeating across this connection's catalog, each with a
+/// switch to turn that whole set off. Collapsed by default; the checklist
+/// loads its initials only when first expanded.
+///
+/// Unlike the edit screen's deferred save, a toggle here persists
+/// immediately (registry upsert + rebind, like the edit screen's caller
+/// does after Save), so the filter applies everywhere at once.
+class _IptvConnectionInitials extends StatefulWidget {
+  final Connection connection;
+
+  const _IptvConnectionInitials({required this.connection});
+
+  @override
+  State<_IptvConnectionInitials> createState() => _IptvConnectionInitialsState();
+}
+
+class _IptvConnectionInitialsState extends State<_IptvConnectionInitials> {
+  bool _expanded = false;
+  List<IptvInitial>? _initials;
+
+  Set<String> get _disabled => switch (widget.connection) {
+    M3uConnection(:final disabledInitials) => disabledInitials.toSet(),
+    XtreamConnection(:final disabledInitials) => disabledInitials.toSet(),
+    _ => <String>{},
+  };
+
+  Future<void> _persist(Set<String> disabled) async {
+    final registry = context.read<ConnectionRegistry>();
+    final updated = switch (widget.connection) {
+      final M3uConnection c => c.copyWith(disabledInitials: disabled.toList()),
+      final XtreamConnection c => c.copyWith(disabledInitials: disabled.toList()),
+      _ => widget.connection,
+    };
+    await registry.upsert(updated);
+    if (!mounted) return;
+    final activeId = context.read<ActiveProfileProvider>().active?.id;
+    if (activeId != null) {
+      unawaited(context.read<ActiveProfileBinder>().rebindIfActive(activeId));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final offCount = _disabled.length;
+    final total = _initials?.length;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FocusableListTile(
+          title: Text(t.connections.iptvFilterInitials, style: theme.textTheme.titleSmall),
+          subtitle: total == null
+              ? null
+              : offCount == 0
+                  ? Text(
+                      t.connections.iptvFilterInitialsCount(n: total),
+                      style: theme.textTheme.bodySmall,
+                    )
+                  : Text(
+                      t.connections.iptvFilterSectionOff(off: offCount, total: total),
+                      style: theme.textTheme.bodySmall,
+                    ),
+          trailing: AppIcon(
+            _expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
+            fill: 1,
+          ),
+          onTap: () => setState(() => _expanded = !_expanded),
+        ),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: IptvInitialsChecklist(
+              connection: widget.connection,
+              disabled: _disabled,
+              onDisabledChanged: (next) => unawaited(_persist(next)),
+              onLoaded: (initials) => setState(() => _initials = initials),
+            ),
+          ),
+      ],
     );
   }
 }

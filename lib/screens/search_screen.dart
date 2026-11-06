@@ -26,6 +26,7 @@ import '../utils/platform_detector.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/media_server_http_client.dart';
 import '../utils/search_relevance.dart';
+import '../utils/search_sections.dart';
 import '../widgets/desktop_app_bar.dart';
 import '../widgets/loading_indicator_box.dart';
 import '../widgets/search_input_field.dart';
@@ -498,45 +499,117 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
-  Widget _buildResultsList(BuildContext context) {
+  /// The results slivers. The "All" view groups the ranked hits into
+  /// sections by library — Movies, TV Shows, Live TV, then other libraries,
+  /// People last — each with a header (build #8 Task 2: "add sections for
+  /// search so I can easily skip through movies TV or live or other
+  /// libraries"). A selected filter chip still shows that kind's full pool
+  /// as a flat list — a kind ranked out of the "All" top-N stays reachable
+  /// that way — and the chips are the jump control: tapping one takes you
+  /// straight to that kind's results.
+  List<Widget> _buildResultsList(BuildContext context) {
     final multiServer = context.watch<MultiServerProvider>();
     final libraries = context.watch<LibrariesProvider>();
     final showServerName = multiServer.totalServerCount > 1;
     final showChips = _showFilterChips;
     final visible = _visibleResults;
-    return buildResultsSliver(
-      childCount: visible.length,
-      // Half the default top padding when the chip strip sits directly above:
-      // the strip already separates results from the search field.
-      padding: showChips ? const EdgeInsets.fromLTRB(16, 8, 16, 16) : const EdgeInsets.all(16),
-      (context, index) {
-        final isFirst = index == 0;
-        final onNavigateUp = isFirst ? (showChips ? _focusFilterChips : focusSearchInput) : null;
-        return switch (visible[index]) {
-          MediaSearchHit(:final item) => FocusableMediaCard(
-            key: Key(item.globalKey),
-            item: item,
-            viewModeOverride: ViewMode.list,
-            disableScale: true,
-            focusNode: isFirst ? firstResultFocusNode : null,
-            onRefresh: updateItem,
-            onListRefresh: refresh,
-            onNavigateLeft: _navigateToSidebar,
-            onNavigateUp: onNavigateUp,
-            showServerName: showServerName,
-            libraryName: libraries.libraryLabelFor(item),
-          ),
-          PersonSearchHit(:final person) => PersonSearchRow(
-            key: Key(person.globalKey),
-            person: person,
-            focusNode: isFirst ? firstResultFocusNode : null,
-            showServerName: showServerName,
-            onNavigateLeft: _navigateToSidebar,
-            onNavigateUp: onNavigateUp,
-          ),
-        };
-      },
+    // Half the default top padding when the chip strip sits directly above:
+    // the strip already separates results from the search field.
+    final topPadding = showChips ? const EdgeInsets.fromLTRB(16, 8, 16, 16) : const EdgeInsets.all(16);
+    Widget flatList(List<SearchHit> hits, {required EdgeInsets padding}) => buildResultsSliver(
+      childCount: hits.length,
+      padding: padding,
+      (context, index) => _buildResultRow(
+        hits[index],
+        isFirst: index == 0,
+        showChips: showChips,
+        showServerName: showServerName,
+        libraries: libraries,
+      ),
     );
+    if (_filteredResults != null) return [flatList(visible, padding: topPadding)];
+    final sections = groupSearchResults(
+      visible,
+      libraryLabel: (item) =>
+          libraries.libraryLabelFor(item) ?? item.libraryTitle ?? item.serverName ?? _kindFilterLabel(item.kind),
+      peopleLabel: t.search.people,
+    );
+    if (sections.length <= 1) return [flatList(visible, padding: topPadding)];
+    final theme = Theme.of(context);
+    final slivers = <Widget>[];
+    for (final (sectionIndex, section) in sections.indexed) {
+      slivers.add(
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, sectionIndex == 0 ? (showChips ? 8 : 16) : 24, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    section.label,
+                    key: Key('SearchSectionHeader:${section.label}'),
+                    style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Text(
+                  '${section.hits.length}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      slivers.add(
+        buildResultsSliver(
+          childCount: section.hits.length,
+          padding: EdgeInsets.fromLTRB(16, 0, 16, sectionIndex == sections.length - 1 ? 16 : 0),
+          (context, index) => _buildResultRow(
+            section.hits[index],
+            isFirst: sectionIndex == 0 && index == 0,
+            showChips: showChips,
+            showServerName: showServerName,
+            libraries: libraries,
+          ),
+        ),
+      );
+    }
+    return slivers;
+  }
+
+  Widget _buildResultRow(
+    SearchHit hit, {
+    required bool isFirst,
+    required bool showChips,
+    required bool showServerName,
+    required LibrariesProvider libraries,
+  }) {
+    final onNavigateUp = isFirst ? (showChips ? _focusFilterChips : focusSearchInput) : null;
+    return switch (hit) {
+      MediaSearchHit(:final item) => FocusableMediaCard(
+        key: Key(item.globalKey),
+        item: item,
+        viewModeOverride: ViewMode.list,
+        disableScale: true,
+        focusNode: isFirst ? firstResultFocusNode : null,
+        onRefresh: updateItem,
+        onListRefresh: refresh,
+        onNavigateLeft: _navigateToSidebar,
+        onNavigateUp: onNavigateUp,
+        showServerName: showServerName,
+        libraryName: libraries.libraryLabelFor(item),
+      ),
+      PersonSearchHit(:final person) => PersonSearchRow(
+        key: Key(person.globalKey),
+        person: person,
+        focusNode: isFirst ? firstResultFocusNode : null,
+        showServerName: showServerName,
+        onNavigateLeft: _navigateToSidebar,
+        onNavigateUp: onNavigateUp,
+      ),
+    };
   }
 
   @override
@@ -594,7 +667,7 @@ class _SearchScreenState extends State<SearchScreen>
               )
             else ...[
               if (_showFilterChips) _buildFilterChips(),
-              _buildResultsList(context),
+              ..._buildResultsList(context),
             ],
           ],
         ),

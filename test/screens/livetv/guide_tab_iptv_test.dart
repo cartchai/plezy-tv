@@ -85,6 +85,8 @@ class _EpgControllableApi extends XtreamApi {
       pending[streamId]?.complete(programs);
 
   void completeEmpty(String streamId) => pending[streamId]?.complete(const []);
+
+  void completeError(String streamId, Object error) => pending[streamId]?.completeError(error);
 }
 
 XtreamEpgProgram _epg({
@@ -199,10 +201,13 @@ void main() {
     await harness.pump(tester);
     await harness.waitForEpgCalls(tester, 2);
 
-    // The thin header bar — not a full-screen spinner — and no
-    // placeholders pretending the load already finished empty.
+    // The thin header bar AND a visible per-row loading state (build #8
+    // Task 3: the row used to stay blank while loading, with only the 3px
+    // line as the signal) — never placeholders pretending the load already
+    // finished empty.
     expect(find.byType(LinearProgressIndicator), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text(t.liveTv.loadingGuide), findsNWidgets(2));
+    expect(find.byType(CircularProgressIndicator), findsNWidgets(2));
     expect(find.text('No information available'), findsNothing);
 
     harness.api.completeEmpty('100');
@@ -213,6 +218,39 @@ void main() {
     // 5 hour blocks per row are in the tree at this viewport (1280px wide,
     // 180px slots + one slot of overscan) — the rest are virtualized away.
     expect(find.text('No information available'), findsNWidgets(10));
+  });
+
+  testWidgets('a failed EPG fetch shows a retry state, and tapping it retries', (tester) async {
+    // Build #8 Task 3: both sources fail (get_short_epg errors; the xmltv
+    // feed throws in this harness) — the row must show a visible failed
+    // state, not silent hour placeholders, and tapping it must refetch.
+    final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    addTearDown(harness.dispose);
+    await harness.init();
+    await harness.pump(tester);
+    await harness.waitForEpgCalls(tester, 1);
+
+    harness.api.completeError('100', Exception('provider down'));
+    await tester.pumpAndSettle();
+
+    // No placeholders pretending the load finished empty; the retry state
+    // is visible instead.
+    expect(find.text('No information available'), findsNothing);
+    expect(find.text(t.liveTv.guideLoadFailed), findsOneWidget);
+
+    // Tapping retries the fetch; completing it with programmes replaces
+    // the retry state with the guide.
+    await tester.tap(find.text(t.liveTv.guideLoadFailed));
+    await harness.waitForEpgCalls(tester, 2);
+    final now = DateTime.now();
+    final hourStart = DateTime(now.year, now.month, now.day, now.hour).add(const Duration(hours: 1));
+    harness.api.complete('100', [
+      _epg(id: 'a', title: 'Retried Show', start: hourStart, end: hourStart.add(const Duration(hours: 1))),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text(t.liveTv.guideLoadFailed), findsNothing);
+    expect(find.text('Retried Show'), findsOneWidget);
   });
 
   testWidgets('channel with no EPG renders one hour block per hour of the window', (tester) async {

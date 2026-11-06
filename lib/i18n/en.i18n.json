@@ -1124,6 +1124,11 @@
     "iptvFilterMovies": "Movies",
     "iptvFilterSeries": "TV Series",
     "iptvFilterGroups": "Groups",
+    "iptvFilterInitials": "Name initials",
+    "iptvFilterInitialsCount": {
+      "one": "${n} initial",
+      "other": "${n} initials"
+    },
     "iptvFilterSectionCount": {
       "one": "${n} category",
       "other": "${n} categories"
@@ -1396,6 +1401,13 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2254": [
+      "Search finds TV shows again — a query matching lots of movies no longer hides the series",
+      "Search results are grouped into Movies, TV Shows, Live TV and other libraries, with chips to jump between them",
+      "The TV guide now shows Loading guide… while it loads, and a tap-to-retry message when it fails",
+      "The guide loads the quick per-channel data first while the big guide file downloads in the background",
+      "Name initials can be turned off in IPTV settings — repeating initials like EN, ES or NF, grouped with the categories"
+    ],
     "changelog2253": [
       "IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick",
       "Movies and TV libraries have a Categories tab with the provider's own categories",
@@ -1693,6 +1705,8 @@
     "live": "LIVE",
     "premiereBadge": "NEW",
     "reloadGuide": "Reload Guide",
+    "loadingGuide": "Loading guide…",
+    "guideLoadFailed": "Guide couldn't load — tap to retry",
     "searchGuide": "Search Guide",
     "searchHint": "Search channels & programs",
     "searchNoResults": "No matches for \"${query}\"",
@@ -2707,6 +2721,9 @@
     "epgLastUpdated": "Last updated",
     "epgNeverUpdated": "Never",
     "epgUpdated": "Guide updated",
-    "epgCleared": "Guide cleared"
+    "epgCleared": "Guide cleared",
+    "initialsLoading": "Loading initials…",
+    "initialsLoadFailed": "Could not load the name initials. Check the connection and try again.",
+    "initialsNoneFound": "No repeating initials found in this connection’s catalog."
   }
 }

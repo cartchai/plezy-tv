@@ -14,9 +14,11 @@ import '../../services/iptv/m3u_parser.dart';
 import '../../services/iptv/xtream_api.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../utils/app_logger.dart';
+import '../../utils/iptv_initials.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/focusable_list_tile.dart';
+import '../../widgets/iptv_initials_checklist.dart';
 import '../../widgets/loading_indicator_box.dart';
 import 'async_form_state_mixin.dart';
 
@@ -31,8 +33,9 @@ class _IptvCategory {
 }
 
 /// Which of the three content types a section lists. M3U groups have no
-/// live/VOD/series type, so they get their own single section.
-enum _CategorySectionKind { live, movies, series, groups }
+/// live/VOD/series type, so they get their own single section. The initials
+/// section (build #8 Task 4) lists detected name initials, not categories.
+enum _CategorySectionKind { live, movies, series, groups, initials }
 
 /// One collapsible section of the category filter. All sections share the
 /// same `disabledCategoryIds` set: a category id that appears in more than
@@ -52,11 +55,27 @@ class _IptvCategorySection {
   });
 }
 
+/// Marker for the name-initials section (build #8 Task 4): the checklist
+/// loads its own initials via its own client, so the section carries no
+/// category list — it is a header row plus one checklist row.
+class _IptvInitialsSection {
+  final settings.Pref<bool> expandedPref;
+
+  const _IptvInitialsSection({required this.expandedPref});
+}
+
+/// Marker for the initials checklist row, rendered by the builder as an
+/// [IptvInitialsChecklist] (one row holding the whole short list).
+class _IptvInitialsChecklistRow {
+  const _IptvInitialsChecklistRow();
+}
+
 settings.Pref<bool> _expandedPrefFor(_CategorySectionKind kind) => switch (kind) {
   _CategorySectionKind.live => settings.SettingsService.iptvCategoriesLiveExpanded,
   _CategorySectionKind.movies => settings.SettingsService.iptvCategoriesMoviesExpanded,
   _CategorySectionKind.series => settings.SettingsService.iptvCategoriesSeriesExpanded,
   _CategorySectionKind.groups => settings.SettingsService.iptvCategoriesGroupsExpanded,
+  _CategorySectionKind.initials => settings.SettingsService.iptvCategoriesInitialsExpanded,
 };
 
 /// Edit an IPTV connection's country/region filter: collapsible sections
@@ -96,6 +115,16 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
   late final Set<String> _disabled = widget.connection is M3uConnection
       ? (widget.connection as M3uConnection).disabledCategoryIds.toSet()
       : (widget.connection as XtreamConnection).disabledCategoryIds.toSet();
+
+  /// The name initials the user turned off (build #8 Task 4) — the same
+  /// deferred-save flow as the category set: edited here, persisted by
+  /// [_save]. Unlike categories, the initials list itself is loaded by the
+  /// checklist widget, so the screen only keeps the disabled set plus the
+  /// loaded list (for the section header's count).
+  late final Set<String> _disabledInitials = widget.connection is M3uConnection
+      ? (widget.connection as M3uConnection).disabledInitials.toSet()
+      : (widget.connection as XtreamConnection).disabledInitials.toSet();
+  List<IptvInitial>? _initials;
 
   /// Expanded/collapsed state per section, persisted per section (see
   /// [_expandedPrefFor]) so it survives leaving the screen.
@@ -250,17 +279,23 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
     _CategorySectionKind.movies => t.connections.iptvFilterMovies,
     _CategorySectionKind.series => t.connections.iptvFilterSeries,
     _CategorySectionKind.groups => t.connections.iptvFilterGroups,
+    _CategorySectionKind.initials => t.connections.iptvFilterInitials,
   };
 
   /// Flat row list for the builder: one header row per section, then that
   /// section's categories only while it is expanded. Keeps the lazy
   /// builder (the provider's 800+ categories never build all at once).
+  /// The name-initials section rides at the end, with the category
+  /// groupings (build #8 Task 4): its checklist loads its own initials,
+  /// so it contributes a header plus one checklist row.
   List<Object> get _rows {
     final rows = <Object>[];
     for (final section in _sections) {
       rows.add(section);
       if (_expanded[section.kind] ?? true) rows.addAll(section.categories);
     }
+    rows.add(_IptvInitialsSection(expandedPref: _expandedPrefFor(_CategorySectionKind.initials)));
+    if (_expanded[_CategorySectionKind.initials] ?? true) rows.add(const _IptvInitialsChecklistRow());
     return rows;
   }
 
@@ -271,8 +306,14 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
       () async {
         final registry = context.read<ConnectionRegistry>();
         final updated = switch (widget.connection) {
-          final M3uConnection c => c.copyWith(disabledCategoryIds: _disabled.toList()),
-          final XtreamConnection c => c.copyWith(disabledCategoryIds: _disabled.toList()),
+          final M3uConnection c => c.copyWith(
+            disabledCategoryIds: _disabled.toList(),
+            disabledInitials: _disabledInitials.toList(),
+          ),
+          final XtreamConnection c => c.copyWith(
+            disabledCategoryIds: _disabled.toList(),
+            disabledInitials: _disabledInitials.toList(),
+          ),
           _ => widget.connection,
         };
         await registry.upsert(updated, expected: widget.connection);
@@ -398,6 +439,46 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
               itemCount: _rows.length,
               itemBuilder: (context, index) {
                 final row = _rows[index];
+                if (row is _IptvInitialsSection) {
+                  final expanded = _expanded[_CategorySectionKind.initials] ?? true;
+                  final offCount = _disabledInitials.length;
+                  final total = _initials?.length;
+                  return FocusableListTile(
+                    title: Text(
+                      _sectionTitle(_CategorySectionKind.initials),
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    subtitle: total == null
+                        ? null
+                        : offCount == 0
+                            ? Text(
+                                t.connections.iptvFilterInitialsCount(n: total),
+                                style: theme.textTheme.bodySmall,
+                              )
+                            : Text(
+                                t.connections.iptvFilterSectionOff(off: offCount, total: total),
+                                style: theme.textTheme.bodySmall,
+                              ),
+                    trailing: AppIcon(
+                      expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
+                      fill: 1,
+                    ),
+                    onTap: busy ? null : () => _toggleSection(_CategorySectionKind.initials),
+                  );
+                }
+                if (row is _IptvInitialsChecklistRow) {
+                  return IptvInitialsChecklist(
+                    connection: widget.connection,
+                    disabled: _disabledInitials,
+                    enabled: !busy,
+                    onDisabledChanged: (next) => setState(() {
+                      _disabledInitials
+                        ..clear()
+                        ..addAll(next);
+                    }),
+                    onLoaded: (initials) => setState(() => _initials = initials),
+                  );
+                }
                 if (row is _IptvCategorySection) {
                   final expanded = _expanded[row.kind] ?? true;
                   final offCount = row.categories.where((c) => _disabled.contains(c.id)).length;

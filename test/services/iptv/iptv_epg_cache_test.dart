@@ -59,10 +59,12 @@ class _EpgFakeApi extends XtreamApi {
   var xmltvCalls = 0;
   String xmltvBody = '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
   bool failXmltv = false;
+  bool failShortEpg = false;
 
   @override
   Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
     calls[streamId] = (calls[streamId] ?? 0) + 1;
+    if (failShortEpg) throw Exception('get_short_epg unavailable');
     return scripted[streamId] ?? const [];
   }
 
@@ -123,6 +125,21 @@ void main() {
     return files.single;
   }
 
+  /// Wait for the persisted EPG file to land. The write is fire-and-forget
+  /// (awaiting disk I/O would gate the guide), so a fetch can return
+  /// before the file exists — poll for it instead of asserting immediately.
+  /// Build #8 Task 3 made the fetch return faster (get_short_epg first, no
+  /// xmltv await when it answers), so the race the old xmltv-first await
+  /// used to mask is now visible in these tests.
+  Future<void> waitForEpgFile() async {
+    for (var i = 0; i < 100; i++) {
+      final files = tempDir.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('.json')).toList();
+      if (files.length == 1) return;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    fail('persisted EPG file was not written');
+  }
+
   /// Rewrite the persisted entry's JSON in place (fetchedAt / window).
   Future<void> rewritePersisted(Map<String, dynamic> Function(Map<String, dynamic> json) edit) async {
     final file = epgFile();
@@ -166,6 +183,7 @@ void main() {
     final programs = await fetchEpg(first, now);
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
     expect(api.calls['100'], 1);
+    await waitForEpgFile();
     expect(epgFile().existsSync(), isTrue);
 
     // Relaunch: a new support instance, same connection, same disk.
@@ -182,6 +200,7 @@ void main() {
     expect(api.calls['100'], 1);
 
     // Age the entry past the 24h default interval.
+    await waitForEpgFile();
     await rewritePersisted(
       (json) => {...json, 'fetchedAt': now.subtract(const Duration(hours: 25)).toIso8601String()},
     );
@@ -200,6 +219,7 @@ void main() {
 
     // Shrink the stored window so it no longer covers the requested
     // to = now + 6h.
+    await waitForEpgFile();
     await rewritePersisted(
       (json) => {...json, 'windowTo': now.add(const Duration(hours: 1)).toIso8601String()},
     );
@@ -214,6 +234,7 @@ void main() {
     scriptEpg(now);
     await fetchEpg(supportFor(), now);
     expect(api.calls['100'], 1);
+    await waitForEpgFile();
     await epgFile().writeAsString('not-json{');
 
     final relaunched = supportFor();
@@ -228,9 +249,16 @@ void main() {
     final support = supportFor();
     await fetchEpg(support, now);
     expect(api.calls['100'], 1);
+    await waitForEpgFile();
     expect(epgFile().existsSync(), isTrue);
 
     await support.clearEpgCache();
+    // The delete is fire-and-forget (like the write): poll until the
+    // directory is actually empty instead of asserting immediately.
+    for (var i = 0; i < 100; i++) {
+      if (tempDir.listSync(recursive: true).whereType<File>().isEmpty) break;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
     expect(tempDir.listSync(recursive: true).whereType<File>(), isEmpty);
 
     // Same launch: the cleared flag holds — no refetch.
@@ -351,7 +379,12 @@ void main() {
     return client;
   }
 
-  test('xmltv.php feed is the primary Xtream EPG source', () async {
+  test('get_short_epg answers first; the xmltv.php feed covers a channel it has nothing for', () async {
+    // Build #8 Task 3: get_short_epg runs first per channel (fast, so the
+    // guide populates in seconds) while the big xmltv.php feed loads in
+    // the background; the feed is the deeper source when get_short_epg has
+    // nothing for the channel. get_short_epg answers empty here, so the
+    // feed serves the channel.
     final now = DateTime.now();
     api.xmltvBody = xmltvDoc(now);
     final client = await listedClient();
@@ -361,7 +394,8 @@ void main() {
     expect(programs.map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
     expect(programs.first.summary, 'From the feed');
     expect(api.xmltvCalls, 1);
-    expect(api.calls['100'] ?? 0, 0, reason: 'get_short_epg must not run when the feed served the channel');
+    expect(api.calls['100'], 1, reason: 'get_short_epg runs first per channel, even when the feed serves it');
+    await waitForEpgFile();
     // The XMLTV-sourced programmes are persisted per channel, like any
     // other fetch — a relaunch serves them without re-fetching the feed.
     expect(epgFile().existsSync(), isTrue);
@@ -370,7 +404,7 @@ void main() {
     expect(api.xmltvCalls, 1, reason: 'the persisted entry must be served, not the feed re-fetched');
   });
 
-  test('a channel missing from the feed falls back to get_short_epg', () async {
+  test('get_short_epg serves the channel; the xmltv.php feed still loads in the background', () async {
     final now = DateTime.now();
     api.xmltvBody = xmltvDoc(now, includeCh100: false);
     scriptEpg(now);
@@ -383,7 +417,7 @@ void main() {
     expect(api.calls['100'], 1);
   });
 
-  test('a failing xmltv.php fetch falls back to get_short_epg', () async {
+  test('a failing xmltv.php fetch still serves get_short_epg programmes', () async {
     final now = DateTime.now();
     api.failXmltv = true;
     scriptEpg(now);
@@ -394,6 +428,22 @@ void main() {
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
     expect(api.xmltvCalls, 1);
     expect(api.calls['100'], 1);
+  });
+
+  test('both sources failing throws so the guide can mark the channel failed', () async {
+    // Build #8 Task 3: only when BOTH sources fail does the fetch throw —
+    // if either answers (even empty), that answer stands. A throw lets the
+    // guide show a visible failed state with a retry instead of recording
+    // silent empty placeholders as loaded. A failed fetch writes no cache
+    // entry, so a retry refetches.
+    final now = DateTime.now();
+    api.failXmltv = true;
+    api.failShortEpg = true;
+    final client = await listedClient();
+    final support = client.liveTv as IptvLiveTvSupport;
+
+    await expectLater(fetchEpg(support, now), throwsA(anything));
+    expect(tempDir.listSync(recursive: true).whereType<File>(), isEmpty);
   });
 
   test('the parsed XMLTV guide is shared across channels', () async {
@@ -411,7 +461,7 @@ void main() {
     );
     expect(second.map((p) => p.title), ['Other Channel']);
     expect(api.xmltvCalls, 1, reason: 'the second channel must reuse the parsed feed, not re-fetch it');
-    expect(api.calls['100'] ?? 0, 0);
-    expect(api.calls['200'] ?? 0, 0);
+    expect(api.calls['100'], 1, reason: 'get_short_epg runs first per channel, even when the feed serves it');
+    expect(api.calls['200'], 1, reason: 'get_short_epg runs first per channel, even when the feed serves it');
   });
 }

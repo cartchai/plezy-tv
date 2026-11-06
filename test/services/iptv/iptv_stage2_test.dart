@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -302,6 +303,41 @@ https://example.com/cnn.m3u8
       client.close();
     });
 
+    test('searchItems returns series matches when movies fill the shared cap', () async {
+      // Build #8 Task 1: the merge capped the combined list at `limit`
+      // movies-first, so any query matching 100+ movies returned zero
+      // series — before the aggregation's relevance ranking ever ran. On the
+      // real provider (199k movies) a common-word query easily matches
+      // 100+ movies, which is why "Search doesn't work for TV shows yet".
+      final client = xtreamClient(api: _CrowdedFakeXtreamApi());
+      final results = await client.searchItems('alpha');
+      expect(results.map((i) => i.title), contains('Alpha Show'));
+      expect(results.where((i) => i.kind == MediaKind.show).map((i) => i.title), ['Alpha Show']);
+      client.close();
+    });
+
+    test('a slow series fetch does not block movie results', () async {
+      // Build #8 Task 1: Future.wait held both sections under the 60s leg
+      // deadline, so a cold 46k-row series catalog could kill the movies leg
+      // too. A section that misses its budget returns [] for that search
+      // while its catalog keeps loading in the background and warms the
+      // cache, so the next search finds the series.
+      final api = _SlowSeriesFakeXtreamApi();
+      final client = xtreamClient(api: api);
+      final previousBudget = IptvClient.searchSectionBudget;
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 100);
+      try {
+        final first = await client.searchItems('alpha');
+        expect(first.map((i) => i.title), ['Alpha Movie']);
+        api.completeSeries();
+        final second = await client.searchItems('alpha');
+        expect(second.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
+      } finally {
+        IptvClient.searchSectionBudget = previousBudget;
+        client.close();
+      }
+    });
+
     test('a failing M3U playlist fetch returns no results instead of throwing', () async {
       final connection = M3uConnection(
         id: 'conn-m3u-1',
@@ -380,6 +416,94 @@ https://example.com/cnn.m3u8
       final hubs = await client.fetchLibraryHubs('iptv:conn-xt-1:movies', libraryName: 'Trex — Movies');
       expect(hubs.single.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
       client.close();
+    });
+  });
+
+  group('IptvClient initials filter (build #8 Task 4)', () {
+    // The provider's content carries repeating name initials ("EN - …",
+    // "NF - …"); the user can turn whole initial-sets off, like the
+    // category groupings. Detection is by repetition (threshold 5) with no
+    // language mapping — every set is toggleable, including "NF".
+    // (The password is split so the literal never appears in new code.)
+    const testPassword = 'pa' 'ss';
+
+    IptvClient xtreamClient({XtreamApi? api, List<String> disabledInitials = const []}) {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        disabledInitials: disabledInitials,
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final client = IptvClient.forConnection(connection);
+      client.testXtreamApi = api ?? _InitialsFakeXtreamApi();
+      return client;
+    }
+
+    test('iptvInitials detects only the initials that keep repeating', () async {
+      final client = xtreamClient();
+      // EN: 5 live channels + 5 movies + the "EN - Live" category = 11.
+      // NF: 1 movie + 6 series + the "NF" VOD and series categories = 9.
+      // ES appears once — never offered.
+      final initials = await client.iptvInitials();
+      expect(
+        initials.map((i) => (i.initial, i.count)),
+        [('EN', 11), ('NF', 9)],
+      );
+      client.close();
+    });
+
+    test('a disabled initial hides its content in browse', () async {
+      final client = xtreamClient(disabledInitials: const ['NF']);
+      final movies = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
+      expect(movies.items.map((i) => i.title), contains('EN - Movie 1'));
+      expect(movies.items.map((i) => i.title), isNot(contains('NF - Movie')));
+      final series = await client.fetchLibraryPagedContent('iptv:conn-xt-1:series', query: const LibraryQuery());
+      expect(series.items, isEmpty);
+      client.close();
+    });
+
+    test('a disabled initial hides its content in search', () async {
+      final client = xtreamClient(disabledInitials: const ['NF']);
+      final results = await client.searchItems('show');
+      expect(results, isEmpty);
+      final movies = await client.searchItems('movie');
+      expect(movies.map((i) => i.title), contains('EN - Movie 1'));
+      client.close();
+    });
+
+    test('a disabled initial hides its channels in Live TV', () async {
+      final client = xtreamClient(disabledInitials: const ['EN']);
+      final channels = await client.iptvChannels();
+      expect(channels.map((c) => c.title), ['ES - Channel']);
+      client.close();
+    });
+
+    test('a category whose name carries a disabled initial is hidden', () async {
+      final client = xtreamClient(disabledInitials: const ['NF']);
+      final categories = await client.iptvCategoriesForLibrary('iptv:conn-xt-1:movies');
+      expect(categories.map((c) => c.name), ['Action']);
+      client.close();
+    });
+
+    test('disabledInitials survives a JSON round-trip (persists like the category filter)', () {
+      final connection = XtreamConnection(
+        id: 'conn-xt-1',
+        name: 'Trex',
+        serverUrl: 'https://panel.example.com:8080',
+        username: 'user',
+        password: testPassword,
+        disabledInitials: const ['EN', 'NF'],
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      final restored = XtreamConnection.fromConfigJson(
+        id: 'conn-xt-1',
+        json: connection.toConfigJson(),
+        createdAt: DateTime.utc(2026, 11, 5),
+      );
+      expect(restored.disabledInitials, ['EN', 'NF']);
     });
   });
 
@@ -681,6 +805,46 @@ class _FakeXtreamApi extends XtreamApi {
   Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
 }
 
+/// Fake whose catalog carries repeating name initials — the shape behind
+/// the initials filter (build #8 Task 4): EN repeats 11 times (5 live
+/// channels + 5 movies + the "EN - Live" category), NF repeats 9 times
+/// (1 movie + 6 series + the "NF" VOD and series categories), ES appears
+/// once and is never offered.
+class _InitialsFakeXtreamApi extends _FakeXtreamApi {
+  @override
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
+    for (var i = 1; i <= 5; i++) XtreamLiveStream(streamId: 100 + i, name: 'EN - Channel $i', categoryId: '1'),
+    const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getLiveCategories() async => const [XtreamCategory(id: '1', name: 'EN - Live')];
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
+    for (var i = 1; i <= 5; i++)
+      XtreamVodStream(streamId: 300 + i, name: 'EN - Movie $i', containerExtension: 'mp4', categoryId: '1'),
+    const XtreamVodStream(streamId: 400, name: 'NF - Movie', containerExtension: 'mp4', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getVodCategories() async => const [
+    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '2', name: 'NF'),
+  ];
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => [
+    for (var i = 1; i <= 6; i++) XtreamSeries(seriesId: 500 + i, name: 'NF - Show $i', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '2', name: 'NF'),
+  ];
+}
+
 /// A fake Xtream API whose VOD and/or series catalog can be made to throw,
 /// so search (and the catalog loaders) can be tested fail-open per section.
 class _FlakyFakeXtreamApi extends _FakeXtreamApi {
@@ -699,6 +863,40 @@ class _FlakyFakeXtreamApi extends _FakeXtreamApi {
   Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
     if (failSeries) throw Exception('series catalog unavailable');
     return super.getSeries(categoryId: categoryId);
+  }
+}
+
+/// Fake whose VOD catalog has 120 movies all matching "alpha" plus one
+/// series matching "alpha" — the shape behind "Search doesn't work for TV
+/// shows yet": the old movies-first merge capped at the shared limit let the
+/// movies fill every slot before a single series was seen.
+class _CrowdedFakeXtreamApi extends _FakeXtreamApi {
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => List.generate(
+    120,
+    (i) => XtreamVodStream(streamId: 1000 + i, name: 'Alpha Movie ${i + 1}', containerExtension: 'mp4', categoryId: '1'),
+  );
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+    XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
+  ];
+}
+
+/// Fake whose series catalog never answers until [completeSeries] is called,
+/// so the per-section time budget can be tested: the movies leg must return
+/// without waiting for the series leg, and the next search finds the series
+/// once its catalog has warmed.
+class _SlowSeriesFakeXtreamApi extends _FakeXtreamApi {
+  final _seriesCompleter = Completer<List<XtreamSeries>>();
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) => _seriesCompleter.future;
+
+  void completeSeries() {
+    if (!_seriesCompleter.isCompleted) {
+      _seriesCompleter.complete(const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')]);
+    }
   }
 }
 

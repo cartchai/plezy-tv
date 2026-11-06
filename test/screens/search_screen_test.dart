@@ -606,6 +606,105 @@ void main() {
     expect(find.byType(FocusableMediaCard), findsNWidgets(3));
   });
 
+  testWidgets('All view groups results into library sections in Movies / TV / Live TV order', (tester) async {
+    // Build #8 Task 2: the ranked list is show-first, channel-second,
+    // movie-third — sections still render Movies, TV Shows, Live TV, then
+    // the Plex library, then People, each with a header, and the series
+    // result lands in the TV Shows section. The Plex library keeps its own
+    // section apart from the IPTV one.
+    final (_, key) = await _pumpTvSearchScreen(
+      tester,
+      items: [
+        testMediaItem(
+          id: 'show_1',
+          backend: MediaBackend.plex,
+          kind: MediaKind.show,
+          title: 'Alpha Show',
+          serverId: 'conn-xt-1',
+          serverName: 'Trex',
+          libraryId: 'series',
+          libraryTitle: 'Trex — Series',
+        ),
+        testMediaItem(
+          id: 'ch_1',
+          backend: MediaBackend.plex,
+          kind: MediaKind.unknown,
+          title: 'Alpha Channel',
+          serverId: 'conn-m3u-1',
+          serverName: 'Trex M3U',
+          libraryId: 'iptv:conn-m3u-1:live',
+          libraryTitle: 'Trex — Live TV',
+        ),
+        testMediaItem(
+          id: 'movie_1',
+          backend: MediaBackend.plex,
+          kind: MediaKind.movie,
+          title: 'Alpha Movie',
+          serverId: 'conn-xt-1',
+          serverName: 'Trex',
+          libraryId: 'movies',
+          libraryTitle: 'Trex — Movies',
+        ),
+        testMediaItem(
+          id: 'movie_2',
+          backend: MediaBackend.plex,
+          kind: MediaKind.movie,
+          title: 'Alpha Plex Movie',
+          serverId: 'server_1',
+          serverName: 'HOME PC',
+          libraryId: '1',
+          libraryTitle: 'Plex Movies',
+        ),
+      ],
+      people: [
+        MediaPerson(
+          id: 'person_1',
+          name: 'Alpha Person',
+          backend: MediaBackend.plex,
+          serverId: ServerId('server_1'),
+        ),
+      ],
+    );
+    await tester.pumpAndSettle();
+
+    // The five sections are taller than the 720px TV viewport: grow it so
+    // every section header and row is built for the position assertions.
+    tester.view.physicalSize = const Size(1280, 2000);
+    await tester.pumpAndSettle();
+
+    (key.currentState! as SearchInputFocusable).submitSearchQuery('alpha');
+    await tester.pumpAndSettle();
+
+    // Section headers in order, regardless of the ranked item order:
+    // Movies libraries first (both servers, by label), then TV Shows,
+    // then Live TV, then People.
+    double headerY(String label) => tester.getTopLeft(find.byKey(Key('SearchSectionHeader:$label'))).dy;
+    final plexY = headerY('Plex Movies');
+    final movieY = headerY('Trex — Movies');
+    final seriesY = headerY('Trex — Series');
+    final liveY = headerY('Trex — Live TV');
+    final peopleY = headerY(t.search.people);
+    expect(plexY < movieY, isTrue);
+    expect(movieY < seriesY, isTrue);
+    expect(seriesY < liveY, isTrue);
+    expect(liveY < peopleY, isTrue);
+
+    // Each item sits under its own section's header.
+    double itemY(String title) => tester.getTopLeft(find.text(title)).dy;
+    expect(itemY('Alpha Plex Movie'), inInclusiveRange(plexY, movieY));
+    expect(itemY('Alpha Movie'), inInclusiveRange(movieY, seriesY));
+    expect(itemY('Alpha Show'), inInclusiveRange(seriesY, liveY));
+    expect(itemY('Alpha Channel'), inInclusiveRange(liveY, peopleY));
+
+    // The chips are the jump control: tapping Shows takes you straight to
+    // the shows (and the sectioned All view comes back with All).
+    await tester.tap(find.widgetWithText(FocusableTabChip, t.libraries.groupings.shows));
+    await tester.pumpAndSettle();
+    expect(find.text('Alpha Show'), findsOneWidget);
+    expect(find.text('Alpha Movie'), findsNothing);
+    expect(find.byKey(const Key('SearchSectionHeader:Trex — Series')), findsNothing);
+  });
+
   testWidgets('a kind ranked out of the trimmed All view keeps its chip and full results', (tester) async {
     // 100 exact-title episodes fill the ranked display budget; the weakly
     // titled track only survives in the candidate pool behind it.

@@ -118,9 +118,15 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// The fetch covers the whole settings window ([now - pastDays, now +
   /// daysToLoad]) and the result is cached per channel, so scrolling the
   /// guide re-uses it until the update interval elapses. Only the slice
-  /// overlapping [from, to] is returned. A per-channel failure fails open
-  /// (empty list — the guide renders hour placeholders for that channel)
-  /// and never crashes the guide.
+  /// overlapping [from, to] is returned.
+  ///
+  /// Build #8 Task 3: a fetch that FAILS (both sources failed) THROWS
+  /// instead of returning [] — the old fail-open [] made the guide record
+  /// a failed fetch as a successful empty one (loaded, placeholders, never
+  /// retried), so Matt could not tell "failed" from "loaded but empty".
+  /// Returning [] now means only one thing: the fetch succeeded and this
+  /// channel genuinely has no programmes in the window. The guide catches
+  /// the throw and marks the channel FAILED (visible retry state).
   Future<List<LiveTvProgram>> fetchEpgForChannel(
     String channelKey, {
     required DateTime from,
@@ -159,8 +165,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
           ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl)
           : await _fetchM3uEpg(channelKey, settings, fetchFrom, fetchTo, ttl);
     } catch (e) {
+      // Build #8 Task 3: a failed fetch must surface (see the doc comment
+      // above) — swallowing it as [] recorded failures as loaded-empty.
+      // A failed fetch writes no cache entry, so a retry refetches.
       appLogger.w('IPTV EPG fetch failed for channel $channelKey', error: e);
-      return const [];
+      rethrow;
     }
 
     final entry = _CachedChannelEpg(
@@ -241,12 +250,17 @@ class IptvLiveTvSupport implements LiveTvSupport {
         .toList(growable: false);
   }
 
-  /// Xtream EPG, TiviMate-style: the login's `xmltv.php` feed is the
-  /// PRIMARY source (one fetch for the whole catalog, matched to this
-  /// channel by tvg-id), and per-channel `get_short_epg` is the FALLBACK
-  /// for channels with no XMLTV programmes (or when the feed fetch fails).
-  /// A channel is never left blank by a missing or partial feed — the
-  /// fallback (or the hour placeholders, when that fails too) covers it.
+  /// Xtream EPG, TiviMate-style (build #8 Task 3): per-channel
+  /// `get_short_epg` answers FIRST for the visible channel, while the
+  /// login's big `xmltv.php` feed loads in the background (one shared fetch
+  /// for the whole catalog, deduped by [_xtreamXmltvGuide]). The old order
+  /// — xmltv first — made every visible row wait on a 55k-channel file
+  /// (tens of MB, up to 120s) before showing anything. If get_short_epg has
+  /// nothing for the channel, the feed (already in flight) is awaited and
+  /// matched by tvg-id. A channel is never left blank by a missing or
+  /// partial feed — and a fetch only THROWS when both sources fail: if
+  /// either source answers (even empty), that answer stands, so a genuine
+  /// empty is never misread as a failure.
   Future<List<LiveTvProgram>> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
@@ -254,16 +268,42 @@ class IptvLiveTvSupport implements LiveTvSupport {
     DateTime to,
     Duration? ttl,
   ) async {
+    // Start the big feed loading in the background now, so the fallback
+    // below awaits the shared in-flight future instead of starting it.
+    // Attach a no-op error listener NOW: the future is only awaited after
+    // get_short_epg answers, and a rejection with no listener in the
+    // meantime would surface as an unhandled async error — even though the
+    // fetch handles it below. Awaiting the original future still sees the
+    // rejection; this listener only marks it observed.
+    final xmltvFuture = _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl);
+    unawaited(xmltvFuture.then<void>((_) {}).catchError((_) {}));
+    List<LiveTvProgram>? shortEpg;
     try {
-      final xmltvPrograms = await _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl);
-      if (xmltvPrograms.isNotEmpty) return xmltvPrograms;
-      // The feed loaded but this channel has no programmes in it — fall
-      // through to get_short_epg instead of leaving the row blank.
-      appLogger.d('IPTV: channel $channelKey has no XMLTV programmes; falling back to get_short_epg');
+      shortEpg = await _fetchXtreamShortEpg(channelKey, settings, from, to);
     } catch (e) {
-      appLogger.w('IPTV: xmltv.php fetch failed for channel $channelKey; falling back to get_short_epg', error: e);
+      appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
-    return _fetchXtreamShortEpg(channelKey, settings, from, to);
+    if (shortEpg != null && shortEpg.isNotEmpty) {
+      // The background feed still lands in the shared cache for later
+      // fetches (its error is already observed above).
+      return shortEpg;
+    }
+    // get_short_epg had nothing (or failed): use the feed (already
+    // loading). A feed that loads but has nothing for the channel returns
+    // [] (genuine empty); a feed that fails only throws when get_short_epg
+    // never answered — both sources failed.
+    try {
+      return await xmltvFuture;
+    } catch (e) {
+      if (shortEpg != null) {
+        appLogger.w(
+          'IPTV: xmltv.php fetch failed for channel $channelKey; get_short_epg already answered empty',
+          error: e,
+        );
+        return const [];
+      }
+      rethrow;
+    }
   }
 
   /// Programmes for one channel out of the login's `xmltv.php` feed.

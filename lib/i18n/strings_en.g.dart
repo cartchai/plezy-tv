@@ -3188,6 +3188,15 @@ class Translations$connections$en {
 	/// en: 'Groups'
 	String get iptvFilterGroups => 'Groups';
 
+	/// en: 'Name initials'
+	String get iptvFilterInitials => 'Name initials';
+
+	/// en: '(one) {${n} initial} (other) {${n} initials}'
+	String iptvFilterInitialsCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} initial',
+		other: '${n} initials',
+	);
+
 	/// en: '(one) {${n} category} (other) {${n} categories}'
 	String iptvFilterSectionCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
 		one: '${n} category',
@@ -3631,6 +3640,13 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2254 => [
+		'Search finds TV shows again — a query matching lots of movies no longer hides the series',
+		'Search results are grouped into Movies, TV Shows, Live TV and other libraries, with chips to jump between them',
+		'The TV guide now shows Loading guide… while it loads, and a tap-to-retry message when it fails',
+		'The guide loads the quick per-channel data first while the big guide file downloads in the background',
+		'Name initials can be turned off in IPTV settings — repeating initials like EN, ES or NF, grouped with the categories',
+	];
 	List<String> get changelog2253 => [
 		'IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick',
 		'Movies and TV libraries have a Categories tab with the provider\'s own categories',
@@ -4031,6 +4047,12 @@ class Translations$liveTv$en {
 
 	/// en: 'Reload Guide'
 	String get reloadGuide => 'Reload Guide';
+
+	/// en: 'Loading guide…'
+	String get loadingGuide => 'Loading guide…';
+
+	/// en: 'Guide couldn't load — tap to retry'
+	String get guideLoadFailed => 'Guide couldn\'t load — tap to retry';
 
 	/// en: 'Search Guide'
 	String get searchGuide => 'Search Guide';
@@ -6475,6 +6497,15 @@ class Translations$iptv$en {
 
 	/// en: 'Guide cleared'
 	String get epgCleared => 'Guide cleared';
+
+	/// en: 'Loading initials…'
+	String get initialsLoading => 'Loading initials…';
+
+	/// en: 'Could not load the name initials. Check the connection and try again.'
+	String get initialsLoadFailed => 'Could not load the name initials. Check the connection and try again.';
+
+	/// en: 'No repeating initials found in this connection’s catalog.'
+	String get initialsNoneFound => 'No repeating initials found in this connection’s catalog.';
 }
 
 // Path: appIcon.names
@@ -9500,6 +9531,8 @@ extension on Translations {
 			'connections.iptvFilterMovies' => 'Movies',
 			'connections.iptvFilterSeries' => 'TV Series',
 			'connections.iptvFilterGroups' => 'Groups',
+			'connections.iptvFilterInitials' => 'Name initials',
+			'connections.iptvFilterInitialsCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} initial', other: '${n} initials', ), 
 			'connections.iptvFilterSectionCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} category', other: '${n} categories', ), 
 			'connections.iptvFilterSectionOff' => ({required Object off, required Object total}) => '${off} of ${total} hidden',
 			'accountPreferences.sectionTitle' => 'Account preferences',
@@ -9729,6 +9762,11 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2254.0' => 'Search finds TV shows again — a query matching lots of movies no longer hides the series',
+			'about.changelog2254.1' => 'Search results are grouped into Movies, TV Shows, Live TV and other libraries, with chips to jump between them',
+			'about.changelog2254.2' => 'The TV guide now shows Loading guide… while it loads, and a tap-to-retry message when it fails',
+			'about.changelog2254.3' => 'The guide loads the quick per-channel data first while the big guide file downloads in the background',
+			'about.changelog2254.4' => 'Name initials can be turned off in IPTV settings — repeating initials like EN, ES or NF, grouped with the categories',
 			'about.changelog2253.0' => 'IPTV favourites: one favourites screen for channels, movies and TV shows — favourites now stick',
 			'about.changelog2253.1' => 'Movies and TV libraries have a Categories tab with the provider\'s own categories',
 			'about.changelog2253.2' => 'Movies can be downloaded now',
@@ -9967,6 +10005,8 @@ extension on Translations {
 			'liveTv.live' => 'LIVE',
 			'liveTv.premiereBadge' => 'NEW',
 			'liveTv.reloadGuide' => 'Reload Guide',
+			'liveTv.loadingGuide' => 'Loading guide…',
+			'liveTv.guideLoadFailed' => 'Guide couldn\'t load — tap to retry',
 			'liveTv.searchGuide' => 'Search Guide',
 			'liveTv.searchHint' => 'Search channels & programs',
 			'liveTv.searchNoResults' => ({required Object query}) => 'No matches for "${query}"',
@@ -9978,6 +10018,8 @@ extension on Translations {
 			'liveTv.midnight' => 'Midnight',
 			'liveTv.overnight' => 'Overnight',
 			'liveTv.morning' => 'Morning',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.daytime' => 'Daytime',
 			'liveTv.evening' => 'Evening',
 			'liveTv.lateNight' => 'Late Night',
@@ -9987,8 +10029,6 @@ extension on Translations {
 			'liveTv.reorderFavorites' => 'Reorder Favorites',
 			'liveTv.noFavoriteChannels' => 'No favorite channels',
 			'liveTv.noFavoriteChannelsHint' => 'Show all channels, then long-press a channel to add it to your favorites.',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.showAllChannels' => 'Show All Channels',
 			'liveTv.favoritesLoadFailed' => 'Could not load favorites. Check your connection and try again.',
 			'liveTv.favoritesUpdateFailed' => 'Could not update favorites. Check your connection and try again.',
@@ -10492,6 +10532,8 @@ extension on Translations {
 			'videoSettings.hdrToneMapping' => 'HDR Tone Mapping',
 			'videoSettings.hdrToneMappingCompositor' => 'Compositor',
 			'videoSettings.hdrToneMappingCompositorDescription' => 'Pass the source\'s HDR metadata through and let the desktop compositor map it.',
+			_ => null,
+		} ?? switch (path) {
 			'videoSettings.hdrToneMappingPlayer' => 'Player',
 			'videoSettings.hdrToneMappingPlayerDescription' => 'Map to the display\'s peak brightness in the player, then tell the compositor the result.',
 			'videoSettings.hdrToneMappingFailed' => 'Couldn\'t change HDR tone mapping — the previous mode is still active.',
@@ -10501,8 +10543,6 @@ extension on Translations {
 			'videoSettings.audioOutputDolbyAudio' => 'Dolby Audio',
 			'videoSettings.audioOutputSurround' => 'Surround',
 			'videoSettings.audioOutputSpatial' => 'Spatial Audio',
-			_ => null,
-		} ?? switch (path) {
 			'videoSettings.audioOutputStereo' => 'Stereo',
 			'videoSettings.audioNormalization' => 'Normalize Loudness',
 			'videoSettings.audioNormalizationDisablesPassthrough' => 'Decodes audio to PCM; passthrough is off while this is on',
@@ -10897,6 +10937,9 @@ extension on Translations {
 			'iptv.epgNeverUpdated' => 'Never',
 			'iptv.epgUpdated' => 'Guide updated',
 			'iptv.epgCleared' => 'Guide cleared',
+			'iptv.initialsLoading' => 'Loading initials…',
+			'iptv.initialsLoadFailed' => 'Could not load the name initials. Check the connection and try again.',
+			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s catalog.',
 			_ => null,
 		};
 	}

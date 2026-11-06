@@ -33,6 +33,7 @@ import '../services/playback_initialization_types.dart';
 import '../services/scrub_preview_source.dart';
 import '../utils/app_logger.dart';
 import '../utils/external_ids.dart';
+import '../utils/iptv_initials.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_live_tv.dart';
 import '../services/iptv/iptv_item_favorites_repository.dart';
@@ -69,12 +70,22 @@ class IptvClient implements MediaServerClient {
   IptvClient.xtream({required XtreamConnection xtreamConnection}) : connection = xtreamConnection;
 
   factory IptvClient.forConnection(Connection connection) {
+    // Test seam: when set, the factory's client is used instead of a fresh
+    // one — widget tests point it at a client backed by a fake API, so
+    // screens that create their own client (the initials checklist) can
+    // load catalogs without the network. Always null in production;
+    // tests must clear it in tearDown.
+    final debugFactory = debugClientFactory;
+    if (debugFactory != null) return debugFactory(connection);
     return switch (connection) {
       M3uConnection() => IptvClient.m3u(m3uConnection: connection),
       XtreamConnection() => IptvClient.xtream(xtreamConnection: connection),
       _ => throw UnsupportedError('IptvClient cannot wrap ${connection.runtimeType}'),
     };
   }
+
+  @visibleForTesting
+  static IptvClient Function(Connection connection)? debugClientFactory;
 
   bool get _isXtream => connection is XtreamConnection;
   XtreamConnection get _xtream => connection as XtreamConnection;
@@ -173,6 +184,15 @@ class IptvClient implements MediaServerClient {
   /// answers per-category calls even when the unfiltered call returns [].
   static const int _catalogFallbackBatchSize = 8;
 
+  /// Per-section time budget for [searchItems] (build #8 Task 1): a section
+  /// that misses its budget returns [] for that search while its catalog
+  /// fetch keeps running in the background and warms the cache, so the other
+  /// section's results are never held hostage — and the next search finds
+  /// the slow section. 50s sits inside the aggregation's 60s IPTV leg
+  /// deadline with room for ranking. Tests shrink it.
+  @visibleForTesting
+  static Duration searchSectionBudget = const Duration(seconds: 50);
+
   /// Live-channel stream info by channel key (populated by [iptvChannels]).
   final Map<String, XtreamLiveStream> _xtreamChannelByKey = {};
   final Map<String, M3uEntry> _m3uChannelByKey = {};
@@ -193,6 +213,22 @@ class IptvClient implements MediaServerClient {
   Set<String> get _disabledCategories => _disabledCategoryIdList.toSet();
 
   bool _isDisabled(String? categoryId) => categoryId != null && _disabledCategories.contains(categoryId);
+
+  /// Name-initial filter list (only the IPTV connection types carry it).
+  List<String> get _disabledInitialsList => switch (connection) {
+    M3uConnection(:final disabledInitials) => disabledInitials,
+    XtreamConnection(:final disabledInitials) => disabledInitials,
+    _ => const [],
+  };
+
+  Set<String> get _disabledInitials => _disabledInitialsList.toSet();
+
+  /// True when [name]'s leading initial is turned off (build #8 Task 4).
+  /// Names without an initial are never hidden by this filter.
+  bool _isDisabledInitial(String? name) {
+    final initial = initialOf(name);
+    return initial != null && _disabledInitials.contains(initial);
+  }
 
   @override
   ServerId get serverId => ServerId(connection.id);
@@ -649,7 +685,7 @@ class IptvClient implements MediaServerClient {
     final favorites = await _favoriteItems();
     final categoryNames = await _vodCategoryNames();
     return streams
-        .where((s) => !_isDisabled(s.categoryId))
+        .where((s) => !_isDisabled(s.categoryId) && !_isDisabledInitial(s.name))
         .map(
           (s) => _movieItem(
             s,
@@ -666,7 +702,7 @@ class IptvClient implements MediaServerClient {
     final favorites = await _favoriteItems();
     final categoryNames = await _seriesCategoryNames();
     return series
-        .where((s) => !_isDisabled(s.categoryId))
+        .where((s) => !_isDisabled(s.categoryId) && !_isDisabledInitial(s.name))
         .map(
           (s) => _seriesItem(
             s,
@@ -742,7 +778,7 @@ class IptvClient implements MediaServerClient {
         if (id != null) counts[id] = (counts[id] ?? 0) + 1;
       }
       return categories
-          .where((c) => !_isDisabled(c.id))
+          .where((c) => !_isDisabled(c.id) && !_isDisabledInitial(c.name))
           .map((c) => IptvCategory(id: c.id, name: c.name, itemCount: counts[c.id]))
           .toList();
     }
@@ -758,11 +794,51 @@ class IptvClient implements MediaServerClient {
         if (id != null) counts[id] = (counts[id] ?? 0) + 1;
       }
       return categories
-          .where((c) => !_isDisabled(c.id))
+          .where((c) => !_isDisabled(c.id) && !_isDisabledInitial(c.name))
           .map((c) => IptvCategory(id: c.id, name: c.name, itemCount: counts[c.id]))
           .toList();
     }
     return const [];
+  }
+
+  /// Detected name initials for this connection (build #8 Task 4): the
+  /// initials that keep repeating across the catalog — live channel names,
+  /// VOD names, series names, and category names — most-common first.
+  /// Only initials at or above [iptvInitialRepeatThreshold] are offered as
+  /// toggles; one-off prefixes are never offered. Uses the client's cached
+  /// catalog futures, so the first call on a cold connection loads the
+  /// catalogs (like opening the libraries); call it lazily, on expand.
+  Future<List<IptvInitial>> iptvInitials() async {
+    final names = <String>[];
+    if (_isXtream) {
+      final streams = await _liveStreams();
+      names.addAll(streams.map((s) => s.name));
+      final vod = await _vodStreams();
+      names.addAll(vod.map((s) => s.name));
+      final series = await _seriesList();
+      names.addAll(series.map((s) => s.name));
+      final liveCategories = await _xtreamApi
+          .getLiveCategories()
+          .catchError((Object e) {
+            appLogger.w(
+              'IPTV: live category list unavailable for initials: $e',
+            );
+            return const <XtreamCategory>[];
+          });
+      names.addAll(liveCategories.map((c) => c.name));
+      final vodCategories = await _vodCategories();
+      names.addAll(vodCategories.map((c) => c.name));
+      final seriesCategories = await _seriesCategories();
+      names.addAll(seriesCategories.map((c) => c.name));
+    } else {
+      final entries = await _m3uEntries();
+      names.addAll(entries.map((e) => e.name));
+      for (final entry in entries) {
+        final group = entry.groupTitle;
+        if (group != null) names.add(group);
+      }
+    }
+    return initialsMeetingThreshold(countInitials(names));
   }
 
   /// Items in one category of a library, for the Categories tab.
@@ -773,7 +849,12 @@ class IptvClient implements MediaServerClient {
       final favorites = await _favoriteItems();
       final categoryNames = await _vodCategoryNames();
       return streams
-          .where((s) => s.categoryId == categoryId && !_isDisabled(s.categoryId))
+          .where(
+            (s) =>
+                s.categoryId == categoryId &&
+                !_isDisabled(s.categoryId) &&
+                !_isDisabledInitial(s.name),
+          )
           .map(
             (s) => _movieItem(
               s,
@@ -788,7 +869,12 @@ class IptvClient implements MediaServerClient {
       final favorites = await _favoriteItems();
       final categoryNames = await _seriesCategoryNames();
       return series
-          .where((s) => s.categoryId == categoryId && !_isDisabled(s.categoryId))
+          .where(
+            (s) =>
+                s.categoryId == categoryId &&
+                !_isDisabled(s.categoryId) &&
+                !_isDisabledInitial(s.name),
+          )
           .map(
             (s) => _seriesItem(
               s,
@@ -1030,19 +1116,30 @@ class IptvClient implements MediaServerClient {
       // search costs max(movies, series), not the sum — the old sequential
       // awaits behind the 20s search leg deadline returned zero IPTV
       // results on a slow connection.
+      //
+      // Build #8 Task 1: each section gets its OWN `limit` of results.
+      // The old merge capped the COMBINED list at `limit` movies-first, so
+      // any query matching 100+ movies returned zero series — before the
+      // aggregation's relevance ranking ever ran. The merged pool is at most
+      // 2 * limit; the aggregation re-ranks it and caps it at its own limit,
+      // so an exact series-title match now beats partial movie matches.
+      //
+      // Each section also races [searchSectionBudget]: a section that misses
+      // it returns [] for this search while its catalog fetch keeps running
+      // in the background and warms the cache, so a cold 46k-row series
+      // catalog can no longer hold the movies leg hostage under the 60s
+      // IPTV leg deadline — the next search finds the slow section.
       final sections = await Future.wait([
-        if (includeMovies) _searchMovies(needle, limit) else Future.value(const <MediaItem>[]),
-        if (includeSeries) _searchSeries(needle, limit) else Future.value(const <MediaItem>[]),
+        if (includeMovies)
+          _searchMovies(needle, limit).timeout(searchSectionBudget, onTimeout: () => const <MediaItem>[])
+        else
+          Future.value(const <MediaItem>[]),
+        if (includeSeries)
+          _searchSeries(needle, limit).timeout(searchSectionBudget, onTimeout: () => const <MediaItem>[])
+        else
+          Future.value(const <MediaItem>[]),
       ]);
-      final out = <MediaItem>[];
-      for (final section in sections) {
-        for (final item in section) {
-          if (out.length >= limit) break;
-          out.add(item);
-        }
-        if (out.length >= limit) break;
-      }
-      return out;
+      return sections.expand((items) => items).toList();
     }
     // M3U: the playlist is the catalog; channels surface as playable items.
     return _searchM3uEntries(needle, limit, excludedLibraryIds);
@@ -1056,7 +1153,7 @@ class IptvClient implements MediaServerClient {
       final out = <MediaItem>[];
       for (final stream in streams) {
         if (out.length >= limit) break;
-        if (_isDisabled(stream.categoryId)) continue;
+        if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
         if (!stream.name.toLowerCase().contains(needle)) continue;
         out.add(
           _movieItem(
@@ -1081,7 +1178,7 @@ class IptvClient implements MediaServerClient {
       final out = <MediaItem>[];
       for (final s in series) {
         if (out.length >= limit) break;
-        if (_isDisabled(s.categoryId)) continue;
+        if (_isDisabled(s.categoryId) || _isDisabledInitial(s.name)) continue;
         if (!s.name.toLowerCase().contains(needle)) continue;
         out.add(
           _seriesItem(
@@ -1111,6 +1208,8 @@ class IptvClient implements MediaServerClient {
         if (out.length >= limit) break;
         // Disabled groups (country/region filter) stay out of search too.
         if (_isDisabled(entry.groupTitle)) continue;
+        // And a disabled initial hides the entry by its name or its group.
+        if (_isDisabledInitial(entry.name) || _isDisabledInitial(entry.groupTitle)) continue;
         if (!entry.name.toLowerCase().contains(needle)) continue;
         out.add(
           MediaItem.m3u(
@@ -1662,7 +1761,7 @@ class IptvClient implements MediaServerClient {
       final streams = await _liveStreams();
       final channels = <LiveTvChannel>[];
       for (final stream in streams) {
-        if (_isDisabled(stream.categoryId)) continue;
+        if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
         _xtreamChannelByKey['${stream.streamId}'] = stream;
         channels.add(
           LiveTvChannel(
@@ -1685,6 +1784,8 @@ class IptvClient implements MediaServerClient {
       // M3U categories are group titles; a disabled group hides its
       // channels from Live TV (same as Xtream's category filter above).
       if (_isDisabled(entry.groupTitle)) continue;
+      // And a disabled initial hides the channel by its name or its group.
+      if (_isDisabledInitial(entry.name) || _isDisabledInitial(entry.groupTitle)) continue;
       final key = entry.tvgId ?? entry.url;
       _m3uChannelByKey[key] = entry;
       channels.add(

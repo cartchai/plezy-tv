@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
 import 'package:plezy/connection/connection.dart';
+import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/iptv_live_tv.dart';
@@ -218,7 +219,7 @@ void main() {
     expect(api.calls['100'], 2);
   });
 
-  test('per-channel failure fails open and never takes the guide down', () async {
+  test('per-channel failure throws so the guide can mark it failed, and never takes the guide down', () async {
     final now = nowFn();
     api.failing.add('101');
     api.scripted['100'] = [
@@ -227,7 +228,16 @@ void main() {
     final from = now.subtract(const Duration(hours: 1));
     final to = now.add(const Duration(hours: 6));
 
-    expect(await support.fetchEpgForChannel('101', from: from, to: to), isEmpty);
+    // Both sources fail for 101 (get_short_epg throws; the xmltv.php feed
+    // is unreachable in tests) — the fetch THROWS instead of returning []
+    // (build #8 Task 3), so the guide can mark the channel FAILED with a
+    // visible retry state instead of recording silent empty placeholders.
+    // The sibling channel still loads, so one bad channel never takes the
+    // guide down.
+    await expectLater(
+      support.fetchEpgForChannel('101', from: from, to: to),
+      throwsA(isA<MediaServerHttpException>()),
+    );
     expect(await support.fetchEpgForChannel('100', from: from, to: to), hasLength(1));
   });
 

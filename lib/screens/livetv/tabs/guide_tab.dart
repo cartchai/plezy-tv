@@ -922,8 +922,9 @@ class GuideTabState extends State<GuideTab>
       _mergedProgramsCache.clear();
     }
     if (_iptvEpgLoaded.contains(scopeKey) || _iptvEpgInFlight.contains(scopeKey)) return;
-    // A failed channel stays failed for this window (its row shows hour
-    // placeholders); a window change or cache bust clears the failure.
+    // A failed channel stays failed for this window (its row shows a
+    // retry state — tap to retry); a window change or cache bust clears
+    // the failure via [_resetIptvEpgState].
     if (_iptvEpgFailed.contains(scopeKey)) return;
 
     _iptvEpgInFlight.add(scopeKey);
@@ -990,6 +991,58 @@ class GuideTabState extends State<GuideTab>
     _iptvEpgLoaded.clear();
     _iptvEpgFailed.clear();
     _mergedProgramsCache.clear();
+  }
+
+  /// Retry a failed channel's EPG fetch (build #8 Task 3): clears the
+  /// failed flag (and the merged placeholders) so the row re-fetches
+  /// instead of staying dead for the window. A failed fetch writes no
+  /// cache entry, so the retry refetches rather than serving stale data.
+  void _retryIptvEpg(LiveTvChannel channel) {
+    final scopeKey = liveTvChannelScopeKey(channel);
+    _iptvEpgFailed.remove(scopeKey);
+    _iptvEpgLoaded.remove(scopeKey);
+    _mergedProgramsCache.remove(scopeKey);
+    _ensureIptvEpg(channel);
+    if (mounted) setState(() {});
+  }
+
+  /// The visible failed state for a channel whose EPG fetch failed (build
+  /// #8 Task 3): an error icon + "Guide couldn't load — tap to retry".
+  /// Tapping retries the fetch. Distinct from the loaded-but-empty state
+  /// (hour placeholders) and the loading state (spinner).
+  Widget _buildEpgFailedRow(LiveTvChannel channel, ThemeData theme) {
+    final tk = tokens(context);
+    return SizedBox(
+      height: _rowHeight,
+      child: Padding(
+        padding: EdgeInsets.only(right: tk.groupGap, bottom: tk.groupGap),
+        child: Material(
+          color: Color.alphaBlend(tk.surface.withValues(alpha: 0.5), tk.bg),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(tk.radiusXs)),
+          child: InkWell(
+            onTap: () => _retryIptvEpg(channel),
+            borderRadius: BorderRadius.circular(tk.radiusXs),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AppIcon(Symbols.error_rounded, size: 16, color: tk.textMuted),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      t.liveTv.guideLoadFailed,
+                      style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   double _totalGridWidth() {
@@ -1876,12 +1929,23 @@ class GuideTabState extends State<GuideTab>
   }) {
     // Visible rows drive the lazy IPTV EPG fetch for their own channel.
     _ensureIptvEpg(channel);
+    final scopeKey = liveTvChannelScopeKey(channel);
+    // Build #8 Task 3: a failed channel shows a visible retry state, not
+    // silent hour placeholders — but only when it has no real programs at
+    // all; a channel with partial programs keeps them. (The merged
+    // `programs` below already contain placeholders for a failed channel,
+    // so this checks the real programs, not the merged list.)
+    final realPrograms = _programsByChannelScope[scopeKey] ?? const <LiveTvProgram>[];
+    if (_iptvSupportFor(channel) != null && _iptvEpgFailed.contains(scopeKey) && realPrograms.isEmpty) {
+      return _buildEpgFailedRow(channel, theme);
+    }
     if (programs.isEmpty) {
-      // An IPTV row is only empty while its EPG is still loading: a ready
-      // IPTV channel always has at least one hour placeholder (Task G).
-      // The row stays blank — the thin header indicator (Task B) is the
-      // loading signal, not a "no data" message for a load still in flight.
-      // A Plex/Jellyfin/Emby row with genuinely no programs keeps the old
+      // Three states, visibly distinct (build #8 Task 3): an IPTV row
+      // still loading shows a spinner + "Loading guide…" (never a blank
+      // row — the old blank row plus a 3px header line was the whole reason
+      // Matt could not tell the guide was loading); a ready channel with
+      // genuinely no programs shows "No program data available"; a
+      // Plex/Jellyfin/Emby row with genuinely no programs keeps the old
       // "No program data available" bar.
       final iptvLoading = _iptvSupportFor(channel) != null && !_isChannelEpgReady(channel);
       final tk = tokens(context);
@@ -1893,7 +1957,23 @@ class GuideTabState extends State<GuideTab>
             color: Color.alphaBlend(tk.surface.withValues(alpha: 0.5), tk.bg),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(tk.radiusXs)),
             child: iptvLoading
-                ? null
+                ? Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          t.liveTv.loadingGuide,
+                          style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted),
+                        ),
+                      ],
+                    ),
+                  )
                 : Center(
                     child: Text(
                       t.liveTv.noPrograms,

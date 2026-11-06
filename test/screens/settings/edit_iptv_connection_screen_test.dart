@@ -8,7 +8,9 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
+import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/screens/settings/edit_iptv_connection_screen.dart';
+import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/widgets/focusable_list_tile.dart';
 
@@ -63,10 +65,24 @@ void main() {
       }
       return http.Response('not found', 404);
     });
+    // The initials checklist creates its own client via forConnection — the
+    // factory seam points it at a fake-backed client (EN ×11, NF ×9), so
+    // the section can be tested without the network. M3U connections get a
+    // plain client (their playlist fetch fails in tests, as it would for a
+    // real unreachable playlist, and the checklist shows its failed state).
+    IptvClient.debugClientFactory = (connection) {
+      if (connection is XtreamConnection) {
+        final client = IptvClient.xtream(xtreamConnection: connection);
+        client.testXtreamApi = _InitialsFakeXtreamApi();
+        return client;
+      }
+      return IptvClient.m3u(m3uConnection: connection as M3uConnection);
+    };
   });
 
   tearDown(() {
     EditIptvConnectionScreen.debugHttpClient = null;
+    IptvClient.debugClientFactory = null;
   });
 
   XtreamConnection trexConnection() => XtreamConnection(
@@ -164,13 +180,15 @@ void main() {
     expect(tileValue(tester, categoryTile('Comedy')), isTrue);
 
     // Show all / Hide all work across all three sections at once.
-    await tester.tap(find.text(t.connections.iptvFilterHideAll));
+    // (There are two "Hide all" buttons on the screen now — the header's
+    // and the initials checklist's — so scope to the header's, first.)
+    await tester.tap(find.text(t.connections.iptvFilterHideAll).first);
     await tester.pumpAndSettle();
     expect(tileValue(tester, categoryTile('News')), isFalse);
     expect(tileValue(tester, categoryTile('Sports')), isFalse);
     expect(tileValue(tester, categoryTile('Drama')), isFalse);
 
-    await tester.tap(find.text(t.connections.iptvFilterShowAll));
+    await tester.tap(find.text(t.connections.iptvFilterShowAll).first);
     await tester.pumpAndSettle();
     expect(tileValue(tester, categoryTile('News')), isTrue);
     expect(tileValue(tester, categoryTile('Drama')), isTrue);
@@ -200,4 +218,74 @@ void main() {
     expect(find.text('News'), findsOneWidget);
     expect(find.text('Sports'), findsOneWidget);
   });
+
+  testWidgets('Name initials section lives with the category groupings (build #8 Task 4)', (tester) async {
+    await pumpScreen(tester, trexConnection());
+
+    // After the category sections, grouped with them — not a separate
+    // screen. Only the initials that keep repeating are offered.
+    expect(sectionHeader(t.connections.iptvFilterInitials), findsOneWidget);
+    expect(find.text('EN (11)'), findsOneWidget);
+    expect(find.text('NF (9)'), findsOneWidget);
+    expect(find.textContaining('ES'), findsNothing);
+
+    // Toggling an initial updates only its own switch; the edit screen
+    // persists on Save, so this asserts the deferred state, not the
+    // registry.
+    await tester.tap(categoryTile('NF (9)'));
+    await tester.pumpAndSettle();
+    expect(tileValue(tester, categoryTile('NF (9)')), isFalse);
+    expect(tileValue(tester, categoryTile('EN (11)')), isTrue);
+
+    // The section collapses and expands on its own, like the categories.
+    await tester.tap(sectionHeader(t.connections.iptvFilterInitials));
+    await tester.pumpAndSettle();
+    expect(find.text('NF (9)'), findsNothing);
+    expect(find.text('News'), findsOneWidget, reason: 'Live TV untouched');
+
+    await tester.tap(sectionHeader(t.connections.iptvFilterInitials));
+    await tester.pumpAndSettle();
+    expect(find.text('NF (9)'), findsOneWidget);
+  });
+}
+
+/// Fake whose catalog carries repeating name initials — EN ×11 (5 live
+/// channels + 5 movies + the "EN - Live" category), NF ×9 (1 movie +
+/// 6 series + the "NF" VOD and series categories), ES ×1 (never offered).
+class _InitialsFakeXtreamApi extends XtreamApi {
+  _InitialsFakeXtreamApi()
+    : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
+
+  @override
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
+    for (var i = 1; i <= 5; i++) XtreamLiveStream(streamId: 100 + i, name: 'EN - Channel $i', categoryId: '1'),
+    const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '1'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getLiveCategories() async => const [XtreamCategory(id: '1', name: 'EN - Live')];
+
+  @override
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
+    for (var i = 1; i <= 5; i++)
+      XtreamVodStream(streamId: 300 + i, name: 'EN - Movie $i', containerExtension: 'mp4', categoryId: '1'),
+    const XtreamVodStream(streamId: 400, name: 'NF - Movie', containerExtension: 'mp4', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getVodCategories() async => const [
+    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '2', name: 'NF'),
+  ];
+
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => [
+    for (var i = 1; i <= 6; i++) XtreamSeries(seriesId: 500 + i, name: 'NF - Show $i', categoryId: '2'),
+  ];
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '2', name: 'NF'),
+  ];
 }

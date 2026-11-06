@@ -99,6 +99,20 @@ updates install over the top. Version `2.25.3+160`.
 Detail: `IPTV_BUILD7_NOTES.md`. Reference: `PLEZY_REFERENCE.md` (full
 codebase reference + fork-vs-upstream inventory, written this round).
 
+Build #8 (PlezTV v2.25.4) is in this commit: series search fixed
+(per-section result caps — a query matching 100+ movies no longer starves
+series before ranking — plus a 50s per-section budget inside the 60s leg
+deadline), search results grouped into Movies / TV Shows / Live TV / other
+libraries with jump chips, EPG made truthful (fetch failures now throw
+instead of being cached as loaded-empty; rows show "Loading guide…" while
+fetching and a tap-to-retry state on failure; `getShortEpg` runs first for
+visible channels while the 55k-channel `xmltv.php` download runs in the
+background), and a name-initials filter (repeating 2–3 letter prefixes
+like EN / ES / NF, threshold 5, toggleable per connection in IPTV settings
+and on the connection edit screen, grouped with the categories; no
+language mapping, no ISO list). Version `2.25.4+161`.
+Detail: `IPTV_BUILD8_NOTES.md`.
+
 ## Change inventory by area (for repatching)
 
 ### 1. Rebrand / rename
@@ -217,6 +231,30 @@ codebase reference + fork-vs-upstream inventory, written this round).
 - Progress notes: `IPTV_BUILD7_NOTES.md`. Reference:
   `PLEZY_REFERENCE.md` (full codebase reference + fork-vs-upstream
   inventory, 295 files / +11,052/−3,045 vs base at build #6).
+
+### 6. Build #8 — series search, search sections, truthful EPG loader, initials filter
+- New files: `lib/utils/iptv_initials.dart`,
+  `lib/utils/search_sections.dart`,
+  `lib/widgets/iptv_initials_checklist.dart`,
+  `test/utils/iptv_initials_test.dart`,
+  `test/utils/search_sections_test.dart`,
+  `test/widgets/iptv_initials_checklist_test.dart`.
+- Touched upstream files: `lib/media/iptv_client.dart` (per-section
+  search caps + budgets, `disabledInitials` filtering,
+  `iptvInitials()`), `lib/media/iptv_live_tv.dart` (fetch throws on
+  failure, `getShortEpg` first + xmltv in the background),
+  `lib/screens/livetv/tabs/guide_tab.dart` (Loading guide… / retry
+  rows), `lib/screens/search_screen.dart` (sectioned results + jump
+  chips), `lib/screens/settings/edit_iptv_connection_screen.dart`
+  (Name initials section),
+  `lib/screens/settings/iptv_settings_screen.dart` (per-connection
+  initials sections), `lib/connection/connection.dart`
+  (`disabledInitials`), `lib/services/settings_service.dart`
+  (initials expansion pref), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (changelog 2.25.4),
+  `lib/screens/settings/about_screen.dart` (changelog entry),
+  `pubspec.yaml` (version `2.25.4+161`).
+- Progress notes: `IPTV_BUILD8_NOTES.md`.
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

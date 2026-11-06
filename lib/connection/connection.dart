@@ -395,12 +395,18 @@ class M3uConnection extends Connection {
   /// Live TV and Library.
   final List<String> disabledCategoryIds;
 
+  /// Name initials the user turned off (build #8 Task 4 — the repeating
+  /// "EN", "ES", "NF" style prefixes). Items whose name carries a disabled
+  /// initial are hidden from Live TV and Library, like a disabled category.
+  final List<String> disabledInitials;
+
   M3uConnection({
     required this.id,
     required this.name,
     required this.playlistUrl,
     this.epgUrl,
     this.disabledCategoryIds = const [],
+    this.disabledInitials = const [],
     required this.createdAt,
     this.lastAuthenticatedAt,
   });
@@ -429,6 +435,7 @@ class M3uConnection extends Connection {
     String? epgUrl,
     bool clearEpgUrl = false,
     List<String>? disabledCategoryIds,
+    List<String>? disabledInitials,
     DateTime? createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
@@ -438,6 +445,7 @@ class M3uConnection extends Connection {
       playlistUrl: playlistUrl ?? this.playlistUrl,
       epgUrl: clearEpgUrl ? null : (epgUrl ?? this.epgUrl),
       disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
+      disabledInitials: disabledInitials ?? this.disabledInitials,
       createdAt: createdAt ?? this.createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
     );
@@ -450,6 +458,7 @@ class M3uConnection extends Connection {
       'playlistUrl': playlistUrl,
       'epgUrl': epgUrl,
       'disabledCategoryIds': disabledCategoryIds,
+      'disabledInitials': disabledInitials,
     };
   }
 
@@ -461,12 +470,15 @@ class M3uConnection extends Connection {
   }) {
     final rawDisabled = json['disabledCategoryIds'];
     final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
+    final rawInitials = json['disabledInitials'];
+    final initials = rawInitials is List ? rawInitials.whereType<String>().toList(growable: false) : const <String>[];
     return M3uConnection(
       id: id,
       name: json['name'] as String? ?? 'M3U',
       playlistUrl: json['playlistUrl'] as String? ?? '',
       epgUrl: json['epgUrl'] as String?,
       disabledCategoryIds: disabled,
+      disabledInitials: initials,
       createdAt: createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt,
     );
@@ -507,6 +519,11 @@ class XtreamConnection extends Connection {
   /// Live TV and Library.
   final List<String> disabledCategoryIds;
 
+  /// Name initials the user turned off (build #8 Task 4 — the repeating
+  /// "EN", "ES", "NF" style prefixes). Items whose name carries a disabled
+  /// initial are hidden from Live TV and Library, like a disabled category.
+  final List<String> disabledInitials;
+
   XtreamConnection({
     required this.id,
     required this.name,
@@ -514,6 +531,7 @@ class XtreamConnection extends Connection {
     required this.username,
     required this.password,
     this.disabledCategoryIds = const [],
+    this.disabledInitials = const [],
     required this.createdAt,
     this.lastAuthenticatedAt,
   }) : serverUrl = canonicalizeBaseUrl(serverUrl);
@@ -542,6 +560,7 @@ class XtreamConnection extends Connection {
     String? username,
     String? password,
     List<String>? disabledCategoryIds,
+    List<String>? disabledInitials,
     DateTime? createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
@@ -552,6 +571,7 @@ class XtreamConnection extends Connection {
       username: username ?? this.username,
       password: password ?? this.password,
       disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
+      disabledInitials: disabledInitials ?? this.disabledInitials,
       createdAt: createdAt ?? this.createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
     );
@@ -565,6 +585,7 @@ class XtreamConnection extends Connection {
       'username': username,
       'password': password,
       'disabledCategoryIds': disabledCategoryIds,
+      'disabledInitials': disabledInitials,
     };
   }
 
@@ -576,6 +597,8 @@ class XtreamConnection extends Connection {
   }) {
     final rawDisabled = json['disabledCategoryIds'];
     final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
+    final rawInitials = json['disabledInitials'];
+    final initials = rawInitials is List ? rawInitials.whereType<String>().toList(growable: false) : const <String>[];
     return XtreamConnection(
       id: id,
       name: json['name'] as String? ?? 'Xtream',
@@ -583,6 +606,7 @@ class XtreamConnection extends Connection {
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
       disabledCategoryIds: disabled,
+      disabledInitials: initials,
       createdAt: createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt,
     );

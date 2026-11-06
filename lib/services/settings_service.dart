@@ -962,6 +962,10 @@ class SettingsService extends BaseSharedPreferencesService {
 
   /// Expanded/collapsed state of the M3U groups section on the same screen.
   static const iptvCategoriesGroupsExpanded = BoolPref('iptv_categories_groups_expanded', defaultValue: true);
+
+  /// Expanded/collapsed state of the name-initials section on the same
+  /// screen (build #8 Task 4). Defaults open, like the category sections.
+  static const iptvCategoriesInitialsExpanded = BoolPref('iptv_categories_initials_expanded', defaultValue: true);
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();
