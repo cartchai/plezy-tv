@@ -109,12 +109,53 @@ sealed class MediaItem with _$MediaItem {
         serverName: serverName,
         raw: raw,
       ),
-      // No IPTV item case yet — the IPTV client (Stage 2) will add a
-      // MediaItem.iptv union case and replace this throw. No IPTV
-      // connections can exist until then, so this is unreachable in practice.
-      MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError(
-        'MediaItem has no IPTV case yet (backend: ${backend.id})',
+      MediaBackend.m3u => M3uMediaItem(
+        id: id,
+        kind: kind,
+        title: title,
+        summary: summary,
+        year: year,
+        contentRating: contentRating,
+        parentId: parentId,
+        parentTitle: parentTitle,
+        index: index,
+        thumbPath: thumbPath,
+        artPath: artPath,
+        durationMs: durationMs,
+        leafCount: leafCount,
+        rating: rating,
+        ratings: ratings,
+        genres: genres,
+        libraryId: libraryId,
+        libraryTitle: libraryTitle,
+        serverId: serverId,
+        serverName: serverName,
+        raw: raw,
       ),
+      MediaBackend.xtream => XtreamMediaItem(
+        id: id,
+        kind: kind,
+        title: title,
+        summary: summary,
+        year: year,
+        contentRating: contentRating,
+        parentId: parentId,
+        parentTitle: parentTitle,
+        index: index,
+        thumbPath: thumbPath,
+        artPath: artPath,
+        durationMs: durationMs,
+        leafCount: leafCount,
+        rating: rating,
+        ratings: ratings,
+        genres: genres,
+        libraryId: libraryId,
+        libraryTitle: libraryTitle,
+        serverId: serverId,
+        serverName: serverName,
+        raw: raw,
+      ),
+
     };
   }
 
@@ -291,10 +332,182 @@ sealed class MediaItem with _$MediaItem {
     String? backendFolderKey,
     @JsonKey(fromJson: _mediaItemRawFromJson) Map<String, Object?>? raw,
   }) = JellyfinMediaItem;
+@FreezedUnionValue('m3u')
+  @JsonSerializable(includeIfNull: false, explicitToJson: true)
+  const factory MediaItem.m3u({
+    @JsonKey(readValue: readStringField, defaultValue: '') required String id,
+    @JsonKey(fromJson: _mediaKindFromJson, toJson: _mediaKindToJson) required MediaKind kind,
+    String? guid,
+    String? title,
+    String? titleSort,
+    String? summary,
+    String? tagline,
+    String? originalTitle,
+    String? studio,
+    @JsonKey(fromJson: flexibleInt) int? year,
+    String? originallyAvailableAt,
+    String? contentRating,
+    String? parentId,
+    String? parentTitle,
+    String? parentThumbPath,
+    @JsonKey(fromJson: flexibleInt) int? parentIndex,
+    @JsonKey(fromJson: flexibleInt) int? index,
+    String? grandparentId,
+    String? grandparentTitle,
+    String? grandparentThumbPath,
+    String? grandparentArtPath,
+    List<String>? grandparentBackdropPaths,
+    String? thumbPath,
+    String? artPath,
+    List<String>? backdropPaths,
+    String? clearLogoPath,
+    String? backgroundSquarePath,
+    @JsonKey(fromJson: flexibleInt) int? durationMs,
+    @JsonKey(fromJson: flexibleInt) int? viewOffsetMs,
+    @JsonKey(fromJson: flexibleInt) int? viewCount,
+    @JsonKey(fromJson: flexibleInt) int? lastViewedAt,
+    @JsonKey(fromJson: flexibleInt) int? leafCount,
+    @JsonKey(fromJson: flexibleInt) int? viewedLeafCount,
+    @JsonKey(fromJson: flexibleInt) int? childCount,
+    @JsonKey(fromJson: flexibleInt) int? addedAt,
+    @JsonKey(fromJson: flexibleInt) int? updatedAt,
+    @JsonKey(fromJson: flexibleDouble) double? rating,
+    @JsonKey(fromJson: flexibleDouble) double? userRating,
+
+    /// `CommunityRating` and the `CriticRating` Tomatometer, in that order.
+    /// Jellyfin exposes no per-source array, so this is at most two entries.
+    @JsonKey(fromJson: _mediaItemRatingsFromJson) List<MediaRatingSource>? ratings,
+    bool? isFavorite,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? genres,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? directors,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? writers,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? producers,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? countries,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? collections,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? labels,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? styles,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? moods,
+    @JsonKey(fromJson: _mediaItemRolesFromJson) List<MediaRole>? roles,
+
+    /// The item's versions, one per `MediaSources` entry. Same contract as
+    /// the Plex variant: null means not fetched, non-empty means complete.
+    /// Emby list rows are complete only when `AlternateMediaSources` is
+    /// requested beside `MediaSources` (#2474); the client adds it.
+    @JsonKey(fromJson: _mediaItemVersionsFromJson) List<MediaVersion>? mediaVersions,
+    String? libraryId,
+    String? libraryTitle,
+
+    /// Jellyfin playlist entry id used by playlist write endpoints.
+    String? playlistItemId,
+    String? serverId,
+    String? serverName,
+
+    /// Always null on Jellyfin — folder children are fetched by [id]. Exists
+    /// on both variants so the union exposes one neutral getter.
+    String? backendFolderKey,
+    @JsonKey(fromJson: _mediaItemRawFromJson) Map<String, Object?>? raw,
+      /// Direct stream URL (Xtream /movie/ or /live/ URL, or the M3U URL).
+    String? streamUrl,
+    /// EPG channel id (Xtream epg_channel_id / M3U tvg-id) for guide matching.
+    String? epgChannelId,
+    /// True when the provider offers catch-up for this channel (tv_archive=1).
+    bool? hasArchive,
+    /// How far back the catch-up archive goes, in seconds (tv_archive_duration).
+    @JsonKey(fromJson: flexibleInt) int? archiveDuration,
+    /// Category id this item belongs to (country/region filter key).
+    String? categoryId,
+}) = M3uMediaItem;
+@FreezedUnionValue('xtream')
+  @JsonSerializable(includeIfNull: false, explicitToJson: true)
+  const factory MediaItem.xtream({
+    @JsonKey(readValue: readStringField, defaultValue: '') required String id,
+    @JsonKey(fromJson: _mediaKindFromJson, toJson: _mediaKindToJson) required MediaKind kind,
+    String? guid,
+    String? title,
+    String? titleSort,
+    String? summary,
+    String? tagline,
+    String? originalTitle,
+    String? studio,
+    @JsonKey(fromJson: flexibleInt) int? year,
+    String? originallyAvailableAt,
+    String? contentRating,
+    String? parentId,
+    String? parentTitle,
+    String? parentThumbPath,
+    @JsonKey(fromJson: flexibleInt) int? parentIndex,
+    @JsonKey(fromJson: flexibleInt) int? index,
+    String? grandparentId,
+    String? grandparentTitle,
+    String? grandparentThumbPath,
+    String? grandparentArtPath,
+    List<String>? grandparentBackdropPaths,
+    String? thumbPath,
+    String? artPath,
+    List<String>? backdropPaths,
+    String? clearLogoPath,
+    String? backgroundSquarePath,
+    @JsonKey(fromJson: flexibleInt) int? durationMs,
+    @JsonKey(fromJson: flexibleInt) int? viewOffsetMs,
+    @JsonKey(fromJson: flexibleInt) int? viewCount,
+    @JsonKey(fromJson: flexibleInt) int? lastViewedAt,
+    @JsonKey(fromJson: flexibleInt) int? leafCount,
+    @JsonKey(fromJson: flexibleInt) int? viewedLeafCount,
+    @JsonKey(fromJson: flexibleInt) int? childCount,
+    @JsonKey(fromJson: flexibleInt) int? addedAt,
+    @JsonKey(fromJson: flexibleInt) int? updatedAt,
+    @JsonKey(fromJson: flexibleDouble) double? rating,
+    @JsonKey(fromJson: flexibleDouble) double? userRating,
+
+    /// `CommunityRating` and the `CriticRating` Tomatometer, in that order.
+    /// Jellyfin exposes no per-source array, so this is at most two entries.
+    @JsonKey(fromJson: _mediaItemRatingsFromJson) List<MediaRatingSource>? ratings,
+    bool? isFavorite,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? genres,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? directors,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? writers,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? producers,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? countries,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? collections,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? labels,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? styles,
+    @JsonKey(fromJson: _mediaItemStringList) List<String>? moods,
+    @JsonKey(fromJson: _mediaItemRolesFromJson) List<MediaRole>? roles,
+
+    /// The item's versions, one per `MediaSources` entry. Same contract as
+    /// the Plex variant: null means not fetched, non-empty means complete.
+    /// Emby list rows are complete only when `AlternateMediaSources` is
+    /// requested beside `MediaSources` (#2474); the client adds it.
+    @JsonKey(fromJson: _mediaItemVersionsFromJson) List<MediaVersion>? mediaVersions,
+    String? libraryId,
+    String? libraryTitle,
+
+    /// Jellyfin playlist entry id used by playlist write endpoints.
+    String? playlistItemId,
+    String? serverId,
+    String? serverName,
+
+    /// Always null on Jellyfin — folder children are fetched by [id]. Exists
+    /// on both variants so the union exposes one neutral getter.
+    String? backendFolderKey,
+    @JsonKey(fromJson: _mediaItemRawFromJson) Map<String, Object?>? raw,
+      /// Direct stream URL (Xtream /movie/ or /live/ URL, or the M3U URL).
+    String? streamUrl,
+    /// EPG channel id (Xtream epg_channel_id / M3U tvg-id) for guide matching.
+    String? epgChannelId,
+    /// True when the provider offers catch-up for this channel (tv_archive=1).
+    bool? hasArchive,
+    /// How far back the catch-up archive goes, in seconds (tv_archive_duration).
+    @JsonKey(fromJson: flexibleInt) int? archiveDuration,
+    /// Category id this item belongs to (country/region filter key).
+    String? categoryId,
+}) = XtreamMediaItem;
 
   MediaBackend get backend => switch (this) {
     PlexMediaItem() => MediaBackend.plex,
     JellyfinMediaItem(:final dialect) => dialect.backend,
+    M3uMediaItem() => MediaBackend.m3u,
+    XtreamMediaItem() => MediaBackend.xtream,
   };
 
   /// Restore a [MediaItem] from a [toJson] payload. Missing/unknown backend
@@ -305,11 +518,8 @@ sealed class MediaItem with _$MediaItem {
       MediaBackend.plex => _$PlexMediaItemFromJson(json),
       MediaBackend.jellyfin => _$JellyfinMediaItemFromJson(json),
       MediaBackend.emby => _$JellyfinMediaItemFromJson(json).copyWith(dialect: MediaBrowserDialect.emby),
-      // No IPTV item case yet — see the factory above. No IPTV items are
-      // persisted until the IPTV client adds a MediaItem.iptv case.
-      MediaBackend.m3u || MediaBackend.xtream => throw UnsupportedError(
-        'MediaItem has no IPTV case yet (backend: ${MediaBackend.fromString(json['backend'] as String?).id})',
-      ),
+      MediaBackend.m3u => _$M3uMediaItemFromJson(json),
+      MediaBackend.xtream => _$XtreamMediaItemFromJson(json),
     };
   }
 
@@ -317,6 +527,8 @@ sealed class MediaItem with _$MediaItem {
     return switch (this) {
       final PlexMediaItem item => {'backend': MediaBackend.plex.id, ..._$PlexMediaItemToJson(item)},
       final JellyfinMediaItem item => {'backend': item.dialect.backend.id, ..._$JellyfinMediaItemToJson(item)},
+      final M3uMediaItem item => {'backend': MediaBackend.m3u.id, ..._$M3uMediaItemToJson(item)},
+      final XtreamMediaItem item => {'backend': MediaBackend.xtream.id, ..._$XtreamMediaItemToJson(item)},
     };
   }
 
