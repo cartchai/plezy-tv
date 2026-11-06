@@ -12,7 +12,9 @@ import '../../widgets/backend_badge.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../profile/borrow_connection_screen.dart';
 import 'add_jellyfin_screen.dart';
+import 'add_m3u_screen.dart';
 import 'add_plex_account_screen.dart';
+import 'add_xtream_screen.dart';
 
 /// Picker shown when the user taps "Add connection".
 ///
@@ -62,6 +64,18 @@ class AddConnectionScreen extends StatelessWidget {
               )
             : t.addServer.connectToMediaBrowserCardSubtitle,
         builder: (_) => AddJellyfinScreen(targetProfile: targetProfile, dialect: embyDialect),
+      ),
+      _BackendOption(
+        backend: MediaBackend.m3u,
+        title: t.addServer.connectToM3uCard,
+        subtitle: t.addServer.connectToM3uCardSubtitle,
+        builder: (_) => AddM3uScreen(targetProfile: targetProfile),
+      ),
+      _BackendOption(
+        backend: MediaBackend.xtream,
+        title: t.addServer.connectToXtreamCard,
+        subtitle: t.addServer.connectToXtreamCardSubtitle,
+        builder: (_) => AddXtreamScreen(targetProfile: targetProfile),
       ),
       if (scoped)
         _BackendOption(

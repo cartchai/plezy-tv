@@ -3138,6 +3138,21 @@ class Translations$connections$en {
 
 	/// en: 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.'
 	String editMediaBrowserIntro({required Object serverName}) => 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.';
+
+	/// en: 'Countries & regions'
+	String get iptvFilterTitle => 'Countries & regions';
+
+	/// en: 'Turn off a country or region to hide its channels and on-demand titles.'
+	String get iptvFilterIntro => 'Turn off a country or region to hide its channels and on-demand titles.';
+
+	/// en: 'No categories found for this connection.'
+	String get iptvFilterEmpty => 'No categories found for this connection.';
+
+	/// en: 'Loading categories…'
+	String get iptvFilterLoading => 'Loading categories…';
+
+	/// en: 'Could not load the categories. Check the connection and try again.'
+	String get iptvFilterLoadFailed => 'Could not load the categories. Check the connection and try again.';
 }
 
 // Path: accountPreferences
@@ -6090,6 +6105,54 @@ class Translations$addServer$en {
 
 	/// en: 'The server redirected to an unsupported URL. Enter the final ${product} URL directly.'
 	String redirectUnsupportedEnterFinal({required Object product}) => 'The server redirected to an unsupported URL. Enter the final ${product} URL directly.';
+
+	/// en: 'Add M3U playlist'
+	String get addM3uTitle => 'Add M3U playlist';
+
+	/// en: 'Add Xtream Codes'
+	String get addXtreamTitle => 'Add Xtream Codes';
+
+	/// en: 'Connect to M3U'
+	String get connectToM3uCard => 'Connect to M3U';
+
+	/// en: 'Import a playlist URL.'
+	String get connectToM3uCardSubtitle => 'Import a playlist URL.';
+
+	/// en: 'Connect to Xtream Codes'
+	String get connectToXtreamCard => 'Connect to Xtream Codes';
+
+	/// en: 'Enter your server URL, username, and password.'
+	String get connectToXtreamCardSubtitle => 'Enter your server URL, username, and password.';
+
+	/// en: 'Library name'
+	String get libraryName => 'Library name';
+
+	/// en: 'This name becomes the library's name.'
+	String get libraryNameHelper => 'This name becomes the library\'s name.';
+
+	/// en: 'Playlist URL'
+	String get playlistUrl => 'Playlist URL';
+
+	/// en: 'EPG URL (optional)'
+	String get epgUrl => 'EPG URL (optional)';
+
+	/// en: 'Server URL'
+	String get serverUrl => 'Server URL';
+
+	/// en: 'Could not load that playlist. Check the URL and try again.'
+	String get m3uProbeFailed => 'Could not load that playlist. Check the URL and try again.';
+
+	/// en: 'That playlist has no channels.'
+	String get m3uPlaylistEmpty => 'That playlist has no channels.';
+
+	/// en: 'Enter a valid playlist URL starting with http:// or https://.'
+	String get m3uInvalidUrl => 'Enter a valid playlist URL starting with http:// or https://.';
+
+	/// en: 'Could not sign in to that Xtream server. Check the server URL, username, and password.'
+	String get xtreamProbeFailed => 'Could not sign in to that Xtream server. Check the server URL, username, and password.';
+
+	/// en: 'Add'
+	String get addIptv => 'Add';
 }
 
 // Path: deepLinks
@@ -9126,6 +9189,11 @@ extension on Translations {
 			'connections.signInAgain' => 'Sign in again',
 			'connections.editMediaBrowserTitle' => ({required Object product}) => 'Edit ${product} connection',
 			'connections.editMediaBrowserIntro' => ({required Object serverName}) => 'Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.',
+			'connections.iptvFilterTitle' => 'Countries & regions',
+			'connections.iptvFilterIntro' => 'Turn off a country or region to hide its channels and on-demand titles.',
+			'connections.iptvFilterEmpty' => 'No categories found for this connection.',
+			'connections.iptvFilterLoading' => 'Loading categories…',
+			'connections.iptvFilterLoadFailed' => 'Could not load the categories. Check the connection and try again.',
 			'accountPreferences.sectionTitle' => 'Account preferences',
 			'accountPreferences.hubSubtitleSingle' => ({required Object account}) => 'Audio, subtitle and library options saved on ${account}',
 			'accountPreferences.hubSubtitleMultiple' => ({required Object count}) => 'Audio, subtitle and library options saved on ${count} accounts',
@@ -9624,13 +9692,13 @@ extension on Translations {
 			'liveTv.recordSettings.endLate' => 'End late (seconds)',
 			'liveTv.recordSettings.newOnly' => 'Only new episodes',
 			'liveTv.recordSettings.anyChannel' => 'Record on any channel',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.recordSettings.anyTime' => 'Record at any time',
 			'liveTv.recordSettings.skipInLibrary' => 'Skip episodes already in the library',
 			'liveTv.recordSettings.keepUpTo' => 'Episodes to keep',
 			'liveTv.recordSettings.keepUpToHint' => '0 keeps every episode',
 			'liveTv.startingInMinutes' => ({required Object minutes}) => 'Starting in ${minutes} min',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.dayAtTime' => ({required Object day, required Object time}) => '${day} at ${time}',
 			'liveTv.invalidPlaybackData' => ({required Object product}) => '${product} returned invalid Live TV playback data',
 			'liveTv.failedToStartChannel' => 'Could not start the live channel',
@@ -10138,13 +10206,13 @@ extension on Translations {
 			'performanceOverlay.fps' => 'FPS',
 			'performanceOverlay.decoderAndroidHw' => 'Android HW',
 			'performanceOverlay.decoderNvidiaHw' => 'NVIDIA HW',
+			_ => null,
+		} ?? switch (path) {
 			'performanceOverlay.decoderQualcommHw' => 'Qualcomm HW',
 			'performanceOverlay.decoderMediatekHw' => 'MediaTek HW',
 			'performanceOverlay.decoderExynosHw' => 'Exynos HW',
 			'performanceOverlay.decoderSoftware' => 'Software',
 			'performanceOverlay.decoderHardware' => 'Hardware',
-			_ => null,
-		} ?? switch (path) {
 			'performanceOverlay.tunnelingActive' => 'Active',
 			'performanceOverlay.dvRpuFailed' => ({required Object converted, required Object failures}) => '${converted} (${failures} failed)',
 			'externalPlayer.title' => 'External Player',
@@ -10399,6 +10467,22 @@ extension on Translations {
 			'addServer.redirectDifferentHost' => ({required Object product}) => 'The server redirected to a different host. Enter the final ${product} URL directly.',
 			'addServer.redirectInsecure' => 'The server redirected from HTTPS to an insecure URL',
 			'addServer.redirectUnsupportedEnterFinal' => ({required Object product}) => 'The server redirected to an unsupported URL. Enter the final ${product} URL directly.',
+			'addServer.addM3uTitle' => 'Add M3U playlist',
+			'addServer.addXtreamTitle' => 'Add Xtream Codes',
+			'addServer.connectToM3uCard' => 'Connect to M3U',
+			'addServer.connectToM3uCardSubtitle' => 'Import a playlist URL.',
+			'addServer.connectToXtreamCard' => 'Connect to Xtream Codes',
+			'addServer.connectToXtreamCardSubtitle' => 'Enter your server URL, username, and password.',
+			'addServer.libraryName' => 'Library name',
+			'addServer.libraryNameHelper' => 'This name becomes the library\'s name.',
+			'addServer.playlistUrl' => 'Playlist URL',
+			'addServer.epgUrl' => 'EPG URL (optional)',
+			'addServer.serverUrl' => 'Server URL',
+			'addServer.m3uProbeFailed' => 'Could not load that playlist. Check the URL and try again.',
+			'addServer.m3uPlaylistEmpty' => 'That playlist has no channels.',
+			'addServer.m3uInvalidUrl' => 'Enter a valid playlist URL starting with http:// or https://.',
+			'addServer.xtreamProbeFailed' => 'Could not sign in to that Xtream server. Check the server URL, username, and password.',
+			'addServer.addIptv' => 'Add',
 			'deepLinks.invalid' => 'This Plezy link isn\'t valid.',
 			'deepLinks.profileNotFound' => ({required Object profile}) => 'No profile matches "${profile}".',
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',

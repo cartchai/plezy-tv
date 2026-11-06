@@ -14,6 +14,7 @@ import '../exceptions/media_server_exceptions.dart';
 import 'connectivity_probe.dart';
 import 'jellyfin_client.dart';
 import 'jellyfin_endpoint_discovery.dart';
+import '../media/iptv_client.dart';
 import 'plex_client.dart';
 import '../models/plex/plex_config.dart';
 import '../utils/app_logger.dart';
@@ -189,6 +190,11 @@ class MultiServerManager {
   final Map<String, JellyfinClient> _jellyfinByCompoundId = {};
   final Map<String, String> _activeJellyfinMachine = {};
   final Map<String, HealthStatus> _jellyfinHealthByCompoundId = {};
+
+  /// Live IPTV clients by connection id. An IPTV client's serverId IS its
+  /// connection id, so — unlike Jellyfin's compound ids — one map suffices.
+  final Map<String, IptvClient> _iptvByConnectionId = {};
+  final Map<String, HealthStatus> _iptvHealthByConnectionId = {};
 
   /// Debounce timers for endpoint-exhaustion-triggered reconnection (per server)
   final Map<String, Timer> _reconnectDebounce = {};
@@ -637,6 +643,8 @@ class MultiServerManager {
         .where((entry) => entry.value.connection.serverMachineId == serverId)
         .map((entry) => entry.key)
         .toList();
+    final iptvClient = _iptvByConnectionId.remove(serverId);
+    _iptvHealthByConnectionId.remove(serverId);
     final activeClient = _forgetServer(serverId);
     if (jellyfinCompoundIds.isNotEmpty) {
       final closed = <JellyfinClient>{};
@@ -650,6 +658,9 @@ class MultiServerManager {
     } else if (activeClient != null) {
       // Jellyfin's clients were all closed above.
       unawaited(_closeClientGracefully(activeClient));
+    }
+    if (iptvClient != null && !identical(iptvClient, activeClient)) {
+      unawaited(_closeClientGracefully(iptvClient));
     }
     _emitStatus();
     appLogger.i('Removed server: $serverId');
@@ -927,6 +938,42 @@ class MultiServerManager {
     }
   }
 
+  /// Add an IPTV connection (M3U playlist or Xtream Codes account) backed
+  /// by an [IptvClient]. Returns true when the health probe reports online.
+  ///
+  /// Unlike Jellyfin there is no endpoint race and no per-user compound id:
+  /// the client's serverId IS the connection id, and construction is cheap
+  /// and stateless (lazy in-memory catalog caches), so a re-add always
+  /// replaces the live client instead of reusing it. Replacing is safe —
+  /// the client holds no transcode session and never opens a stream itself.
+  Future<bool> addIptvConnection(Connection connection) async {
+    if (connection is! M3uConnection && connection is! XtreamConnection) {
+      throw ArgumentError(
+        'addIptvConnection requires an M3U or Xtream connection, got ${connection.runtimeType}',
+      );
+    }
+    try {
+      final oldClient = _iptvByConnectionId[connection.id];
+      if (oldClient != null) unawaited(_closeClientGracefully(oldClient));
+      final client = IptvClient.forConnection(connection);
+      _iptvByConnectionId[connection.id] = client;
+      _clients[connection.id] = client;
+
+      final health = await client.checkHealth();
+      final healthy = health == HealthStatus.online;
+      _iptvHealthByConnectionId[connection.id] = health;
+      _applyHealth(ServerId(connection.id), health);
+
+      appLogger.i(
+        'Added IPTV server: ${client.serverName ?? connection.id}${healthy ? '' : ' (unhealthy)'}',
+      );
+      return healthy;
+    } catch (e, stackTrace) {
+      appLogger.e('Failed to add IPTV server ${connection.displayName}', error: e, stackTrace: stackTrace);
+      return false;
+    }
+  }
+
   /// Whether the live client bound to [live] can serve [incoming] without
   /// being recreated. Recreation is required when a field baked into the
   /// client at construction time changes:
@@ -1024,6 +1071,23 @@ class MultiServerManager {
     if (client != null) unawaited(_closeClientGracefully(client));
     if (_isActiveJellyfin(machineId, compoundId)) {
       _forgetServer(machineId);
+      _emitStatus();
+    }
+  }
+
+  /// Look up a tracked IPTV client by its connection id. Returns `null`
+  /// if no IPTV connection with that id has been added.
+  IptvClient? getIptvClientByConnectionId(String connectionId) => _iptvByConnectionId[connectionId];
+
+  /// Tear down a specific IPTV connection's client. The client's serverId
+  /// is the connection id, so removing it also clears the shared slot.
+  void removeIptvConnection(Connection connection) {
+    final id = connection.id;
+    final client = _iptvByConnectionId.remove(id);
+    _iptvHealthByConnectionId.remove(id);
+    if (client != null) unawaited(_closeClientGracefully(client));
+    if (identical(_clients[id], client)) {
+      _forgetServer(id);
       _emitStatus();
     }
   }
@@ -1688,6 +1752,8 @@ class MultiServerManager {
     _jellyfinByCompoundId.clear();
     _activeJellyfinMachine.clear();
     _jellyfinHealthByCompoundId.clear();
+    _iptvByConnectionId.clear();
+    _iptvHealthByConnectionId.clear();
     _plexServers.clear();
     _serverStatus.clear();
     _refusedServers.clear();

@@ -28,6 +28,7 @@ import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/settings_section.dart';
 import '../../utils/dialogs.dart';
 import '../settings/add_connection_screen.dart';
+import '../settings/edit_iptv_connection_screen.dart';
 import '../settings/edit_jellyfin_connection_screen.dart';
 import 'pin_entry_dialog.dart';
 import 'pin_status_row.dart';
@@ -217,10 +218,16 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> with Controll
   }
 
   Future<void> _editConnection(Connection conn) async {
-    if (conn is! JellyfinConnection) return;
-    final changed = await Navigator.of(
-      context,
-    ).push<bool>(MaterialPageRoute(builder: (_) => EditJellyfinConnectionScreen(connection: conn)));
+    final changed = await switch (conn) {
+      JellyfinConnection() => Navigator.of(
+        context,
+      ).push<bool>(MaterialPageRoute(builder: (_) => EditJellyfinConnectionScreen(connection: conn))),
+      // IPTV connections edit their country/region filter.
+      M3uConnection() || XtreamConnection() => Navigator.of(
+        context,
+      ).push<bool>(MaterialPageRoute(builder: (_) => EditIptvConnectionScreen(connection: conn))),
+      _ => null,
+    };
     if (changed != true || !mounted) return;
     setState(() {});
     unawaited(context.read<ActiveProfileBinder>().rebindIfActive(_profile.id));

@@ -8,7 +8,9 @@ import 'package:plezy/media/media_browser_dialect.dart';
 import 'package:plezy/profiles/profile.dart';
 import 'package:plezy/screens/settings/add_connection_screen.dart';
 import 'package:plezy/screens/settings/add_jellyfin_screen.dart';
+import 'package:plezy/screens/settings/add_m3u_screen.dart';
 import 'package:plezy/screens/settings/add_plex_account_screen.dart';
+import 'package:plezy/screens/settings/add_xtream_screen.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/widgets/backend_badge.dart';
 
@@ -23,16 +25,27 @@ void main() {
   Profile profile(String id) =>
       Profile.local(id: id, displayName: id, sortOrder: 0, createdAt: DateTime.fromMillisecondsSinceEpoch(0));
 
-  testWidgets('offers Plex, Jellyfin and Emby, each with its own badge', (tester) async {
+  testWidgets('offers Plex, Jellyfin, Emby, M3U and Xtream Codes, each with its own badge', (tester) async {
     await tester.pumpWidget(app(const AddConnectionScreen()));
     await tester.pumpAndSettle();
 
     expect(find.text('Sign in with Plex'), findsOneWidget);
     expect(find.text('Connect to Jellyfin'), findsOneWidget);
     expect(find.text('Connect to Emby'), findsOneWidget);
+    expect(find.text('Connect to M3U'), findsOneWidget);
+    expect(find.text('Connect to Xtream Codes'), findsOneWidget);
 
     final badges = tester.widgetList<BackendBadge>(find.byType(BackendBadge)).map((b) => b.backend).toList();
-    expect(badges, containsAll(<MediaBackend>[MediaBackend.plex, MediaBackend.jellyfin, MediaBackend.emby]));
+    expect(
+      badges,
+      containsAll(<MediaBackend>[
+        MediaBackend.plex,
+        MediaBackend.jellyfin,
+        MediaBackend.emby,
+        MediaBackend.m3u,
+        MediaBackend.xtream,
+      ]),
+    );
   });
 
   /// The pushed sign-in screen starts a 2s LAN discovery sweep and a
@@ -90,20 +103,44 @@ void main() {
     expect(screen.targetProfile?.id, target.id);
   });
 
-  testWidgets('the D-pad steps through all three backend cards', (tester) async {
+  testWidgets('the M3U card opens the M3U add screen', (tester) async {
+    await tester.pumpWidget(app(const AddConnectionScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Connect to M3U'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(AddM3uScreen), findsOneWidget);
+    expect(find.text('Add M3U playlist'), findsOneWidget);
+  });
+
+  testWidgets('the Xtream Codes card opens the Xtream add screen', (tester) async {
+    await tester.pumpWidget(app(const AddConnectionScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Connect to Xtream Codes'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(AddXtreamScreen), findsOneWidget);
+    expect(find.text('Add Xtream Codes'), findsOneWidget);
+  });
+
+  testWidgets('the D-pad steps through all five backend cards', (tester) async {
     await tester.pumpWidget(app(const AddConnectionScreen()));
     await tester.pumpAndSettle();
 
     // The cards share a debugLabel, so track focus-node identity instead.
     final visited = <FocusNode>{};
-    for (var i = 0; i < 6; i++) {
+    for (var i = 0; i < 8; i++) {
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       final focused = FocusManager.instance.primaryFocus;
       if (focused != null) visited.add(focused);
     }
 
-    expect(find.byType(FocusableWrapper), findsNWidgets(3));
-    expect(visited.length, greaterThanOrEqualTo(3), reason: 'D-pad did not reach every backend card');
+    expect(find.byType(FocusableWrapper), findsNWidgets(5));
+    expect(visited.length, greaterThanOrEqualTo(5), reason: 'D-pad did not reach every backend card');
   });
 }

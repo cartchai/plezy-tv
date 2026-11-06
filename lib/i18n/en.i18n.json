@@ -1107,7 +1107,12 @@
     "accessDeniedMany": "${count} servers refused access for this account",
     "signInAgain": "Sign in again",
     "editMediaBrowserTitle": "Edit ${product} connection",
-    "editMediaBrowserIntro": "Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency."
+    "editMediaBrowserIntro": "Add or remove URLs for ${serverName}. Plezy will use the reachable URL with the lowest latency.",
+    "iptvFilterTitle": "Countries & regions",
+    "iptvFilterIntro": "Turn off a country or region to hide its channels and on-demand titles.",
+    "iptvFilterEmpty": "No categories found for this connection.",
+    "iptvFilterLoading": "Loading categories…",
+    "iptvFilterLoadFailed": "Could not load the categories. Check the connection and try again."
   },
   "accountPreferences": {
     "sectionTitle": "Account preferences",
@@ -2538,7 +2543,23 @@
     "redirectUnsupported": "The server redirected to an unsupported URL",
     "redirectDifferentHost": "The server redirected to a different host. Enter the final ${product} URL directly.",
     "redirectInsecure": "The server redirected from HTTPS to an insecure URL",
-    "redirectUnsupportedEnterFinal": "The server redirected to an unsupported URL. Enter the final ${product} URL directly."
+    "redirectUnsupportedEnterFinal": "The server redirected to an unsupported URL. Enter the final ${product} URL directly.",
+    "addM3uTitle": "Add M3U playlist",
+    "addXtreamTitle": "Add Xtream Codes",
+    "connectToM3uCard": "Connect to M3U",
+    "connectToM3uCardSubtitle": "Import a playlist URL.",
+    "connectToXtreamCard": "Connect to Xtream Codes",
+    "connectToXtreamCardSubtitle": "Enter your server URL, username, and password.",
+    "libraryName": "Library name",
+    "libraryNameHelper": "This name becomes the library's name.",
+    "playlistUrl": "Playlist URL",
+    "epgUrl": "EPG URL (optional)",
+    "serverUrl": "Server URL",
+    "m3uProbeFailed": "Could not load that playlist. Check the URL and try again.",
+    "m3uPlaylistEmpty": "That playlist has no channels.",
+    "m3uInvalidUrl": "Enter a valid playlist URL starting with http:// or https://.",
+    "xtreamProbeFailed": "Could not sign in to that Xtream server. Check the server URL, username, and password.",
+    "addIptv": "Add"
   },
   "deepLinks": {
     "invalid": "This Plezy link isn't valid.",

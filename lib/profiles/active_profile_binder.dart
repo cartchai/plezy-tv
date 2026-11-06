@@ -659,9 +659,7 @@ class ActiveProfileBinder {
           expected.add(conn.serverMachineId);
           futures.add(_bindMediaBrowser(conn, profileId: profile.id, generation: generation));
         case M3uConnection() || XtreamConnection():
-          // IPTV binding is added in Stage 2 with the IPTV client. Until
-          // then an IPTV connection is stored but produces no client.
-          appLogger.w('ActiveProfileBinder: IPTV connection ${conn.id} has no client yet; skipping bind.');
+          futures.add(_bindIptv(conn, profileId: profile.id, generation: generation));
       }
     }
     final results = await Future.wait(futures);
@@ -1201,6 +1199,25 @@ class ActiveProfileBinder {
       return _ProfileBindResult.visible({conn.serverMachineId});
     }
     return _ProfileBindResult(visibleServerIds: const {}, expectedServerIds: {conn.serverMachineId});
+  }
+
+  Future<_ProfileBindResult> _bindIptv(
+    Connection conn, {
+    required String profileId,
+    required int generation,
+  }) async {
+    final ok = await serverManager.addIptvConnection(conn);
+    if (!_isCurrentBind(profileId, generation)) {
+      return _ProfileBindResult(visibleServerIds: const {}, expectedServerIds: {conn.id});
+    }
+    // `addIptvConnection` registers the client even when the health probe
+    // returns a refusal. Keep that server in the active profile's visibility
+    // filter so the refusal banner can surface it instead of hiding it as if
+    // the profile had no server.
+    if (ok || serverManager.refusedServerIds.contains(conn.id)) {
+      return _ProfileBindResult.visible({conn.id});
+    }
+    return _ProfileBindResult(visibleServerIds: const {}, expectedServerIds: {conn.id});
   }
 
   bool _isCurrentBind(String profileId, int generation) {
