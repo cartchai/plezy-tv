@@ -1620,6 +1620,12 @@ class Translations$search$en {
 
 	/// en: 'People'
 	String get people => 'People';
+
+	/// en: 'All libraries'
+	String get allLibraries => 'All libraries';
+
+	/// en: 'No results in ${library}'
+	String noResultsInLibrary({required Object library}) => 'No results in ${library}';
 }
 
 // Path: hotkeys
@@ -3640,6 +3646,13 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2255 => [
+		'Search now finds TV shows, even the first time you search after opening the app',
+		'You can search inside one library — pick it above the search results',
+		'Catch-up is here: Watch from start sits next to Play, and a show that\'s already on offers Start from beginning',
+		'The live scrubber now covers the show you\'re watching, or the hour block when there\'s no guide info',
+		'Fixed the catch-up window so it reaches back days, not seconds',
+	];
 	List<String> get changelog2254 => [
 		'Search finds TV shows again — a query matching lots of movies no longer hides the series',
 		'Search results are grouped into Movies, TV Shows, Live TV and other libraries, with chips to jump between them',
@@ -4128,6 +4141,9 @@ class Translations$liveTv$en {
 
 	/// en: 'Watch from start (${minutes} min ago)'
 	String watchFromStart({required Object minutes}) => 'Watch from start (${minutes} min ago)';
+
+	/// en: 'Start from beginning'
+	String get startFromBeginning => 'Start from beginning';
 
 	/// en: 'Watch Live'
 	String get watchLive => 'Watch Live';
@@ -9021,6 +9037,8 @@ extension on Translations {
 			'search.searchYourMedia' => 'Search your media',
 			'search.enterTitleActorOrKeyword' => 'Enter a title, actor, or keyword',
 			'search.people' => 'People',
+			'search.allLibraries' => 'All libraries',
+			'search.noResultsInLibrary' => ({required Object library}) => 'No results in ${library}',
 			'hotkeys.setShortcutFor' => ({required Object actionName}) => 'Set Shortcut for ${actionName}',
 			'hotkeys.clearShortcut' => 'Clear shortcut',
 			'hotkeys.noShortcutSet' => 'No shortcut set',
@@ -9502,10 +9520,10 @@ extension on Translations {
 			'profiles.failedToVerifyPin' => 'Failed to verify PIN.',
 			'profiles.newProfile' => 'New profile',
 			'profiles.profileNameHint' => 'e.g. Guests, Kids, Family Room',
-			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
-			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
+			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
 			'profiles.continueButton' => 'Continue',
 			'profiles.pinsDontMatch' => 'PINs don\'t match',
 			'profiles.tokenIdentityMismatch' => 'The Plex profile token resolved to an unexpected server',
@@ -9762,6 +9780,11 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2255.0' => 'Search now finds TV shows, even the first time you search after opening the app',
+			'about.changelog2255.1' => 'You can search inside one library — pick it above the search results',
+			'about.changelog2255.2' => 'Catch-up is here: Watch from start sits next to Play, and a show that\'s already on offers Start from beginning',
+			'about.changelog2255.3' => 'The live scrubber now covers the show you\'re watching, or the hour block when there\'s no guide info',
+			'about.changelog2255.4' => 'Fixed the catch-up window so it reaches back days, not seconds',
 			'about.changelog2254.0' => 'Search finds TV shows again — a query matching lots of movies no longer hides the series',
 			'about.changelog2254.1' => 'Search results are grouped into Movies, TV Shows, Live TV and other libraries, with chips to jump between them',
 			'about.changelog2254.2' => 'The TV guide now shows Loading guide… while it loads, and a tap-to-retry message when it fails',
@@ -10011,6 +10034,8 @@ extension on Translations {
 			'liveTv.searchHint' => 'Search channels & programs',
 			'liveTv.searchNoResults' => ({required Object query}) => 'No matches for "${query}"',
 			'liveTv.channelsSection' => 'Channels',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.programsSection' => 'Programs',
 			'liveTv.now' => 'Now',
 			'liveTv.today' => 'Today',
@@ -10018,8 +10043,6 @@ extension on Translations {
 			'liveTv.midnight' => 'Midnight',
 			'liveTv.overnight' => 'Overnight',
 			'liveTv.morning' => 'Morning',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.daytime' => 'Daytime',
 			'liveTv.evening' => 'Evening',
 			'liveTv.lateNight' => 'Late Night',
@@ -10034,6 +10057,7 @@ extension on Translations {
 			'liveTv.favoritesUpdateFailed' => 'Could not update favorites. Check your connection and try again.',
 			'liveTv.joinSession' => 'Join Session in Progress',
 			'liveTv.watchFromStart' => ({required Object minutes}) => 'Watch from start (${minutes} min ago)',
+			'liveTv.startFromBeginning' => 'Start from beginning',
 			'liveTv.watchLive' => 'Watch Live',
 			'liveTv.goToLive' => 'Go to Live',
 			'liveTv.record' => 'Record',
@@ -10524,6 +10548,8 @@ extension on Translations {
 			'videoSettings.normalSpeed' => 'Normal',
 			'videoSettings.sleepTimerActive' => ({required Object duration}) => 'Active (${duration})',
 			'videoSettings.zoom' => 'Zoom',
+			_ => null,
+		} ?? switch (path) {
 			'videoSettings.sleepTimer' => 'Sleep Timer',
 			'videoSettings.audioSync' => 'Audio Sync',
 			'videoSettings.subtitleSync' => 'Subtitle Sync',
@@ -10532,8 +10558,6 @@ extension on Translations {
 			'videoSettings.hdrToneMapping' => 'HDR Tone Mapping',
 			'videoSettings.hdrToneMappingCompositor' => 'Compositor',
 			'videoSettings.hdrToneMappingCompositorDescription' => 'Pass the source\'s HDR metadata through and let the desktop compositor map it.',
-			_ => null,
-		} ?? switch (path) {
 			'videoSettings.hdrToneMappingPlayer' => 'Player',
 			'videoSettings.hdrToneMappingPlayerDescription' => 'Map to the display\'s peak brightness in the player, then tell the compositor the result.',
 			'videoSettings.hdrToneMappingFailed' => 'Couldn\'t change HDR tone mapping — the previous mode is still active.',

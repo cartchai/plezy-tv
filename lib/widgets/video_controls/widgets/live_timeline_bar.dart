@@ -16,7 +16,15 @@ import 'player_focus_disc.dart';
 ///
 /// Listens to player position while delegating the player-clock-to-epoch
 /// mapping to [epochForPosition], the same mapping used by seek commands and
-/// timeline heartbeats. The slider range covers the capture buffer.
+/// timeline heartbeats.
+///
+/// The slider range covers the capture buffer — unless [visibleStartEpoch] /
+/// [visibleEndEpoch] pin it to a narrower window (build #9 Task 3: the
+/// current programme block, or the current clock-hour block when there is
+/// no guide data, so the scrubber covers the time slot Matt is watching
+/// instead of the whole multi-day archive). Seeks still clamp to the
+/// capture buffer in the player, so a target past the live edge lands on
+/// live, never in the future.
 class LiveTimelineBar extends StatefulWidget {
   final Player player;
   final CaptureBuffer captureBuffer;
@@ -28,6 +36,12 @@ class LiveTimelineBar extends StatefulWidget {
   final KeyEventResult Function(FocusNode, KeyEvent)? onKeyEvent;
   final ValueChanged<bool>? onFocusChange;
   final bool enabled;
+
+  /// Optional visible range override (epoch seconds). When both are set
+  /// and form a valid range, the slider spans the block instead of the
+  /// capture buffer.
+  final int? visibleStartEpoch;
+  final int? visibleEndEpoch;
 
   const LiveTimelineBar({
     super.key,
@@ -41,6 +55,8 @@ class LiveTimelineBar extends StatefulWidget {
     this.onKeyEvent,
     this.onFocusChange,
     this.enabled = true,
+    this.visibleStartEpoch,
+    this.visibleEndEpoch,
   });
 
   @override
@@ -72,8 +88,21 @@ class _LiveTimelineBarState extends State<LiveTimelineBar> {
     _positionSecondsStream = widget.player.streams.position.map((position) => position.inSeconds).distinct();
   }
 
-  int get _rangeStart => widget.captureBuffer.seekableStartEpoch;
-  int get _rangeEnd => widget.captureBuffer.seekableEndEpoch;
+  /// The slider's range: the visible block when one is pinned (and valid),
+  /// otherwise the capture buffer's seekable window.
+  int get _rangeStart {
+    final visible = widget.visibleStartEpoch;
+    final visibleEnd = widget.visibleEndEpoch;
+    if (visible != null && visibleEnd != null && visibleEnd > visible) return visible;
+    return widget.captureBuffer.seekableStartEpoch;
+  }
+
+  int get _rangeEnd {
+    final visible = widget.visibleStartEpoch;
+    final visibleEnd = widget.visibleEndEpoch;
+    if (visible != null && visibleEnd != null && visibleEnd > visible) return visibleEnd;
+    return widget.captureBuffer.seekableEndEpoch;
+  }
 
   int _currentEpoch(int positionSeconds) => widget.epochForPosition(Duration(seconds: positionSeconds));
 

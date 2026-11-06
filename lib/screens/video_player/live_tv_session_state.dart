@@ -58,6 +58,19 @@ class LiveTvSessionState {
   /// refreshed by timeline heartbeat responses.
   CaptureBuffer? captureBuffer;
 
+  /// Current scrub block for the live timeline bar (build #9 Task 3): the
+  /// programme covering now, or the current clock-hour block when there is
+  /// no guide data. Null until resolved (or when the session is not an
+  /// IPTV catch-up session); the bar falls back to the capture window.
+  /// Reset by [adoptSession] — the block belongs to the tuned channel.
+  int? scrubBlockStartEpoch;
+  int? scrubBlockEndEpoch;
+
+  /// Last wall-clock attempt to resolve the scrub block, so a failed
+  /// resolution is retried at most once a minute by the heartbeat instead
+  /// of on every 10s tick.
+  DateTime? scrubBlockAttemptedAt;
+
   /// Server-side subtitle track the live stream is currently delivering
   /// (Plex burn), or null when subtitles are off. Owned here because every
   /// stream rebuild (time-shift seek, retry) must re-apply it. Reset by
@@ -306,6 +319,9 @@ class LiveTvSessionState {
     if (!identical(session, newSession)) timelineReports = LiveTimelineReportQueue();
     session = newSession;
     captureBuffer = newSession.captureBuffer;
+    scrubBlockStartEpoch = null;
+    scrubBlockEndEpoch = null;
+    scrubBlockAttemptedAt = null;
     selectedSubtitle = null;
   }
 

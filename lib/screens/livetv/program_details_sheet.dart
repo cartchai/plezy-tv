@@ -223,12 +223,17 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
       );
     }
 
+    // Catch-up sits NEXT TO Play / Watch Channel in the same button row
+    // (build #9 Task 2): a past programme reads "Watch from start
+    // (X min ago)", a programme already playing reads "Start from
+    // beginning" — both start the archive at this programme's own
+    // beginning (its block start).
     if (widget.onCatchUp != null && program.beginsAt != null) {
       final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final minutesAgo = ((nowEpoch - program.beginsAt!) ~/ 60).clamp(0, 1 << 30);
       actions.add(
         _SheetAction(
-          label: t.liveTv.watchFromStart(minutes: minutesAgo),
+          label: program.isCurrentlyAiring ? t.liveTv.startFromBeginning : t.liveTv.watchFromStart(minutes: minutesAgo),
           icon: Symbols.replay_rounded,
           onPressed: () {
             _closeSheet();

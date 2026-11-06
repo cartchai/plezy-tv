@@ -338,6 +338,44 @@ https://example.com/cnn.m3u8
       }
     });
 
+    test('a cold series catalog still returns series matches from per-category calls', () async {
+      // Build #9 Task 1(a): "it still can't search tv/series" on v2.25.4.
+      // The old code awaited the FULL 46k-row series catalog before
+      // filtering a single title, so on a cold start (unfiltered call
+      // slow on LTE) the 50s section budget fired and the search returned
+      // [] every time — the background warm-up never finished in time
+      // either. A cold section must sweep per-category now and return the
+      // matches that land before the budget fires.
+      final client = xtreamClient(api: _ColdCatalogFakeXtreamApi());
+      final previousBudget = IptvClient.searchSectionBudget;
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 500);
+      try {
+        final results = await client.searchItems('alpha');
+        expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
+      } finally {
+        IptvClient.searchSectionBudget = previousBudget;
+        client.close();
+      }
+    });
+
+    test('a stalled per-category crawl returns the matches that already landed', () async {
+      // Build #9 Task 1(a): the old code crawled EVERY category (batched
+      // Future.wait) before returning anything, so one slow category held
+      // the whole section hostage until the budget fired. The sweep must
+      // process each category's rows as they land and return partial
+      // matches at the deadline instead of [].
+      final client = xtreamClient(api: _StalledCrawlFakeXtreamApi());
+      final previousBudget = IptvClient.searchSectionBudget;
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 500);
+      try {
+        final results = await client.searchItems('alpha');
+        expect(results.map((i) => i.title), contains('Alpha Show'));
+      } finally {
+        IptvClient.searchSectionBudget = previousBudget;
+        client.close();
+      }
+    });
+
     test('a failing M3U playlist fetch returns no results instead of throwing', () async {
       final connection = M3uConnection(
         id: 'conn-m3u-1',
@@ -713,6 +751,41 @@ https://example.com/cnn.m3u8
       final streams = await api.getLiveStreams();
       expect(streams.map((s) => s.name), ['Good Channel', 'Other Channel']);
     });
+
+    test('tv_archive_duration is days, not seconds', () async {
+      // Build #9 Task 2: Xtream's tv_archive_duration is the catch-up
+      // window in DAYS (docs: "for how many days", example 7) but the
+      // code stored the raw value as seconds — a 7-day archive became a
+      // 7-SECOND seek window and every catch-up clamped to a 1-minute
+      // segment at the live edge, so catch-up silently played live.
+      final api = apiReturning(
+        jsonEncode([
+          {'stream_id': 100, 'name': 'Week Archive', 'tv_archive': 1, 'tv_archive_duration': 7},
+          {'stream_id': 101, 'name': 'Day Archive', 'tv_archive': 1, 'tv_archive_duration': 1},
+          {'stream_id': 102, 'name': 'No Archive', 'tv_archive': 0},
+        ]),
+      );
+      addTearDown(api.close);
+
+      final streams = await api.getLiveStreams();
+      expect(streams[0].tvArchiveDuration, 7 * 24 * 3600);
+      expect(streams[1].tvArchiveDuration, 24 * 3600);
+      expect(streams[2].tvArchiveDuration, 0);
+    });
+
+    test('tv_archive_duration already in seconds passes through', () async {
+      // Some panels return the window in seconds (604800 for 7 days).
+      // A value no panel would express in days (> 366) is kept as-is.
+      final api = apiReturning(
+        jsonEncode([
+          {'stream_id': 100, 'name': 'Seconds Panel', 'tv_archive': 1, 'tv_archive_duration': 604800},
+        ]),
+      );
+      addTearDown(api.close);
+
+      final streams = await api.getLiveStreams();
+      expect(streams[0].tvArchiveDuration, 604800);
+    });
   });
 
   group('IptvClient categories (fake catalog, no network)', () {
@@ -898,6 +971,42 @@ class _SlowSeriesFakeXtreamApi extends _FakeXtreamApi {
       _seriesCompleter.complete(const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')]);
     }
   }
+}
+
+/// Fake whose UNFILTERED series call never answers (the cold 46k-row catalog
+/// on a slow connection) while per-category calls answer fast — the shape
+/// behind "it still can't search tv/series" on v2.25.4: the old code awaited
+/// the full catalog before filtering a single title, so the section budget
+/// fired and the search returned [] on every cold search.
+class _ColdCatalogFakeXtreamApi extends _FakeXtreamApi {
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+    if (categoryId == null) return Completer<List<XtreamSeries>>().future;
+    return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
+  }
+}
+
+/// Fake whose unfiltered series call returns [] and whose per-category crawl
+/// stalls after the first category — the shape behind a cold search on a
+/// provider with many series categories: the old code crawled every category
+/// (batched Future.wait) before returning anything, so one slow category held
+/// the whole section hostage until the budget fired.
+class _StalledCrawlFakeXtreamApi extends _FakeXtreamApi {
+  @override
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+    if (categoryId == null) return const [];
+    if (categoryId == '1') {
+      return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
+    }
+    return Completer<List<XtreamSeries>>().future;
+  }
+
+  @override
+  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '2', name: 'Drama'),
+    XtreamCategory(id: '3', name: 'Comedy'),
+  ];
 }
 
 /// Fake whose UNFILTERED catalog calls return [] (the provider behaviour

@@ -334,6 +334,8 @@ extension _VideoPlayerBuildMethods on VideoPlayerScreenState {
                         isLive: widget.isLive,
                         liveChannelName: _live.channelName,
                         captureBuffer: _live.captureBuffer,
+                        liveScrubBlockStartEpoch: _live.scrubBlockStartEpoch,
+                        liveScrubBlockEndEpoch: _live.scrubBlockEndEpoch,
                         isAtLiveEdge: _live.atLiveEdge,
                         liveEpochForPosition: widget.isLive ? _liveEpochForPosition : null,
                         onLiveSeek: _live.captureBuffer != null ? _seekLiveToEpoch : null,

@@ -200,6 +200,52 @@ void main() {
     expect(keyEvents, 1);
     expect(seeks, [harness.startEpoch + 90]);
   });
+
+  testWidgets('a pinned visible block bounds drags, not the buffer', (tester) async {
+    // Build #9 Task 3: the scrubber covers the current block (here the
+    // clock hour starting at startEpoch), even though the capture buffer
+    // spans 7 days. A drag to the middle of the bar must seek to the
+    // middle of the BLOCK, not the middle of the buffer.
+    final seeks = <int>[];
+    final harness = await _pumpTimeline(
+      tester,
+      seeks: seeks,
+      currentOffset: 600,
+      seekStartSeconds: -7 * 24 * 3600,
+      rangeEndOffset: 0,
+      visibleStartOffset: 0,
+      visibleEndOffset: 3600,
+    );
+
+    final paint = find.descendant(of: find.byType(LiveTimelineBar), matching: find.byType(CustomPaint));
+    final topLeft = tester.getTopLeft(paint);
+    final size = tester.getSize(paint);
+    final gesture = await tester.startGesture(Offset(topLeft.dx + size.width * 0.5, topLeft.dy + size.height / 2));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    expect(seeks, [harness.startEpoch + 1800]);
+  });
+
+  testWidgets('an invalid visible block falls back to the buffer window', (tester) async {
+    final seeks = <int>[];
+    final harness = await _pumpTimeline(
+      tester,
+      seeks: seeks,
+      currentOffset: 60,
+      visibleStartOffset: 120,
+      visibleEndOffset: 120,
+    );
+
+    final paint = find.descendant(of: find.byType(LiveTimelineBar), matching: find.byType(CustomPaint));
+    final topLeft = tester.getTopLeft(paint);
+    final size = tester.getSize(paint);
+    final gesture = await tester.startGesture(Offset(topLeft.dx + size.width * 0.75, topLeft.dy + size.height / 2));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    expect(seeks, [harness.startEpoch + 90]);
+  });
 }
 
 String _clock(int epochSeconds) {
@@ -211,6 +257,9 @@ Future<({int startEpoch, FakeSyncPlayer player})> _pumpTimeline(
   required List<int> seeks,
   required int currentOffset,
   int rangeEndOffset = 120,
+  int seekStartSeconds = 0,
+  int? visibleStartOffset,
+  int? visibleEndOffset,
   bool isAtLiveEdge = false,
   bool enabled = true,
   bool provideSeekCallback = true,
@@ -237,7 +286,7 @@ Future<({int startEpoch, FakeSyncPlayer player})> _pumpTimeline(
                   player: player,
                   captureBuffer: CaptureBuffer(
                     startedAt: startEpoch.toDouble(),
-                    seekStartSeconds: 0,
+                    seekStartSeconds: seekStartSeconds.toDouble(),
                     seekEndSeconds: rangeEndOffset.toDouble(),
                   ),
                   epochForPosition: (position) =>
@@ -248,6 +297,8 @@ Future<({int startEpoch, FakeSyncPlayer player})> _pumpTimeline(
                   onKeyEvent: onKeyEvent,
                   horizontalLayout: horizontalLayout,
                   enabled: enabled,
+                  visibleStartEpoch: visibleStartOffset == null ? null : startEpoch + visibleStartOffset,
+                  visibleEndEpoch: visibleEndOffset == null ? null : startEpoch + visibleEndOffset,
                 ),
               ),
             ),

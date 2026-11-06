@@ -295,6 +295,13 @@ class XtreamLiveStream {
   final bool tvArchive;
   final int tvArchiveDuration; // seconds the archive reaches back
 
+  /// Xtream's `tv_archive_duration` is the catch-up window in DAYS
+  /// (provider docs: "for how many days", example 7) — convert to seconds
+  /// here so every downstream use (seek window, timeshift clamp) sees
+  /// seconds. A value no panel would express in days (> 366) is already
+  /// seconds and passes through unchanged.
+  static int archiveDurationSeconds(int raw) => raw > 366 ? raw : raw * 24 * 3600;
+
   const XtreamLiveStream({
     required this.streamId,
     required this.name,
@@ -313,7 +320,7 @@ class XtreamLiveStream {
       epgChannelId: json['epg_channel_id'] as String?,
       categoryId: json['category_id']?.toString(),
       tvArchive: flexibleInt(json['tv_archive']) == 1,
-      tvArchiveDuration: flexibleInt(json['tv_archive_duration']) ?? 0,
+      tvArchiveDuration: archiveDurationSeconds(flexibleInt(json['tv_archive_duration']) ?? 0),
     );
   }
 }

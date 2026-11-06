@@ -73,10 +73,15 @@ void main() {
 
     final hiddenLibraries = HiddenLibrariesProvider();
     addTearDown(hiddenLibraries.dispose);
+    final librariesProvider = LibrariesProvider();
+    addTearDown(librariesProvider.dispose);
     await tester.pumpWidget(
       TranslationProvider(
-        child: ChangeNotifierProvider<HiddenLibrariesProvider>.value(
-          value: hiddenLibraries,
+        child: MultiProvider(
+          providers: [
+            ChangeNotifierProvider<HiddenLibrariesProvider>.value(value: hiddenLibraries),
+            ChangeNotifierProvider<LibrariesProvider>.value(value: librariesProvider),
+          ],
           child: MaterialApp(home: SearchScreen(key: key)),
         ),
       ),
@@ -561,6 +566,69 @@ void main() {
     final refreshed = tester.widget<FocusableMediaCard>(cardFinder).item as MediaItem;
     expect(refreshed.libraryId, '1');
     expect(refreshed.libraryTitle, 'Movies');
+  });
+
+  testWidgets('scope strip shows All plus each library before any search', (tester) async {
+    // Build #9 Task 1b: the library scope must be ALWAYS visible — not
+    // gated on results — so Matt can scope a search to one library even
+    // when that library currently returns nothing.
+    await _pumpTvSearchScreen(
+      tester,
+      items: _twoLibraryMovies(),
+      libraries: [_library('1', 'Movies'), _library('2', 'Anime')],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(FocusableTabChip, t.search.allLibraries), findsOneWidget);
+    expect(find.widgetWithText(FocusableTabChip, 'Movies'), findsOneWidget);
+    expect(find.widgetWithText(FocusableTabChip, 'Anime'), findsOneWidget);
+  });
+
+  testWidgets('selecting a library scope shows only that library results', (tester) async {
+    final (client, key) = await _pumpTvSearchScreen(
+      tester,
+      items: _twoLibraryMovies(),
+      libraries: [_library('1', 'Movies'), _library('2', 'Anime')],
+    );
+    await tester.pumpAndSettle();
+
+    (key.currentState! as SearchInputFocusable).submitSearchQuery('movie');
+    await tester.pumpAndSettle();
+    expect(find.text('Movie 1'), findsOneWidget);
+    expect(find.text('Movie 2'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FocusableTabChip, 'Anime'));
+    await tester.pumpAndSettle();
+
+    // The scope re-runs the query with the other library hidden.
+    expect(client.queries, ['movie', 'movie']);
+    expect(find.text('Movie 1'), findsNothing);
+    expect(find.text('Movie 2'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FocusableTabChip, t.search.allLibraries));
+    await tester.pumpAndSettle();
+    expect(find.text('Movie 1'), findsOneWidget);
+    expect(find.text('Movie 2'), findsOneWidget);
+  });
+
+  testWidgets('a scoped search with no hits shows the honest empty state', (tester) async {
+    final (_, key) = await _pumpTvSearchScreen(
+      tester,
+      items: const [],
+      libraries: [_library('1', 'Movies'), _library('2', 'Anime')],
+    );
+    await tester.pumpAndSettle();
+
+    (key.currentState! as SearchInputFocusable).submitSearchQuery('zzz');
+    await tester.pumpAndSettle();
+    expect(find.text(t.messages.noResultsFound), findsOneWidget);
+
+    // The strip stays visible on the empty state, and scoping it names
+    // the library that came back empty instead of the generic message.
+    await tester.tap(find.widgetWithText(FocusableTabChip, 'Anime'));
+    await tester.pumpAndSettle();
+    expect(find.text(t.search.noResultsInLibrary(library: 'Anime')), findsOneWidget);
+    expect(find.widgetWithText(FocusableTabChip, t.search.allLibraries), findsOneWidget);
   });
 
   testWidgets('kind chips appear only when results span multiple kinds', (tester) async {

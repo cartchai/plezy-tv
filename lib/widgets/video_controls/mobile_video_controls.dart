@@ -66,6 +66,8 @@ class MobileVideoControls extends StatefulWidget {
 
   // Live TV time-shift
   final CaptureBuffer? captureBuffer;
+  final int? liveScrubBlockStartEpoch;
+  final int? liveScrubBlockEndEpoch;
   final bool isAtLiveEdge;
   final int Function(Duration position)? liveEpochForPosition;
   final ValueChanged<int>? onLiveSeek;
@@ -114,6 +116,8 @@ class MobileVideoControls extends StatefulWidget {
     this.isLive = false,
     this.liveChannelName,
     this.captureBuffer,
+    this.liveScrubBlockStartEpoch,
+    this.liveScrubBlockEndEpoch,
     this.isAtLiveEdge = true,
     this.liveEpochForPosition,
     this.onLiveSeek,
@@ -402,6 +406,8 @@ class _MobileVideoControlsState extends State<MobileVideoControls> with SingleTi
           builder: (context) => LiveTimelineBar(
             player: widget.player,
             captureBuffer: widget.captureBuffer!,
+            visibleStartEpoch: widget.liveScrubBlockStartEpoch,
+            visibleEndEpoch: widget.liveScrubBlockEndEpoch,
             epochForPosition: widget.liveEpochForPosition!,
             isAtLiveEdge: widget.isAtLiveEdge,
             onSeekEnd: widget.onLiveSeek,

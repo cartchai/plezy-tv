@@ -256,6 +256,36 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   `pubspec.yaml` (version `2.25.4+161`).
 - Progress notes: `IPTV_BUILD8_NOTES.md`.
 
+### 7. Build #9 — series search on cold catalogs, per-library search scope, catch-up + block scrubber
+- New files: `lib/utils/live_tv_scrub_block.dart`,
+  `test/services/iptv/iptv_live_session_test.dart`,
+  `test/utils/live_tv_scrub_block_test.dart`.
+- Touched upstream files: `lib/media/iptv_client.dart` (cold-catalog
+  per-category sweep returning partial matches; library scope via
+  `hiddenLibraryIds`), `lib/services/iptv/xtream_api.dart`
+  (`tv_archive_duration` days → seconds),
+  `lib/media/iptv_live_tv.dart` (capture buffer computed at read time;
+  `reportTimeline` returns the fresh buffer),
+  `lib/screens/livetv/tabs/guide_tab.dart` (catch-up action for every
+  started programme on a catch-up channel),
+  `lib/screens/livetv/program_details_sheet.dart` (catch-up next to
+  Play / Watch Channel; "Start from beginning" for live programmes),
+  `lib/screens/search_screen.dart` (always-visible library scope strip),
+  `lib/screens/video_player/live_tv_session_state.dart`,
+  `lib/screens/video_player/parts/live_tv.dart`,
+  `lib/screens/video_player/parts/build.dart`,
+  `lib/screens/video_player_screen.dart` (block-bounded scrubber),
+  `lib/widgets/video_controls/video_controls.dart`,
+  `lib/widgets/video_controls/desktop_video_controls.dart`,
+  `lib/widgets/video_controls/mobile_video_controls.dart`,
+  `lib/widgets/video_controls/parts/navigation.dart`,
+  `lib/widgets/video_controls/widgets/live_timeline_bar.dart`
+  (visible block range), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (changelog 2.25.5, `startFromBeginning` string),
+  `lib/screens/settings/about_screen.dart` (changelog entry),
+  `pubspec.yaml` (version `2.25.5+162`).
+- Progress notes: `IPTV_BUILD9_NOTES.md`.
+
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
 - libass module keeps `com.edde746.plezy.libass` (its JNI names match).

@@ -329,4 +329,88 @@ void main() {
     expect(find.text('Watch Channel'), findsOneWidget);
     expect(find.textContaining('Watch from start'), findsNothing);
   });
+
+  testWidgets('a past programme with guide data shows Watch from start next to Watch Channel', (tester) async {
+    // Build #9 Task 2: the old catch-up gate was placeholder-only, so a
+    // past programme WITH guide data opened a detail with no catch-up
+    // entry at all — the feature looked missing. It must sit next to the
+    // play action, clickable.
+    final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    addTearDown(harness.dispose);
+    await harness.init();
+    await harness.pump(tester);
+    await harness.waitForEpgCalls(tester, 1);
+
+    final now = DateTime.now();
+    harness.api.complete('100', [
+      _epg(
+        id: 'past',
+        title: 'Past Show',
+        start: now.subtract(const Duration(minutes: 50)),
+        end: now.subtract(const Duration(minutes: 10)),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Past Show'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Watch Channel'), findsOneWidget);
+    expect(find.textContaining('Watch from start'), findsOneWidget);
+  });
+
+  testWidgets('a programme already playing shows Start from beginning next to Play', (tester) async {
+    // Build #9 Task 2 refinement: a live programme's catch-up reads
+    // "Start from beginning" (not "Watch from start") and starts playback
+    // from the beginning of that programme's block.
+    final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    addTearDown(harness.dispose);
+    await harness.init();
+    await harness.pump(tester);
+    await harness.waitForEpgCalls(tester, 1);
+
+    final now = DateTime.now();
+    harness.api.complete('100', [
+      _epg(
+        id: 'live',
+        title: 'Live Show',
+        start: now.subtract(const Duration(minutes: 30)),
+        end: now.add(const Duration(minutes: 30)),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Live Show'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Play'), findsOneWidget);
+    expect(find.text('Start from beginning'), findsOneWidget);
+    expect(find.textContaining('Watch from start'), findsNothing);
+  });
+
+  testWidgets('no catch-up action for a future programme', (tester) async {
+    final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    addTearDown(harness.dispose);
+    await harness.init();
+    await harness.pump(tester);
+    await harness.waitForEpgCalls(tester, 1);
+
+    final now = DateTime.now();
+    harness.api.complete('100', [
+      _epg(
+        id: 'future',
+        title: 'Future Show',
+        start: now.add(const Duration(hours: 1)),
+        end: now.add(const Duration(hours: 2)),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Future Show'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Watch Channel'), findsOneWidget);
+    expect(find.textContaining('Watch from start'), findsNothing);
+    expect(find.text('Start from beginning'), findsNothing);
+  });
 }

@@ -10,6 +10,7 @@ import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/media_item.dart';
 import '../media/media_kind.dart';
+import '../media/media_library.dart';
 import '../media/media_item_merge.dart';
 import '../media/media_person.dart';
 import '../media/search_hit.dart';
@@ -72,6 +73,17 @@ class _SearchScreenState extends State<SearchScreen>
   late final FocusNode _peopleChipFocusNode = FocusNode(debugLabel: 'SearchPeopleChip');
   final Map<MediaKind, FocusNode> _kindChipFocusNodes = {};
 
+  /// Library scope for the search (build #9 Task 1b): null = all
+  /// libraries. The scope strip under the search field always offers every
+  /// visible library — even before a search runs or when the scoped library
+  /// returns nothing — so the option is never hidden. Selecting a scope
+  /// re-runs the query scoped to that library; the scope survives query
+  /// refinements and clearing the field, and resets only via "All
+  /// libraries". Hidden libraries are never offered as a scope.
+  String? _selectedLibraryKey;
+  late final FocusNode _allLibrariesScopeFocusNode = FocusNode(debugLabel: 'SearchScopeChipAll');
+  final Map<String, FocusNode> _libraryScopeFocusNodes = {};
+
   HiddenLibrariesProvider? _hiddenLibraries;
   Set<String> _lastSeenHiddenKeys = const {};
 
@@ -88,6 +100,10 @@ class _SearchScreenState extends State<SearchScreen>
     _allChipFocusNode.dispose();
     _peopleChipFocusNode.dispose();
     for (final node in _kindChipFocusNodes.values) {
+      node.dispose();
+    }
+    _allLibrariesScopeFocusNode.dispose();
+    for (final node in _libraryScopeFocusNodes.values) {
       node.dispose();
     }
     super.dispose();
@@ -132,15 +148,30 @@ class _SearchScreenState extends State<SearchScreen>
     // start would filter nothing. Read before any await: the profile subtree
     // can be torn down mid-search.
     final hiddenLibraries = context.read<HiddenLibrariesProvider>();
+    final librariesProvider = context.read<LibrariesProvider>();
     await hiddenLibraries.ensureInitialized();
     if (!mounted) return const [];
+
+    // Library scope (build #9 Task 1b): a selected library keeps only
+    // itself visible — every other loaded library joins the hidden set for
+    // this query, so the aggregation drops its candidates and hits and the
+    // IPTV client skips its sections entirely. A stale scope (library no
+    // longer loaded) behaves as All rather than hiding everything.
+    final hiddenKeys = {...hiddenLibraries.hiddenLibraryKeys};
+    final scope = _selectedLibraryKey;
+    final libraries = librariesProvider.libraries;
+    if (scope != null && libraries.any((library) => library.globalKey == scope)) {
+      for (final library in libraries) {
+        if (library.globalKey != scope) hiddenKeys.add(library.globalKey);
+      }
+    }
 
     final abort = AbortController();
     _activeSearchAbort = abort;
     try {
       final result = await multiServerProvider.aggregationService.searchAcrossServers(
         query,
-        hiddenLibraryKeys: hiddenLibraries.hiddenLibraryKeys,
+        hiddenLibraryKeys: hiddenKeys,
         abort: abort,
       );
       abort.throwIfAborted();
@@ -499,6 +530,64 @@ class _SearchScreenState extends State<SearchScreen>
     );
   }
 
+  /// The library scope currently in effect, or null for All. A scope whose
+  /// library is no longer loaded (or was hidden) reads as All.
+  String? _effectiveScopeKey(List<MediaLibrary> visibleLibraries) =>
+      visibleLibraries.any((library) => library.globalKey == _selectedLibraryKey) ? _selectedLibraryKey : null;
+
+  FocusNode _scopeChipFocusNode(String? libraryKey) => libraryKey == null
+      ? _allLibrariesScopeFocusNode
+      : _libraryScopeFocusNodes.putIfAbsent(
+          libraryKey,
+          () => FocusNode(debugLabel: 'SearchScopeChip_$libraryKey'),
+        );
+
+  void _selectLibraryScope(String? libraryKey) {
+    if (_selectedLibraryKey == libraryKey) return;
+    setState(() => _selectedLibraryKey = libraryKey);
+    final query = searchController.text.trim();
+    if (query.isNotEmpty) unawaited(runSearch(query));
+  }
+
+  /// The always-visible library scope strip (build #9 Task 1b): "All
+  /// libraries" plus one chip per visible library, rendered under the
+  /// search field whether or not a search has run — so Matt can scope a
+  /// search to one library even when that library currently returns
+  /// nothing. Same chip pattern as the kind filters (explicit left/right
+  /// neighbours, up to the input, down to the first result).
+  Widget _buildLibraryScopeStrip(List<MediaLibrary> visibleLibraries, String? effectiveScopeKey) {
+    final options = <String?>[null, for (final library in visibleLibraries) library.globalKey];
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: TabChipStrip(
+          children: [
+            for (final (index, libraryKey) in options.indexed) ...[
+              if (index > 0) const SizedBox(width: 8),
+              FocusableTabChip(
+                label: libraryKey == null
+                    ? t.search.allLibraries
+                    : visibleLibraries.firstWhere((library) => library.globalKey == libraryKey).title,
+                isSelected: effectiveScopeKey == libraryKey,
+                focusNode: _scopeChipFocusNode(libraryKey),
+                onSelect: () => _selectLibraryScope(libraryKey),
+                onNavigateLeft: index == 0
+                    ? _navigateToSidebar
+                    : () => _scopeChipFocusNode(options[index - 1]).requestFocus(),
+                onNavigateRight: index < options.length - 1
+                    ? () => _scopeChipFocusNode(options[index + 1]).requestFocus()
+                    : null,
+                onNavigateUp: focusSearchInput,
+                onNavigateDown: _focusFirstResult,
+                onBack: _navigateToSidebar,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   /// The results slivers. The "All" view groups the ranked hits into
   /// sections by library — Movies, TV Shows, Live TV, then other libraries,
   /// People last — each with a header (build #8 Task 2: "add sections for
@@ -614,6 +703,19 @@ class _SearchScreenState extends State<SearchScreen>
 
   @override
   Widget build(BuildContext context) {
+    // The scope strip watches the library list, so it appears as soon as
+    // libraries load and stays visible in every search state — before a
+    // search runs, while one loads, and when the scoped library is empty.
+    final librariesProvider = context.watch<LibrariesProvider>();
+    final hiddenKeys = context.watch<HiddenLibrariesProvider>().hiddenLibraryKeys;
+    final visibleLibraries = [
+      for (final library in librariesProvider.libraries)
+        if (!hiddenKeys.contains(library.globalKey)) library,
+    ];
+    final effectiveScopeKey = _effectiveScopeKey(visibleLibraries);
+    final scopeTitle = effectiveScopeKey == null
+        ? null
+        : visibleLibraries.firstWhere((library) => library.globalKey == effectiveScopeKey).title;
     return Scaffold(
       body: SafeArea(
         child: CustomScrollView(
@@ -641,6 +743,7 @@ class _SearchScreenState extends State<SearchScreen>
                 },
               ),
             ),
+            if (visibleLibraries.isNotEmpty) _buildLibraryScopeStrip(visibleLibraries, effectiveScopeKey),
             if (isSearching)
               LoadingIndicatorBox.sliver
             else if (!hasSearched)
@@ -659,7 +762,9 @@ class _SearchScreenState extends State<SearchScreen>
             else if (searchResults.isEmpty)
               SliverFillRemaining(
                 child: StateMessageWidget(
-                  message: t.messages.noResultsFound,
+                  message: scopeTitle == null
+                      ? t.messages.noResultsFound
+                      : t.search.noResultsInLibrary(library: scopeTitle),
                   subtitle: t.search.tryDifferentTerm,
                   icon: Symbols.search_off_rounded,
                   iconSize: 80,

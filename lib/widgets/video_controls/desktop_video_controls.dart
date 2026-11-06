@@ -78,6 +78,8 @@ class DesktopVideoControls extends StatefulWidget {
 
   // Live TV time-shift
   final CaptureBuffer? captureBuffer;
+  final int? liveScrubBlockStartEpoch;
+  final int? liveScrubBlockEndEpoch;
   final bool isAtLiveEdge;
   final int Function(Duration position)? liveEpochForPosition;
   final ValueChanged<int>? onLiveSeek;
@@ -143,6 +145,8 @@ class DesktopVideoControls extends StatefulWidget {
     this.thumbnailDataBuilder,
     this.liveChannelName,
     this.captureBuffer,
+    this.liveScrubBlockStartEpoch,
+    this.liveScrubBlockEndEpoch,
     this.isAtLiveEdge = true,
     this.liveEpochForPosition,
     this.onLiveSeek,
@@ -731,6 +735,8 @@ class DesktopVideoControlsState extends State<DesktopVideoControls> {
             LiveTimelineBar(
               player: widget.player,
               captureBuffer: widget.captureBuffer!,
+              visibleStartEpoch: widget.liveScrubBlockStartEpoch,
+              visibleEndEpoch: widget.liveScrubBlockEndEpoch,
               epochForPosition: widget.liveEpochForPosition!,
               isAtLiveEdge: widget.isAtLiveEdge,
               onSeekEnd: widget.onLiveSeek,

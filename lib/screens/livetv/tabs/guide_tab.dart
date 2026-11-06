@@ -2174,11 +2174,17 @@ class GuideTabState extends State<GuideTab>
     );
   }
 
-  /// Catch-up for a "No information" hour block: only past blocks on
-  /// channels that offer catch-up (Xtream `tv_archive = 1`). The player
-  /// starts the archive at the block's own start time.
+  /// Catch-up for any programme that has already started on a channel
+  /// that offers it (Xtream `tv_archive = 1`). Past programmes start at
+  /// their own beginning; the programme currently airing starts at its
+  /// beginning too ("Start from beginning" in the details sheet). Future
+  /// programmes get no catch-up action. The old code gated this on
+  /// "No information" placeholders only, so every programme WITH guide
+  /// data — i.e. everything Matt could actually see — had no catch-up
+  /// entry at all. The player starts the archive at the programme's own
+  /// start time ([_catchUpToProgram]).
   VoidCallback? _catchUpActionFor(LiveTvChannel channel, LiveTvProgram program) {
-    if (!program.isPlaceholder || !channel.hasCatchUp) return null;
+    if (!channel.hasCatchUp) return null;
     final beginsAt = program.beginsAt;
     if (beginsAt == null) return null;
     if (beginsAt >= DateTime.now().millisecondsSinceEpoch ~/ 1000) return null;

@@ -613,10 +613,15 @@ class IptvLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   CaptureBuffer? get captureBuffer {
     if (!_hasArchive) return null;
+    // The window's end is "now", computed at read time — not frozen at
+    // tune time (build #9 Task 3): the old `seekEndSeconds: 0` left the
+    // bar's live edge minutes stale after minutes of viewing, because no
+    // heartbeat ever refreshed it.
+    final nowEpoch = DateTime.now().millisecondsSinceEpoch / 1000;
     return CaptureBuffer(
       startedAt: _startedAtEpoch,
       seekStartSeconds: -archiveDurationSeconds.toDouble(),
-      seekEndSeconds: 0,
+      seekEndSeconds: (nowEpoch - _startedAtEpoch).clamp(0, double.infinity),
     );
   }
 
@@ -646,7 +651,17 @@ class IptvLiveTvPlaybackSession implements LiveTvPlaybackSession {
     required String state,
     required int positionMs,
     required int durationMs,
-  }) async => null;
+  }) async {
+    // The player's 10s timeline heartbeat refreshes the seek window from
+    // this report — returning null (the old behaviour) left the buffer
+    // frozen at its tune-time snapshot and the live edge went stale
+    // (build #9 Task 3). The update carries a freshly computed buffer so
+    // the existing commit path refreshes `_live.captureBuffer` and
+    // `atLiveEdge`, exactly as it does for Plex. No archive → no window.
+    final buffer = captureBuffer;
+    if (buffer == null) return null;
+    return LiveTimelineUpdate(captureBuffer: buffer);
+  }
 
   @override
   Future<void> discard() async {}

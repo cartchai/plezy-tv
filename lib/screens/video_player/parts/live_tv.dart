@@ -108,6 +108,9 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     if (_shuttingDown && state != 'stopped') return;
     final requestSession = _live.session;
     if (requestSession == null) return;
+    // The scrub block follows the tuned channel: resolve it on the first
+    // heartbeat after a tune/zap, and re-resolve when the block ends.
+    if (state != 'stopped') _maybeRefreshLiveBlock();
     final requestGeneration = _live.timelineGeneration;
     final requestStreamGeneration = _live.streamGeneration;
     // For live TV, player position/duration are unreliable (often 0). Use
@@ -528,11 +531,82 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
   }
 
   /// Current seekable epoch window for [_liveSeek], or null when there is no
-  /// live capture buffer.
+  /// live capture buffer. The ±skip window follows the scrub block when one
+  /// is pinned, so a skip cannot carry the playhead out of the time slot
+  /// the bar shows; the end is still capped at the live edge.
   LiveSeekBounds? _liveSeekBounds() {
     final buffer = _live.captureBuffer;
     if (buffer == null) return null;
+    final blockStart = _live.scrubBlockStartEpoch;
+    final blockEnd = _live.scrubBlockEndEpoch;
+    if (blockStart != null && blockEnd != null && blockEnd > blockStart) {
+      final start = blockStart.clamp(buffer.seekableStartEpoch, buffer.seekableEndEpoch);
+      final end = blockEnd.clamp(buffer.seekableStartEpoch, buffer.seekableEndEpoch);
+      if (end > start) return (start: start, end: end);
+    }
     return (start: buffer.seekableStartEpoch, end: buffer.seekableEndEpoch);
+  }
+
+  /// The channel currently tuned, from the zap list or the launch args.
+  LiveTvChannel? get _currentLiveChannel {
+    final channels = widget.live?.channels;
+    if (channels != null && _live.channelIndex >= 0 && _live.channelIndex < channels.length) {
+      return channels[_live.channelIndex];
+    }
+    return widget.live?.channel;
+  }
+
+  /// Re-resolve the scrub block when it is missing (first heartbeat after a
+  /// tune/zap; a failed resolution is retried at most once a minute) or
+  /// when the current block has ended (the programme rolled over).
+  void _maybeRefreshLiveBlock() {
+    if (_shuttingDown) return;
+    final session = _live.session;
+    if (session is! IptvLiveTvPlaybackSession || !session.canTimeShift) return;
+    final now = DateTime.now();
+    final blockEnd = _live.scrubBlockEndEpoch;
+    if (blockEnd != null) {
+      if (now.millisecondsSinceEpoch ~/ 1000 < blockEnd) return;
+    } else {
+      final attemptedAt = _live.scrubBlockAttemptedAt;
+      if (attemptedAt != null && now.difference(attemptedAt) < const Duration(minutes: 1)) return;
+    }
+    unawaited(_resolveLiveBlock());
+  }
+
+  /// Resolve the current scrub block for the tuned channel (build #9 Task
+  /// 3): the programme covering now, or the current clock hour when there
+  /// is no guide data. Only for IPTV catch-up sessions — Plex/Jellyfin
+  /// keep the capture-window bar. The EPG fetch serves the persisted cache
+  /// the guide already loaded, so coming from the guide this is cheap.
+  Future<void> _resolveLiveBlock() async {
+    final session = _live.session;
+    if (_shuttingDown || session is! IptvLiveTvPlaybackSession || !session.canTimeShift) return;
+    final channel = _currentLiveChannel;
+    if (channel == null) return;
+    _live.scrubBlockAttemptedAt = DateTime.now();
+    final multiServer = context.read<MultiServerProvider>();
+    final serverInfo = liveTvServerInfoForChannel(multiServer, channel);
+    final client = serverInfo == null ? null : multiServer.getClientForServer(ServerId(serverInfo.serverId));
+    final support = client?.liveTv;
+    if (support is! IptvLiveTvSupport) return;
+    final now = DateTime.now();
+    final programs = await support
+        .fetchEpgForChannel(
+          channel.key,
+          from: now.subtract(const Duration(hours: 6)),
+          to: now.add(const Duration(hours: 2)),
+        )
+        .catchError((Object e) {
+          appLogger.w('Live scrub block: EPG unavailable for ${channel.displayName}: $e');
+          return const <LiveTvProgram>[];
+        });
+    if (!mounted || _shuttingDown || !identical(_live.session, session)) return;
+    final block = liveScrubBlock(programs, DateTime.now());
+    _setPlayerState(() {
+      _live.scrubBlockStartEpoch = block.startEpoch;
+      _live.scrubBlockEndEpoch = block.endEpoch;
+    });
   }
 
   /// Rebuild and refresh live-edge state when [_liveSeek]'s pending target

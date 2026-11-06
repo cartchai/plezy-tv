@@ -148,6 +148,13 @@ class IptvClient implements MediaServerClient {
   Future<List<XtreamLiveStream>>? _liveStreamsFuture;
   Future<List<XtreamVodStream>>? _vodStreamsFuture;
   Future<List<XtreamSeries>>? _seriesFuture;
+
+  /// Whether a FULL catalog load has completed with rows (build #9 Task 1).
+  /// A future that is merely in flight — or that resolved empty — does not
+  /// count: a cold search must sweep per-category instead of awaiting a
+  /// load that may take minutes on a 46k-row catalog.
+  bool _vodStreamsLoaded = false;
+  bool _seriesListLoaded = false;
   Future<List<XtreamCategory>>? _vodCategoriesFuture;
   Future<List<XtreamCategory>>? _seriesCategoriesFuture;
   Future<List<M3uEntry>>? _m3uEntriesFuture;
@@ -273,6 +280,8 @@ class IptvClient implements MediaServerClient {
     _liveStreamsFuture = null;
     _vodStreamsFuture = null;
     _seriesFuture = null;
+    _vodStreamsLoaded = false;
+    _seriesListLoaded = false;
     _vodCategoriesFuture = null;
     _seriesCategoriesFuture = null;
     _m3uEntriesFuture = null;
@@ -355,7 +364,11 @@ class IptvClient implements MediaServerClient {
     // An empty result is never cached: a transient empty payload (this
     // panel returns [] for the unfiltered call at 199k rows) must not
     // poison every later view until restart.
-    if (result.isEmpty) _vodStreamsFuture = null;
+    if (result.isEmpty) {
+      _vodStreamsFuture = null;
+    } else {
+      _vodStreamsLoaded = true;
+    }
     return result;
   }
 
@@ -402,7 +415,11 @@ class IptvClient implements MediaServerClient {
     });
     _seriesFuture = future;
     final result = await future;
-    if (result.isEmpty) _seriesFuture = null;
+    if (result.isEmpty) {
+      _seriesFuture = null;
+    } else {
+      _seriesListLoaded = true;
+    }
     return result;
   }
 
@@ -1145,24 +1162,142 @@ class IptvClient implements MediaServerClient {
     return _searchM3uEntries(needle, limit, excludedLibraryIds);
   }
 
-  Future<List<MediaItem>> _searchMovies(String needle, int limit) async {
-    try {
-      final streams = await _vodStreams();
-      final favorites = await _favoriteItems();
-      final categoryNames = await _vodCategoryNames();
-      final out = <MediaItem>[];
-      for (final stream in streams) {
-        if (out.length >= limit) break;
-        if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
-        if (!stream.name.toLowerCase().contains(needle)) continue;
-        out.add(
-          _movieItem(
-            stream,
-            isFavorite: favorites.containsKey('movie:${stream.streamId}'),
-            categoryName: categoryNames[stream.categoryId],
-          ),
+  /// Append this section's matches from [rows] to [out], honouring the
+  /// country/region + initials filters and the query, de-duplicated by
+  /// stream id (a panel may return the same row under two categories).
+  /// Shared by the warm path and the cold sweep so the two cannot drift.
+  void _appendMovieMatches(
+    List<XtreamVodStream> rows,
+    String needle,
+    int limit,
+    Map<String, IptvFavoriteItem> favorites,
+    Map<String, String> categoryNames,
+    List<MediaItem> out,
+    Set<int> seen,
+  ) {
+    for (final stream in rows) {
+      if (out.length >= limit) break;
+      if (!seen.add(stream.streamId)) continue;
+      if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
+      if (!stream.name.toLowerCase().contains(needle)) continue;
+      out.add(
+        _movieItem(
+          stream,
+          isFavorite: favorites.containsKey('movie:${stream.streamId}'),
+          categoryName: categoryNames[stream.categoryId],
+        ),
+      );
+    }
+  }
+
+  /// Same as [_appendMovieMatches], for series rows.
+  void _appendSeriesMatches(
+    List<XtreamSeries> rows,
+    String needle,
+    int limit,
+    Map<String, IptvFavoriteItem> favorites,
+    Map<String, String> categoryNames,
+    List<MediaItem> out,
+    Set<int> seen,
+  ) {
+    for (final s in rows) {
+      if (out.length >= limit) break;
+      if (!seen.add(s.seriesId)) continue;
+      if (_isDisabled(s.categoryId) || _isDisabledInitial(s.name)) continue;
+      if (!s.name.toLowerCase().contains(needle)) continue;
+      out.add(
+        _seriesItem(
+          s,
+          isFavorite: favorites.containsKey('series:${s.seriesId}'),
+          categoryName: categoryNames[s.categoryId],
+        ),
+      );
+    }
+  }
+
+  /// Sweep per-category catalog rows in parallel batches, feeding each
+  /// category's rows to [onRows] AS THEY LAND: a slow category must not
+  /// hold its batch hostage (the old batched Future.wait did exactly
+  /// that). Stops at [deadline] or when [shouldStop] says enough matches
+  /// were found; rows landing after the sweep stopped are dropped, never
+  /// appended to a list that was already returned.
+  Future<void> _sweepCatalogCategories<T>(
+    List<XtreamCategory> categories,
+    Future<List<T>> Function(String categoryId) loadCategory,
+    void Function(List<T> rows) onRows,
+    bool Function() shouldStop,
+    DateTime deadline,
+  ) async {
+    var stopped = false;
+    for (var i = 0; i < categories.length && !stopped; i += _catalogFallbackBatchSize) {
+      if (shouldStop()) break;
+      final timeLeft = deadline.difference(DateTime.now());
+      if (timeLeft <= Duration.zero) break;
+      final end = (i + _catalogFallbackBatchSize).clamp(0, categories.length);
+      final batch = categories.sublist(i, end);
+      final futures = <Future<void>>[];
+      for (final category in batch) {
+        futures.add(
+          loadCategory(category.id)
+              .then((rows) {
+                if (!stopped && !shouldStop()) onRows(rows);
+              })
+              .catchError((Object e) {
+                appLogger.w('IPTV: catalog sweep category ${category.id} unavailable: $e');
+              }),
         );
       }
+      // Wait for the batch, but no longer than the sweep deadline: rows
+      // that already landed are kept, the rest are dropped by `stopped`.
+      await Future.wait(futures).timeout(timeLeft, onTimeout: () {
+        stopped = true;
+        return <void>[];
+      });
+      if (shouldStop()) stopped = true;
+    }
+  }
+
+  /// Deadline for a cold-catalog sweep: 90% of the section budget, so the
+  /// sweep returns partial matches instead of being cut to [] by the outer
+  /// timeout, with room left for the merge.
+  DateTime _sweepDeadline() => DateTime.now().add(searchSectionBudget * 0.9);
+
+  Future<List<MediaItem>> _searchMovies(String needle, int limit) async {
+    try {
+      final favorites = await _favoriteItems();
+      final categoryNames = await _vodCategoryNames();
+      if (_vodStreamsLoaded) {
+        // Warm catalog: filter the cached list (the old path).
+        final out = <MediaItem>[];
+        _appendMovieMatches(await _vodStreams(), needle, limit, favorites, categoryNames, out, <int>{});
+        return out;
+      }
+      // Cold catalog (build #9 Task 1a): the full 199k-row load may take
+      // minutes, and awaiting it before filtering a single title is why a
+      // cold search returned [] under the section budget. Kick the full
+      // load off in the background so the next search finds a warm catalog,
+      // and sweep per-category NOW so this search returns the matches that
+      // land before the budget fires.
+      unawaited(
+        _vodStreams().catchError((Object e) {
+          appLogger.w('IPTV: background VOD catalog warm-up failed: $e');
+          return const <XtreamVodStream>[];
+        }),
+      );
+      final categories = await _vodCategories().catchError((Object e) {
+        appLogger.w('IPTV: VOD category list unavailable for search sweep: $e');
+        return const <XtreamCategory>[];
+      });
+      final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
+      final out = <MediaItem>[];
+      final seen = <int>{};
+      await _sweepCatalogCategories<XtreamVodStream>(
+        wanted,
+        (id) => _xtreamApi.getVodStreams(categoryId: id),
+        (rows) => _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen),
+        () => out.length >= limit,
+        _sweepDeadline(),
+      );
       return out;
     } catch (e) {
       appLogger.w('IPTV: movie search failed: $e');
@@ -1172,22 +1307,37 @@ class IptvClient implements MediaServerClient {
 
   Future<List<MediaItem>> _searchSeries(String needle, int limit) async {
     try {
-      final series = await _seriesList();
       final favorites = await _favoriteItems();
       final categoryNames = await _seriesCategoryNames();
-      final out = <MediaItem>[];
-      for (final s in series) {
-        if (out.length >= limit) break;
-        if (_isDisabled(s.categoryId) || _isDisabledInitial(s.name)) continue;
-        if (!s.name.toLowerCase().contains(needle)) continue;
-        out.add(
-          _seriesItem(
-            s,
-            isFavorite: favorites.containsKey('series:${s.seriesId}'),
-            categoryName: categoryNames[s.categoryId],
-          ),
-        );
+      if (_seriesListLoaded) {
+        // Warm catalog: filter the cached list (the old path).
+        final out = <MediaItem>[];
+        _appendSeriesMatches(await _seriesList(), needle, limit, favorites, categoryNames, out, <int>{});
+        return out;
       }
+      // Cold catalog (build #9 Task 1a): same shape as movies — the full
+      // 46k-row series load is kicked off in the background while a
+      // per-category sweep returns the matches that land in time.
+      unawaited(
+        _seriesList().catchError((Object e) {
+          appLogger.w('IPTV: background series catalog warm-up failed: $e');
+          return const <XtreamSeries>[];
+        }),
+      );
+      final categories = await _seriesCategories().catchError((Object e) {
+        appLogger.w('IPTV: series category list unavailable for search sweep: $e');
+        return const <XtreamCategory>[];
+      });
+      final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
+      final out = <MediaItem>[];
+      final seen = <int>{};
+      await _sweepCatalogCategories<XtreamSeries>(
+        wanted,
+        (id) => _xtreamApi.getSeries(categoryId: id),
+        (rows) => _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen),
+        () => out.length >= limit,
+        _sweepDeadline(),
+      );
       return out;
     } catch (e) {
       appLogger.w('IPTV: series search failed: $e');

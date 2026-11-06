@@ -658,6 +658,13 @@ class PlexVideoControls extends StatefulWidget {
   /// Capture buffer for live TV time-shift (null = no time-shift support)
   final CaptureBuffer? captureBuffer;
 
+  /// Current scrub block for live TV (build #9 Task 3): the programme
+  /// covering now, or the current clock-hour block when there is no guide
+  /// data. Null = the bar spans the whole capture buffer (Plex/Jellyfin
+  /// and IPTV before the block resolves).
+  final int? liveScrubBlockStartEpoch;
+  final int? liveScrubBlockEndEpoch;
+
   /// Whether playback is at the live edge
   final bool isAtLiveEdge;
 
@@ -752,6 +759,8 @@ class PlexVideoControls extends StatefulWidget {
     this.isLive = false,
     this.liveChannelName,
     this.captureBuffer,
+    this.liveScrubBlockStartEpoch,
+    this.liveScrubBlockEndEpoch,
     this.isAtLiveEdge = true,
     this.liveEpochForPosition,
     this.onLiveSeek,
@@ -1358,6 +1367,8 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
                                                       isLive: widget.isLive,
                                                       liveChannelName: widget.liveChannelName,
                                                       captureBuffer: widget.captureBuffer,
+                                                      liveScrubBlockStartEpoch: widget.liveScrubBlockStartEpoch,
+                                                      liveScrubBlockEndEpoch: widget.liveScrubBlockEndEpoch,
                                                       isAtLiveEdge: widget.isAtLiveEdge,
                                                       liveEpochForPosition: widget.liveEpochForPosition,
                                                       onLiveSeek: _liveSeekAbandoningBurst(widget.onLiveSeek),
