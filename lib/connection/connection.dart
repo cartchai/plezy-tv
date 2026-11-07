@@ -395,9 +395,11 @@ class M3uConnection extends Connection {
   /// Live TV and Library.
   final List<String> disabledCategoryIds;
 
-  /// Name initials the user turned off (build #8 Task 4 — the repeating
-  /// "EN", "ES", "NF" style prefixes). Items whose name carries a disabled
-  /// initial are hidden from Live TV and Library, like a disabled category.
+  /// Category initials the user turned off (build #8 Task 4, redesigned
+  /// build #10 — the repeating "EN", "24/7", "NF" style prefixes of
+  /// CATEGORY names). Categories carrying a disabled initial — and
+  /// everything in them — are hidden from Live TV and Library, like a
+  /// disabled category. Item names are never filtered.
   final List<String> disabledInitials;
 
   M3uConnection({
@@ -519,9 +521,11 @@ class XtreamConnection extends Connection {
   /// Live TV and Library.
   final List<String> disabledCategoryIds;
 
-  /// Name initials the user turned off (build #8 Task 4 — the repeating
-  /// "EN", "ES", "NF" style prefixes). Items whose name carries a disabled
-  /// initial are hidden from Live TV and Library, like a disabled category.
+  /// Category initials the user turned off (build #8 Task 4, redesigned
+  /// build #10 — the repeating "EN", "24/7", "NF" style prefixes of
+  /// CATEGORY names). Categories carrying a disabled initial — and
+  /// everything in them — are hidden from Live TV and Library, like a
+  /// disabled category. Item names are never filtered.
   final List<String> disabledInitials;
 
   XtreamConnection({

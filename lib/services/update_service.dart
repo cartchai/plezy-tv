@@ -241,11 +241,15 @@ class UpdateService {
 
   /// The release's .apk asset, matched on the `.apk` suffix only (GitHub
   /// rewrites spaces to dots in stored asset names). Returns
-  /// `{'apkAssetUrl': ..., 'apkAssetName': ...}` or the same keys with null
-  /// values when the release carries no .apk asset.
+  /// `{'apkAssetUrl': ..., 'apkAssetName': ..., 'apkAssetSize': ...}` or the
+  /// same keys with null values when the release carries no .apk asset.
+  /// The size (bytes, from the GitHub API) is what the in-app downloader
+  /// verifies the finished file against before offering Install (build
+  /// #10) — a truncated download must never reach the installer.
   static Map<String, Object?> _apkAsset(Object? assets) {
     String? url;
     String? name;
+    int? size;
     if (assets is List) {
       for (final asset in assets) {
         if (asset is! Map) continue;
@@ -253,10 +257,11 @@ class UpdateService {
         if (assetName == null || !assetName.toLowerCase().endsWith('.apk')) continue;
         url = asset['browser_download_url'] as String?;
         name = assetName;
+        size = asset['size'] as int?;
         break;
       }
     }
-    return {'apkAssetUrl': url, 'apkAssetName': name};
+    return {'apkAssetUrl': url, 'apkAssetName': name, 'apkAssetSize': size};
   }
 
   /// Check for updates on startup (respects cooldown and skipped versions)

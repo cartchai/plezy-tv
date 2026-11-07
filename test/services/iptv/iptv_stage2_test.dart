@@ -457,11 +457,14 @@ https://example.com/cnn.m3u8
     });
   });
 
-  group('IptvClient initials filter (build #8 Task 4)', () {
-    // The provider's content carries repeating name initials ("EN - …",
+  group('IptvClient initials filter (build #8 Task 4, redesigned build #10)', () {
+    // The provider's CATEGORY names carry repeating initials ("EN - …",
     // "NF - …"); the user can turn whole initial-sets off, like the
-    // category groupings. Detection is by repetition (threshold 5) with no
-    // language mapping — every set is toggleable, including "NF".
+    // category groupings — toggling one hides every category carrying it,
+    // and everything in those categories. Detection is by repetition
+    // (threshold 5) with no language mapping — every set is toggleable,
+    // including "NF". Item names are NEVER filtered: an "EN - …" title in
+    // a category with no initial stays visible when EN is turned off.
     // (The password is split so the literal never appears in new code.)
     const testPassword = 'pa' 'ss';
 
@@ -482,13 +485,14 @@ https://example.com/cnn.m3u8
 
     test('iptvInitials detects only the initials that keep repeating', () async {
       final client = xtreamClient();
-      // EN: 5 live channels + 5 movies + the "EN - Live" category = 11.
-      // NF: 1 movie + 6 series + the "NF" VOD and series categories = 9.
-      // ES appears once — never offered.
+      // EN: 6 live categories. NF: 1 VOD + 5 VOD + 1 series + 4 series
+      // categories = 11. ES appears once — never offered. Counts are per
+      // CATEGORY, not per item: the 5 EN-named channels and 5 EN-named
+      // movies add nothing.
       final initials = await client.iptvInitials();
       expect(
         initials.map((i) => (i.initial, i.count)),
-        [('EN', 11), ('NF', 9)],
+        [('NF', 11), ('EN', 6)],
       );
       client.close();
     });
@@ -878,20 +882,30 @@ class _FakeXtreamApi extends XtreamApi {
   Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
 }
 
-/// Fake whose catalog carries repeating name initials — the shape behind
-/// the initials filter (build #8 Task 4): EN repeats 11 times (5 live
-/// channels + 5 movies + the "EN - Live" category), NF repeats 9 times
-/// (1 movie + 6 series + the "NF" VOD and series categories), ES appears
-/// once and is never offered.
+/// Fake whose CATEGORIES carry repeating initials — the shape behind the
+/// category-initials filter (build #8 Task 4, redesigned build #10): EN
+/// repeats 6 times across live category names, NF repeats 11 times across
+/// VOD + series category names, ES appears once and is never offered.
+/// The ITEMS still carry the old "EN - …" / "NF - …" names on purpose:
+/// item names are never filtered, so an EN-named movie in the "Action"
+/// category stays visible when EN is turned off.
 class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
     for (var i = 1; i <= 5; i++) XtreamLiveStream(streamId: 100 + i, name: 'EN - Channel $i', categoryId: '1'),
-    const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '1'),
+    const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [XtreamCategory(id: '1', name: 'EN - Live')];
+  Future<List<XtreamCategory>> getLiveCategories() async => const [
+    XtreamCategory(id: '1', name: 'EN - Live'),
+    XtreamCategory(id: '2', name: 'ES - Live'),
+    XtreamCategory(id: 'L1', name: 'EN - Live 2'),
+    XtreamCategory(id: 'L2', name: 'EN - Live 3'),
+    XtreamCategory(id: 'L3', name: 'EN - Live 4'),
+    XtreamCategory(id: 'L4', name: 'EN - Live 5'),
+    XtreamCategory(id: 'L5', name: 'EN - Live 6'),
+  ];
 
   @override
   Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
@@ -904,6 +918,11 @@ class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   Future<List<XtreamCategory>> getVodCategories() async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'NF'),
+    XtreamCategory(id: 'V1', name: 'NF - Movies 1'),
+    XtreamCategory(id: 'V2', name: 'NF - Movies 2'),
+    XtreamCategory(id: 'V3', name: 'NF - Movies 3'),
+    XtreamCategory(id: 'V4', name: 'NF - Movies 4'),
+    XtreamCategory(id: 'V5', name: 'NF - Movies 5'),
   ];
 
   @override
@@ -915,6 +934,10 @@ class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   Future<List<XtreamCategory>> getSeriesCategories() async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'NF'),
+    XtreamCategory(id: 'S1', name: 'NF - Series 1'),
+    XtreamCategory(id: 'S2', name: 'NF - Series 2'),
+    XtreamCategory(id: 'S3', name: 'NF - Series 3'),
+    XtreamCategory(id: 'S4', name: 'NF - Series 4'),
   ];
 }
 

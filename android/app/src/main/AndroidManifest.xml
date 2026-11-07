@@ -7,6 +7,11 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="auto">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Declared so the in-app updater (build #10) can hand a downloaded APK
+         to the system installer. The user still grants "Install unknown
+         apps" for PlezTV at install time; this permission alone installs
+         nothing. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
 
 

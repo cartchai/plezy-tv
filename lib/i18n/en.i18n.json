@@ -152,6 +152,17 @@
     "latestVersion": "You are on the latest version",
     "checkFailed": "Failed to check for updates",
     "downloadApk": "Download APK",
+    "download": "Download",
+    "downloading": "Downloading update…",
+    "downloadProgress": "${downloaded} of ${total}",
+    "downloadComplete": "Download complete",
+    "install": "Install",
+    "inAppDownloadHint": "PlezTV downloads the APK itself. When it finishes, tap Install — it installs over the current PlezTV.",
+    "installUpdateHint": "Installs over the current PlezTV. You may be asked to allow “Install unknown apps” for PlezTV first.",
+    "downloadFailed": "The download failed. Check your connection and try again.",
+    "downloadSizeMismatch": "The download didn't finish completely. Try again.",
+    "downloadCancelled": "Download cancelled.",
+    "installUnavailable": "This device couldn't open the installer. Open the release page to download the APK instead.",
     "noApkAttached": "This release has no APK attached yet — open the release page for details.",
     "installApkHint": "Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.",
     "releaseNotes": "What’s new"
@@ -1126,7 +1137,7 @@
     "iptvFilterMovies": "Movies",
     "iptvFilterSeries": "TV Series",
     "iptvFilterGroups": "Groups",
-    "iptvFilterInitials": "Name initials",
+    "iptvFilterInitials": "Category initials",
     "iptvFilterInitialsCount": {
       "one": "${n} initial",
       "other": "${n} initials"
@@ -1403,6 +1414,13 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2256": [
+      "Updates now download inside the app, with an Install button when the download finishes — no browser needed",
+      "Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once",
+      "The initials list is in alphabetical order",
+      "Search now uses the full series list as well as the per-category sweep, so TV shows are found even when the per-category calls come back empty",
+      "New Series catalog readout in IPTV settings shows whether the catalog loads on your phone"
+    ],
     "changelog2255": [
       "Search now finds TV shows, even the first time you search after opening the app",
       "You can search inside one library — pick it above the search results",
@@ -2733,7 +2751,16 @@
     "epgUpdated": "Guide updated",
     "epgCleared": "Guide cleared",
     "initialsLoading": "Loading initials…",
-    "initialsLoadFailed": "Could not load the name initials. Check the connection and try again.",
-    "initialsNoneFound": "No repeating initials found in this connection’s catalog."
+    "initialsLoadFailed": "Could not load the category initials. Check the connection and try again.",
+    "initialsNoneFound": "No repeating initials found in this connection’s categories.",
+    "catalogDiagnosticsTitle": "Series catalog",
+    "catalogDiagnosticsHint": "What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.",
+    "catalogDiagnosticsLoading": "Loading catalog…",
+    "catalogDiagnosticsFailed": "Could not load the catalog details.",
+    "catalogDiagnosticsUnfilteredRows": "Series loaded (all categories): ${count}",
+    "catalogDiagnosticsCategoryCount": "Series categories: ${count}",
+    "catalogDiagnosticsPerCategory": "In ${category}: ${count}",
+    "catalogDiagnosticsDisabledInitials": "Category initials turned off: ${count}",
+    "catalogDiagnosticsDisabledCategories": "Categories turned off: ${count}"
   }
 }

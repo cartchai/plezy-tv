@@ -964,6 +964,13 @@ class MultiServerManager {
       _iptvHealthByConnectionId[connection.id] = health;
       _applyHealth(ServerId(connection.id), health);
 
+      // Warm the series catalog in the background (build #10): the
+      // unfiltered load takes a while on a cold connection, and the
+      // first search after app start would otherwise race it. Starting
+      // it here means the second search finds a warm catalog. Unawaited
+      // on purpose — binding must not wait for a 46k-row load.
+      client.warmUpSeriesCatalog();
+
       appLogger.i(
         'Added IPTV server: ${client.serverName ?? connection.id}${healthy ? '' : ' (unhealthy)'}',
       );

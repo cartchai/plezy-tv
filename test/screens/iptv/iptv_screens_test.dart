@@ -151,10 +151,10 @@ class _FakeXtreamApi extends XtreamApi {
   Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async => const [];
 }
 
-/// Fake whose catalog carries repeating name initials — EN ×11 (5 live
-/// channels + 5 movies + the "EN - Live" category), NF ×9 (1 movie +
-/// 6 series + the "NF" VOD and series categories), ES ×1 (never offered).
-/// For the initials filter tests (build #8 Task 4).
+/// Fake whose CATEGORIES carry repeating initials — EN ×11 (6 live + 5
+/// VOD categories), NF ×9 (1 VOD + 8 series categories), ES ×1 (never
+/// offered). For the initials filter tests (build #8 Task 4, redesigned
+/// build #10: category initials).
 class _InitialsFakeXtreamApi extends XtreamApi {
   _InitialsFakeXtreamApi()
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
@@ -166,7 +166,14 @@ class _InitialsFakeXtreamApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [XtreamCategory(id: '1', name: 'EN - Live')];
+  Future<List<XtreamCategory>> getLiveCategories() async => const [
+    XtreamCategory(id: '1', name: 'EN - Live 1'),
+    XtreamCategory(id: 'L2', name: 'EN - Live 2'),
+    XtreamCategory(id: 'L3', name: 'EN - Live 3'),
+    XtreamCategory(id: 'L4', name: 'EN - Live 4'),
+    XtreamCategory(id: 'L5', name: 'EN - Live 5'),
+    XtreamCategory(id: 'L6', name: 'EN - Live 6'),
+  ];
 
   @override
   Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
@@ -177,8 +184,13 @@ class _InitialsFakeXtreamApi extends XtreamApi {
 
   @override
   Future<List<XtreamCategory>> getVodCategories() async => const [
-    XtreamCategory(id: '1', name: 'Action'),
+    XtreamCategory(id: '1', name: 'EN - Films 1'),
+    XtreamCategory(id: 'E2', name: 'EN - Films 2'),
+    XtreamCategory(id: 'E3', name: 'EN - Films 3'),
+    XtreamCategory(id: 'E4', name: 'EN - Films 4'),
+    XtreamCategory(id: 'E5', name: 'EN - Films 5'),
     XtreamCategory(id: '2', name: 'NF'),
+    XtreamCategory(id: 'ES1', name: 'ES - Films'),
   ];
 
   @override
@@ -189,7 +201,14 @@ class _InitialsFakeXtreamApi extends XtreamApi {
   @override
   Future<List<XtreamCategory>> getSeriesCategories() async => const [
     XtreamCategory(id: '1', name: 'Action'),
-    XtreamCategory(id: '2', name: 'NF'),
+    XtreamCategory(id: '2', name: 'NF - Series 1'),
+    XtreamCategory(id: 'S2', name: 'NF - Series 2'),
+    XtreamCategory(id: 'S3', name: 'NF - Series 3'),
+    XtreamCategory(id: 'S4', name: 'NF - Series 4'),
+    XtreamCategory(id: 'S5', name: 'NF - Series 5'),
+    XtreamCategory(id: 'S6', name: 'NF - Series 6'),
+    XtreamCategory(id: 'S7', name: 'NF - Series 7'),
+    XtreamCategory(id: 'S8', name: 'NF - Series 8'),
   ];
 }
 
@@ -696,7 +715,7 @@ void main() {
     expect(find.text(t.iptv.epgCleared), findsOneWidget);
   });
 
-  testWidgets('IPTV settings screen: name initials toggle persists (build #8 Task 4)', (tester) async {
+  testWidgets('IPTV settings screen: category initials toggle persists (build #8 Task 4, redesigned build #10)', (tester) async {
     // The initials section lives grouped with the categories on the IPTV
     // settings screen, under the Trex connection tile; a toggle persists
     // immediately (registry upsert) so the filter applies everywhere.

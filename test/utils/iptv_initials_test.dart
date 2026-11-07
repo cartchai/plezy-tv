@@ -2,50 +2,59 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/utils/iptv_initials.dart';
 
 void main() {
-  group('detectInitial (build #8 Task 4)', () {
-    test('detects the prefix before a separator', () {
-      expect(detectInitial('EN - Title'), 'EN');
-      expect(detectInitial('ES | Channel'), 'ES');
-      expect(detectInitial('UK|Channel'), 'UK');
-      expect(detectInitial('NF - Alice'), 'NF');
-      expect(detectInitial('IT: Show'), 'IT');
-      expect(detectInitial('FR / Film'), 'FR');
-      expect(detectInitial('USA - News'), 'USA');
+  group('categoryInitial (build #10 redesign: from the category name)', () {
+    test('derives the initial from the category prefix', () {
+      expect(categoryInitial('|EN| UK SERIES'), 'EN');
+      expect(categoryInitial('|EN|UK MOVIES'), 'EN');
+      expect(categoryInitial('EN - Movies'), 'EN');
+      expect(categoryInitial('ES | Channels'), 'ES');
+      expect(categoryInitial('UK|Channels'), 'UK');
+      expect(categoryInitial('NF - Alice'), 'NF');
+      expect(categoryInitial('IT: Shows'), 'IT');
+      expect(categoryInitial('FR / Films'), 'FR');
+      expect(categoryInitial('USA - News'), 'USA');
+      expect(categoryInitial('ASIA: Shows'), 'ASIA');
+      expect(categoryInitial('AR - Channels'), 'AR');
+    });
+
+    test('leading token before the first space, when it is a short tag', () {
+      expect(categoryInitial('24/7 ACTION & ADVENTURE VIP'), '24/7');
+      expect(categoryInitial('24/7'), '24/7');
+    });
+
+    test('a category that IS just an initial carries it', () {
+      expect(categoryInitial('NF'), 'NF');
+      expect(categoryInitial('ASIA'), 'ASIA');
     });
 
     test('a bare space is not a separator', () {
-      // "IT Crowd" is a title, not an initial — it must never be offered.
-      expect(detectInitial('IT Crowd'), isNull);
-      expect(detectInitial('ABBA Gold'), isNull);
-      expect(detectInitial('The Last of Us'), isNull);
+      // "UK Series" is a category name, not an initial — it must never be
+      // offered, and neither is a plain category name.
+      expect(categoryInitial('UK Series'), isNull);
+      expect(categoryInitial('IT Crowd'), isNull);
+      expect(categoryInitial('ABBA Gold'), isNull);
+      expect(categoryInitial('Action'), isNull);
     });
 
     test('names without an initial return null', () {
-      expect(detectInitial('Alice'), isNull);
-      expect(detectInitial('NF'), isNull);
-      expect(detectInitial(''), isNull);
-      expect(detectInitial(null), isNull);
-      expect(detectInitial('eN - Title'), isNull);
-      expect(detectInitial('ENGLISH - Title'), isNull);
-    });
-
-    test('initialOf also reads a name that IS just an initial', () {
-      // A category named "NF" is the NF grouping — no separator needed.
-      expect(initialOf('NF'), 'NF');
-      expect(initialOf('EN - Title'), 'EN');
-      expect(initialOf('Action'), isNull);
-      expect(initialOf('IT Crowd'), isNull);
+      expect(categoryInitial('Alice'), isNull);
+      expect(categoryInitial(''), isNull);
+      expect(categoryInitial(null), isNull);
+      expect(categoryInitial('eN - Title'), isNull);
+      expect(categoryInitial('ENGLISH - Title'), isNull);
+      expect(categoryInitial('   '), isNull);
+      expect(categoryInitial('|'), isNull);
     });
   });
 
   group('initialsMeetingThreshold (build #8 Task 4)', () {
-    test('only initials that keep repeating are offered', () {
-      final counts = countInitials([
-        for (var i = 0; i < 6; i++) 'EN - Movie $i',
-        for (var i = 0; i < 5; i++) 'ES - Show $i',
-        for (var i = 0; i < 4; i++) 'IT - Film $i',
+    test('only initials that keep repeating across categories are offered', () {
+      final counts = countCategoryInitials([
+        for (var i = 0; i < 6; i++) 'EN - Category $i',
+        for (var i = 0; i < 5; i++) 'ES - Category $i',
+        for (var i = 0; i < 4; i++) 'IT - Category $i',
         'NF - One Off',
-        'Alice',
+        'Action',
       ]);
       final offered = initialsMeetingThreshold(counts);
       // EN (6) and ES (5) meet the threshold of 5; IT (4) and the NF
@@ -54,16 +63,31 @@ void main() {
     });
 
     test('every initial-set is toggleable, including provider tags like NF', () {
-      final counts = countInitials([for (var i = 0; i < 7; i++) 'NF - Show $i']);
+      final counts = countCategoryInitials([for (var i = 0; i < 7; i++) 'NF - Category $i']);
       final offered = initialsMeetingThreshold(counts);
       expect(offered.map((i) => i.initial), ['NF']);
     });
 
+    test('counts are per category, not per item', () {
+      // Six categories carry EN, however many items sit inside them.
+      final counts = countCategoryInitials([
+        '|EN| UK SERIES',
+        '|EN| UK MOVIES',
+        'EN - Drama',
+        'EN - Comedy',
+        'EN - News',
+        'EN - Sports',
+        'FR - Films',
+      ]);
+      expect(counts, {'EN': 6, 'FR': 1});
+      expect(initialsMeetingThreshold(counts).map((i) => i.initial), ['EN']);
+    });
+
     test('most-common first, ties by initial', () {
-      final counts = countInitials([
-        for (var i = 0; i < 5; i++) 'US - Item $i',
-        for (var i = 0; i < 9; i++) 'EN - Item $i',
-        for (var i = 0; i < 5; i++) 'ES - Item $i',
+      final counts = countCategoryInitials([
+        for (var i = 0; i < 5; i++) 'US - Category $i',
+        for (var i = 0; i < 9; i++) 'EN - Category $i',
+        for (var i = 0; i < 5; i++) 'ES - Category $i',
       ]);
       expect(
         initialsMeetingThreshold(counts).map((i) => i.initial),

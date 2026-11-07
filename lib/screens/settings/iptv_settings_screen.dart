@@ -348,6 +348,8 @@ class _IptvConnectionsList extends StatelessWidget {
             for (final connection in connections) ...[
               _IptvConnectionTile(connection: connection),
               _IptvConnectionInitials(connection: connection),
+              if (connection is XtreamConnection)
+                _IptvCatalogDiagnostics(connection: connection),
             ],
           ],
         );
@@ -401,11 +403,12 @@ class _IptvConnectionTile extends StatelessWidget {
   }
 }
 
-/// The name-initials filter for one IPTV connection (build #8 Task 4),
-/// grouped with the categories on the IPTV settings screen: the initials
-/// that keep repeating across this connection's catalog, each with a
-/// switch to turn that whole set off. Collapsed by default; the checklist
-/// loads its initials only when first expanded.
+/// The category-initials filter for one IPTV connection (build #8 Task 4,
+/// redesigned build #10), grouped with the categories on the IPTV settings
+/// screen: the initials that keep repeating across this connection's
+/// CATEGORY names, each with a switch to turn every category carrying it
+/// off. Collapsed by default; the checklist loads its initials only when
+/// first expanded.
 ///
 /// Unlike the edit screen's deferred save, a toggle here persists
 /// immediately (registry upsert + rebind, like the edit screen's caller
@@ -481,6 +484,126 @@ class _IptvConnectionInitialsState extends State<_IptvConnectionInitials> {
               onDisabledChanged: (next) => unawaited(_persist(next)),
               onLoaded: (initials) => setState(() => _initials = initials),
             ),
+          ),
+      ],
+    );
+  }
+}
+
+/// On-device series catalog readout (build #10, diagnosis recommendation
+/// 6): what this phone loaded from the series catalog — the unfiltered
+/// row count, the series category count, per-category row counts for the
+/// first few categories, and how many initials/categories are turned off.
+/// Collapsed by default; loads only when first expanded, through its own
+/// [IptvClient] (created from [connection], closed on dispose), like the
+/// initials checklist. Xtream only — M3U has no series catalog.
+class _IptvCatalogDiagnostics extends StatefulWidget {
+  final XtreamConnection connection;
+
+  const _IptvCatalogDiagnostics({required this.connection});
+
+  @override
+  State<_IptvCatalogDiagnostics> createState() => _IptvCatalogDiagnosticsState();
+}
+
+class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
+  bool _expanded = false;
+  bool _loading = false;
+  bool _failed = false;
+  IptvCatalogDiagnostics? _diagnostics;
+
+  Future<void> _load() async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    final client = IptvClient.forConnection(widget.connection);
+    try {
+      final diagnostics = await client.seriesCatalogDiagnostics();
+      if (!mounted) return;
+      setState(() => _diagnostics = diagnostics);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _failed = true);
+    } finally {
+      client.close();
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final diagnostics = _diagnostics;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FocusableListTile(
+          title: Text(t.iptv.catalogDiagnosticsTitle, style: theme.textTheme.titleSmall),
+          subtitle: Text(t.iptv.catalogDiagnosticsHint, style: theme.textTheme.bodySmall),
+          trailing: AppIcon(
+            _expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
+            fill: 1,
+          ),
+          onTap: () {
+            setState(() => _expanded = !_expanded);
+            if (_expanded && diagnostics == null) unawaited(_load());
+          },
+        ),
+        if (_expanded)
+          Padding(
+            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+            child: _loading
+                ? Text(t.iptv.catalogDiagnosticsLoading, style: theme.textTheme.bodySmall)
+                : _failed
+                    ? Row(
+                        children: [
+                          Expanded(
+                            child: Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall),
+                          ),
+                          TextButton(
+                            onPressed: _load,
+                            child: Text(t.common.retry),
+                          ),
+                        ],
+                      )
+                    : diagnostics == null
+                        ? Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall)
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t.iptv.catalogDiagnosticsUnfilteredRows(count: diagnostics.unfilteredSeriesRows),
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              Text(
+                                t.iptv.catalogDiagnosticsCategoryCount(count: diagnostics.seriesCategoryCount),
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              for (final entry in diagnostics.perCategorySeriesRows.entries)
+                                Text(
+                                  t.iptv.catalogDiagnosticsPerCategory(
+                                    category: entry.key,
+                                    count: entry.value,
+                                  ),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              Text(
+                                t.iptv.catalogDiagnosticsDisabledInitials(
+                                  count: diagnostics.disabledInitialsCount,
+                                ),
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              Text(
+                                t.iptv.catalogDiagnosticsDisabledCategories(
+                                  count: diagnostics.disabledCategoriesCount,
+                                ),
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
           ),
       ],
     );

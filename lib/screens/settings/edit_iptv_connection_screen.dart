@@ -34,7 +34,8 @@ class _IptvCategory {
 
 /// Which of the three content types a section lists. M3U groups have no
 /// live/VOD/series type, so they get their own single section. The initials
-/// section (build #8 Task 4) lists detected name initials, not categories.
+/// section (build #8 Task 4, redesigned build #10) lists detected category
+/// initials, not categories.
 enum _CategorySectionKind { live, movies, series, groups, initials }
 
 /// One collapsible section of the category filter. All sections share the
@@ -116,11 +117,12 @@ class _EditIptvConnectionScreenState extends State<EditIptvConnectionScreen>
       ? (widget.connection as M3uConnection).disabledCategoryIds.toSet()
       : (widget.connection as XtreamConnection).disabledCategoryIds.toSet();
 
-  /// The name initials the user turned off (build #8 Task 4) — the same
-  /// deferred-save flow as the category set: edited here, persisted by
-  /// [_save]. Unlike categories, the initials list itself is loaded by the
-  /// checklist widget, so the screen only keeps the disabled set plus the
-  /// loaded list (for the section header's count).
+  /// The category initials the user turned off (build #8 Task 4,
+  /// redesigned build #10) — the same deferred-save flow as the category
+  /// set: edited here, persisted by [_save]. Unlike categories, the
+  /// initials list itself is loaded by the checklist widget, so the screen
+  /// only keeps the disabled set plus the loaded list (for the section
+  /// header's count).
   late final Set<String> _disabledInitials = widget.connection is M3uConnection
       ? (widget.connection as M3uConnection).disabledInitials.toSet()
       : (widget.connection as XtreamConnection).disabledInitials.toSet();

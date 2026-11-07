@@ -7,11 +7,17 @@ import '../utils/iptv_initials.dart';
 import 'focusable_list_tile.dart';
 import 'loading_indicator_box.dart';
 
-/// Checklist of detected name initials for one IPTV connection (build #8
-/// Task 4): the initials that keep repeating across the connection's
-/// catalog — "EN", "ES", "NF", … — each with a switch to turn that whole
-/// set off, like the category groupings. No language mapping, no allow-list:
+/// Checklist of detected category initials for one IPTV connection
+/// (build #8 Task 4, redesigned build #10): the initials that keep
+/// repeating across the connection's CATEGORY names — "EN", "24/7",
+/// "NF", … — each with a switch to turn every category carrying it off,
+/// like the category groupings. No language mapping, no allow-list:
 /// every detected set is toggleable, including provider tags like "NF".
+/// Each row's count is the number of CATEGORIES carrying that initial.
+///
+/// The list is alphabetical by initial (build #10, so it is easy to go
+/// through), each with its count — "EN (142)" — never most-common first:
+/// the sort happens here, at the checklist, not in the detection utility.
 ///
 /// The widget loads its own initials lazily, through its own [IptvClient]
 /// (created from [connection], closed on dispose), so it can sit on any
@@ -74,8 +80,13 @@ class _IptvInitialsChecklistState extends State<IptvInitialsChecklist> {
       final initials = await client.iptvInitials();
       // A newer load (connection changed) supersedes this one.
       if (!mounted || !identical(_client, client)) return;
-      setState(() => _initials = initials);
-      widget.onLoaded?.call(initials);
+      // Alphabetical by initial (build #10): the detector returns
+      // most-common first, but the list is easier to go through sorted.
+      // Case-insensitive compare; counts stay attached to their initial.
+      final sorted = [...initials]
+        ..sort((a, b) => a.initial.toUpperCase().compareTo(b.initial.toUpperCase()));
+      setState(() => _initials = sorted);
+      widget.onLoaded?.call(sorted);
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);

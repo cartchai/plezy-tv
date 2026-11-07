@@ -152,6 +152,26 @@ void main() {
     expect(info['apkAssetUrl'], 'https://github.com/cartchai/plezy-tv/releases/download/v1.0.1/PlezTV.v1.0.1.apk');
   });
 
+  test('a release carrying a dotted .apk asset exposes its size for the in-app download check', () async {
+    // Build #10: the in-app downloader verifies the finished file against
+    // the release asset size, so the size must ride along with the URL.
+    final info = await checkRelease({
+      'tag_name': 'v1.0.1',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1',
+      'published_at': '2026-11-06T00:00:00Z',
+      'assets': [
+        {
+          'name': 'PlezTV.v1.0.1.apk',
+          'browser_download_url': 'https://github.com/cartchai/plezy-tv/releases/download/v1.0.1/PlezTV.v1.0.1.apk',
+          'size': 361550680,
+        },
+      ],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['apkAssetSize'], 361550680);
+  });
+
   test('a release with no .apk asset still reports the update, with no download URL', () async {
     final info = await checkRelease({
       'tag_name': 'v1.0.1',

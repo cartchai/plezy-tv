@@ -421,6 +421,39 @@ class Translations$update$en {
 	/// en: 'Download APK'
 	String get downloadApk => 'Download APK';
 
+	/// en: 'Download'
+	String get download => 'Download';
+
+	/// en: 'Downloading update…'
+	String get downloading => 'Downloading update…';
+
+	/// en: '${downloaded} of ${total}'
+	String downloadProgress({required Object downloaded, required Object total}) => '${downloaded} of ${total}';
+
+	/// en: 'Download complete'
+	String get downloadComplete => 'Download complete';
+
+	/// en: 'Install'
+	String get install => 'Install';
+
+	/// en: 'PlezTV downloads the APK itself. When it finishes, tap Install — it installs over the current PlezTV.'
+	String get inAppDownloadHint => 'PlezTV downloads the APK itself. When it finishes, tap Install — it installs over the current PlezTV.';
+
+	/// en: 'Installs over the current PlezTV. You may be asked to allow “Install unknown apps” for PlezTV first.'
+	String get installUpdateHint => 'Installs over the current PlezTV. You may be asked to allow “Install unknown apps” for PlezTV first.';
+
+	/// en: 'The download failed. Check your connection and try again.'
+	String get downloadFailed => 'The download failed. Check your connection and try again.';
+
+	/// en: 'The download didn't finish completely. Try again.'
+	String get downloadSizeMismatch => 'The download didn\'t finish completely. Try again.';
+
+	/// en: 'Download cancelled.'
+	String get downloadCancelled => 'Download cancelled.';
+
+	/// en: 'This device couldn't open the installer. Open the release page to download the APK instead.'
+	String get installUnavailable => 'This device couldn\'t open the installer. Open the release page to download the APK instead.';
+
 	/// en: 'This release has no APK attached yet — open the release page for details.'
 	String get noApkAttached => 'This release has no APK attached yet — open the release page for details.';
 
@@ -3194,8 +3227,8 @@ class Translations$connections$en {
 	/// en: 'Groups'
 	String get iptvFilterGroups => 'Groups';
 
-	/// en: 'Name initials'
-	String get iptvFilterInitials => 'Name initials';
+	/// en: 'Category initials'
+	String get iptvFilterInitials => 'Category initials';
 
 	/// en: '(one) {${n} initial} (other) {${n} initials}'
 	String iptvFilterInitialsCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
@@ -3646,6 +3679,13 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2256 => [
+		'Updates now download inside the app, with an Install button when the download finishes — no browser needed',
+		'Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once',
+		'The initials list is in alphabetical order',
+		'Search now uses the full series list as well as the per-category sweep, so TV shows are found even when the per-category calls come back empty',
+		'New Series catalog readout in IPTV settings shows whether the catalog loads on your phone',
+	];
 	List<String> get changelog2255 => [
 		'Search now finds TV shows, even the first time you search after opening the app',
 		'You can search inside one library — pick it above the search results',
@@ -6517,11 +6557,38 @@ class Translations$iptv$en {
 	/// en: 'Loading initials…'
 	String get initialsLoading => 'Loading initials…';
 
-	/// en: 'Could not load the name initials. Check the connection and try again.'
-	String get initialsLoadFailed => 'Could not load the name initials. Check the connection and try again.';
+	/// en: 'Could not load the category initials. Check the connection and try again.'
+	String get initialsLoadFailed => 'Could not load the category initials. Check the connection and try again.';
 
-	/// en: 'No repeating initials found in this connection’s catalog.'
-	String get initialsNoneFound => 'No repeating initials found in this connection’s catalog.';
+	/// en: 'No repeating initials found in this connection’s categories.'
+	String get initialsNoneFound => 'No repeating initials found in this connection’s categories.';
+
+	/// en: 'Series catalog'
+	String get catalogDiagnosticsTitle => 'Series catalog';
+
+	/// en: 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.'
+	String get catalogDiagnosticsHint => 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.';
+
+	/// en: 'Loading catalog…'
+	String get catalogDiagnosticsLoading => 'Loading catalog…';
+
+	/// en: 'Could not load the catalog details.'
+	String get catalogDiagnosticsFailed => 'Could not load the catalog details.';
+
+	/// en: 'Series loaded (all categories): ${count}'
+	String catalogDiagnosticsUnfilteredRows({required Object count}) => 'Series loaded (all categories): ${count}';
+
+	/// en: 'Series categories: ${count}'
+	String catalogDiagnosticsCategoryCount({required Object count}) => 'Series categories: ${count}';
+
+	/// en: 'In ${category}: ${count}'
+	String catalogDiagnosticsPerCategory({required Object category, required Object count}) => 'In ${category}: ${count}';
+
+	/// en: 'Category initials turned off: ${count}'
+	String catalogDiagnosticsDisabledInitials({required Object count}) => 'Category initials turned off: ${count}';
+
+	/// en: 'Categories turned off: ${count}'
+	String catalogDiagnosticsDisabledCategories({required Object count}) => 'Categories turned off: ${count}';
 }
 
 // Path: appIcon.names
@@ -8630,6 +8697,17 @@ extension on Translations {
 			'update.latestVersion' => 'You are on the latest version',
 			'update.checkFailed' => 'Failed to check for updates',
 			'update.downloadApk' => 'Download APK',
+			'update.download' => 'Download',
+			'update.downloading' => 'Downloading update…',
+			'update.downloadProgress' => ({required Object downloaded, required Object total}) => '${downloaded} of ${total}',
+			'update.downloadComplete' => 'Download complete',
+			'update.install' => 'Install',
+			'update.inAppDownloadHint' => 'PlezTV downloads the APK itself. When it finishes, tap Install — it installs over the current PlezTV.',
+			'update.installUpdateHint' => 'Installs over the current PlezTV. You may be asked to allow “Install unknown apps” for PlezTV first.',
+			'update.downloadFailed' => 'The download failed. Check your connection and try again.',
+			'update.downloadSizeMismatch' => 'The download didn\'t finish completely. Try again.',
+			'update.downloadCancelled' => 'Download cancelled.',
+			'update.installUnavailable' => 'This device couldn\'t open the installer. Open the release page to download the APK instead.',
 			'update.noApkAttached' => 'This release has no APK attached yet — open the release page for details.',
 			'update.installApkHint' => 'Your browser will download the APK. Open the download, and allow “Install unknown apps” for your browser if asked — it installs over the current PlezTV.',
 			'update.releaseNotes' => 'What’s new',
@@ -8995,6 +9073,8 @@ extension on Translations {
 			'themeEditor.builtIn' => 'Built-in',
 			'themeEditor.presets' => 'Presets',
 			'themeEditor.custom' => 'Custom',
+			_ => null,
+		} ?? switch (path) {
 			'themeEditor.customEmpty' => 'Not created yet',
 			'themeEditor.editCustom' => 'Edit custom theme',
 			'themeEditor.editCustomDescription' => 'Choose every color yourself',
@@ -9006,8 +9086,6 @@ extension on Translations {
 			'themeEditor.colors' => 'Colors',
 			'themeEditor.preview' => 'Preview',
 			'themeEditor.slots.bg' => 'Background',
-			_ => null,
-		} ?? switch (path) {
 			'themeEditor.slots.surface' => 'Surface',
 			'themeEditor.slots.outline' => 'Outline',
 			'themeEditor.slots.text' => 'Text',
@@ -9509,6 +9587,8 @@ extension on Translations {
 			'profiles.borrowExplain' => 'Borrow another profile\'s connection. PIN-protected profiles require a PIN.',
 			'profiles.borrowEmpty' => 'Nothing to borrow yet.',
 			'profiles.borrowEmptySubtitle' => 'Connect Plex, Jellyfin, or Emby to another profile first.',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.borrowLoadFailed' => 'Available connections could not be loaded. Try again.',
 			'profiles.borrowFromProfile' => ({required Object displayName}) => 'From ${displayName}',
 			'profiles.borrowConnectionBorrowed' => 'Connection borrowed.',
@@ -9520,8 +9600,6 @@ extension on Translations {
 			'profiles.failedToVerifyPin' => 'Failed to verify PIN.',
 			'profiles.newProfile' => 'New profile',
 			'profiles.profileNameHint' => 'e.g. Guests, Kids, Family Room',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.pinProtectionOptional' => 'PIN protection (optional)',
 			'profiles.pinExplain' => '4-digit PIN required to switch profiles.',
 			'profiles.continueButton' => 'Continue',
@@ -9549,7 +9627,7 @@ extension on Translations {
 			'connections.iptvFilterMovies' => 'Movies',
 			'connections.iptvFilterSeries' => 'TV Series',
 			'connections.iptvFilterGroups' => 'Groups',
-			'connections.iptvFilterInitials' => 'Name initials',
+			'connections.iptvFilterInitials' => 'Category initials',
 			'connections.iptvFilterInitialsCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} initial', other: '${n} initials', ), 
 			'connections.iptvFilterSectionCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} category', other: '${n} categories', ), 
 			'connections.iptvFilterSectionOff' => ({required Object off, required Object total}) => '${off} of ${total} hidden',
@@ -9780,6 +9858,11 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2256.0' => 'Updates now download inside the app, with an Install button when the download finishes — no browser needed',
+			'about.changelog2256.1' => 'Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once',
+			'about.changelog2256.2' => 'The initials list is in alphabetical order',
+			'about.changelog2256.3' => 'Search now uses the full series list as well as the per-category sweep, so TV shows are found even when the per-category calls come back empty',
+			'about.changelog2256.4' => 'New Series catalog readout in IPTV settings shows whether the catalog loads on your phone',
 			'about.changelog2255.0' => 'Search now finds TV shows, even the first time you search after opening the app',
 			'about.changelog2255.1' => 'You can search inside one library — pick it above the search results',
 			'about.changelog2255.2' => 'Catch-up is here: Watch from start sits next to Play, and a show that\'s already on offers Start from beginning',
@@ -10018,6 +10101,8 @@ extension on Translations {
 			'liveTv.serverUnavailable' => 'Live TV server is not available.',
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.noInformationAvailable' => 'No information available',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
 			'liveTv.unknownProgram' => 'Unknown Program',
@@ -10034,8 +10119,6 @@ extension on Translations {
 			'liveTv.searchHint' => 'Search channels & programs',
 			'liveTv.searchNoResults' => ({required Object query}) => 'No matches for "${query}"',
 			'liveTv.channelsSection' => 'Channels',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.programsSection' => 'Programs',
 			'liveTv.now' => 'Now',
 			'liveTv.today' => 'Today',
@@ -10532,6 +10615,8 @@ extension on Translations {
 			'companionRemote.remote.volumeDown' => 'Down',
 			'companionRemote.remote.volumeUp' => 'Up',
 			'companionRemote.remote.fullscreen' => 'Fullscreen',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.subtitles' => 'Subtitles',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Search on desktop...',
@@ -10548,8 +10633,6 @@ extension on Translations {
 			'videoSettings.normalSpeed' => 'Normal',
 			'videoSettings.sleepTimerActive' => ({required Object duration}) => 'Active (${duration})',
 			'videoSettings.zoom' => 'Zoom',
-			_ => null,
-		} ?? switch (path) {
 			'videoSettings.sleepTimer' => 'Sleep Timer',
 			'videoSettings.audioSync' => 'Audio Sync',
 			'videoSettings.subtitleSync' => 'Subtitle Sync',
@@ -10962,8 +11045,17 @@ extension on Translations {
 			'iptv.epgUpdated' => 'Guide updated',
 			'iptv.epgCleared' => 'Guide cleared',
 			'iptv.initialsLoading' => 'Loading initials…',
-			'iptv.initialsLoadFailed' => 'Could not load the name initials. Check the connection and try again.',
-			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s catalog.',
+			'iptv.initialsLoadFailed' => 'Could not load the category initials. Check the connection and try again.',
+			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s categories.',
+			'iptv.catalogDiagnosticsTitle' => 'Series catalog',
+			'iptv.catalogDiagnosticsHint' => 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.',
+			'iptv.catalogDiagnosticsLoading' => 'Loading catalog…',
+			'iptv.catalogDiagnosticsFailed' => 'Could not load the catalog details.',
+			'iptv.catalogDiagnosticsUnfilteredRows' => ({required Object count}) => 'Series loaded (all categories): ${count}',
+			'iptv.catalogDiagnosticsCategoryCount' => ({required Object count}) => 'Series categories: ${count}',
+			'iptv.catalogDiagnosticsPerCategory' => ({required Object category, required Object count}) => 'In ${category}: ${count}',
+			'iptv.catalogDiagnosticsDisabledInitials' => ({required Object count}) => 'Category initials turned off: ${count}',
+			'iptv.catalogDiagnosticsDisabledCategories' => ({required Object count}) => 'Categories turned off: ${count}',
 			_ => null,
 		};
 	}

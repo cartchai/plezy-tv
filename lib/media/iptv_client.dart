@@ -164,6 +164,7 @@ class IptvClient implements MediaServerClient {
   // cannot be fetched — titles just keep their prefixes.
   Future<Map<String, String>>? _vodCategoryNamesFuture;
   Future<Map<String, String>>? _seriesCategoryNamesFuture;
+  Future<Map<String, String>>? _liveCategoryNamesFuture;
 
   // Favourited VOD/series items (id -> snapshot), persisted per
   // connection. Loaded lazily; setFavorite updates the cached map so
@@ -219,9 +220,9 @@ class IptvClient implements MediaServerClient {
 
   Set<String> get _disabledCategories => _disabledCategoryIdList.toSet();
 
-  bool _isDisabled(String? categoryId) => categoryId != null && _disabledCategories.contains(categoryId);
-
-  /// Name-initial filter list (only the IPTV connection types carry it).
+  /// Category-initial filter list (only the IPTV connection types carry
+  /// it). The stored strings are reused as-is from build #8; their
+  /// meaning changed in build #10 (see [_isHiddenCategory]).
   List<String> get _disabledInitialsList => switch (connection) {
     M3uConnection(:final disabledInitials) => disabledInitials,
     XtreamConnection(:final disabledInitials) => disabledInitials,
@@ -230,12 +231,23 @@ class IptvClient implements MediaServerClient {
 
   Set<String> get _disabledInitials => _disabledInitialsList.toSet();
 
-  /// True when [name]'s leading initial is turned off (build #8 Task 4).
-  /// Names without an initial are never hidden by this filter.
-  bool _isDisabledInitial(String? name) {
-    final initial = initialOf(name);
+  /// True when the category with [categoryId] and display [categoryName]
+  /// is hidden — by its own switch, or because its category initial is
+  /// turned off (build #10 redesign: "Category initials", not "Name
+  /// initials"). A category with no initial is only hidden by its own
+  /// switch. Items are hidden if and only if their category is hidden;
+  /// item names are never filtered — the build #8 name filter hid nearly
+  /// every item (Matt hid 161 of 171 initials) while the categories
+  /// stayed listed, which emptied every series category and broke search.
+  bool _isHiddenCategory(String? categoryId, String? categoryName) {
+    if (categoryId != null && _disabledCategories.contains(categoryId)) return true;
+    final initial = categoryInitial(categoryName);
     return initial != null && _disabledInitials.contains(initial);
   }
+
+  /// M3U groups ARE the categories (the group title is both id and name),
+  /// so a group is hidden by its own switch or its category initial.
+  bool _isHiddenGroup(String? groupTitle) => _isHiddenCategory(groupTitle, groupTitle);
 
   @override
   ServerId get serverId => ServerId(connection.id);
@@ -287,6 +299,7 @@ class IptvClient implements MediaServerClient {
     _m3uEntriesFuture = null;
     _vodCategoryNamesFuture = null;
     _seriesCategoryNamesFuture = null;
+    _liveCategoryNamesFuture = null;
     _favoriteItemsFuture = null;
     _xtreamChannelByKey.clear();
     _m3uChannelByKey.clear();
@@ -382,7 +395,7 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: VOD category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
+    final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
     if (wanted.isEmpty) return const [];
     final out = <XtreamVodStream>[];
     final seen = <int>{};
@@ -431,7 +444,7 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: series category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
+    final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
     if (wanted.isEmpty) return const [];
     final out = <XtreamSeries>[];
     final seen = <int>{};
@@ -516,6 +529,26 @@ class IptvClient implements MediaServerClient {
       },
     );
     _seriesCategoryNamesFuture = future;
+    return future;
+  }
+
+  /// Category id -> name for live TV, same fail-open contract as
+  /// [_vodCategoryNames]. The Live TV list needs it so a channel is
+  /// hidden exactly when its category is hidden (build #10 redesign).
+  Future<Map<String, String>> _liveCategoryNames() async {
+    final cached = _liveCategoryNamesFuture;
+    if (cached != null) return cached;
+    final future = _xtreamApi
+        .getLiveCategories()
+        .then(
+          (categories) => {for (final c in categories) c.id: c.name},
+          onError: (Object e) {
+            _liveCategoryNamesFuture = null;
+            appLogger.w('IPTV: live category names unavailable: $e');
+            return const <String, String>{};
+          },
+        );
+    _liveCategoryNamesFuture = future;
     return future;
   }
 
@@ -695,14 +728,14 @@ class IptvClient implements MediaServerClient {
     return out;
   }
 
-  /// Full Movies catalog as items, with disabled categories removed.
+  /// Full Movies catalog as items, with hidden categories removed.
   /// Shared by the paged browse and the Recommended hub so both agree.
   Future<List<MediaItem>> _moviesItems() async {
     final streams = await _vodStreams();
     final favorites = await _favoriteItems();
     final categoryNames = await _vodCategoryNames();
     return streams
-        .where((s) => !_isDisabled(s.categoryId) && !_isDisabledInitial(s.name))
+        .where((s) => !_isHiddenCategory(s.categoryId, categoryNames[s.categoryId]))
         .map(
           (s) => _movieItem(
             s,
@@ -713,13 +746,13 @@ class IptvClient implements MediaServerClient {
         .toList();
   }
 
-  /// Full Series catalog as items, with disabled categories removed.
+  /// Full Series catalog as items, with hidden categories removed.
   Future<List<MediaItem>> _seriesItems() async {
     final series = await _seriesList();
     final favorites = await _favoriteItems();
     final categoryNames = await _seriesCategoryNames();
     return series
-        .where((s) => !_isDisabled(s.categoryId) && !_isDisabledInitial(s.name))
+        .where((s) => !_isHiddenCategory(s.categoryId, categoryNames[s.categoryId]))
         .map(
           (s) => _seriesItem(
             s,
@@ -795,7 +828,7 @@ class IptvClient implements MediaServerClient {
         if (id != null) counts[id] = (counts[id] ?? 0) + 1;
       }
       return categories
-          .where((c) => !_isDisabled(c.id) && !_isDisabledInitial(c.name))
+          .where((c) => !_isHiddenCategory(c.id, c.name))
           .map((c) => IptvCategory(id: c.id, name: c.name, itemCount: counts[c.id]))
           .toList();
     }
@@ -811,37 +844,32 @@ class IptvClient implements MediaServerClient {
         if (id != null) counts[id] = (counts[id] ?? 0) + 1;
       }
       return categories
-          .where((c) => !_isDisabled(c.id) && !_isDisabledInitial(c.name))
+          .where((c) => !_isHiddenCategory(c.id, c.name))
           .map((c) => IptvCategory(id: c.id, name: c.name, itemCount: counts[c.id]))
           .toList();
     }
     return const [];
   }
 
-  /// Detected name initials for this connection (build #8 Task 4): the
-  /// initials that keep repeating across the catalog — live channel names,
-  /// VOD names, series names, and category names — most-common first.
-  /// Only initials at or above [iptvInitialRepeatThreshold] are offered as
-  /// toggles; one-off prefixes are never offered. Uses the client's cached
-  /// catalog futures, so the first call on a cold connection loads the
-  /// catalogs (like opening the libraries); call it lazily, on expand.
+  /// Detected category initials for this connection (build #8 Task 4,
+  /// redesigned build #10): the initials that keep repeating across the
+  /// connection's CATEGORY names — live, VOD and series — most-common
+  /// first. Only initials at or above [iptvInitialRepeatThreshold] are
+  /// offered as toggles; one-off prefixes are never offered. The count
+  /// on each row is the number of CATEGORIES carrying that initial.
+  ///
+  /// Xtream needs only the three category lists now — the old version
+  /// loaded the whole live/VOD/series catalogs just to count item-name
+  /// prefixes, which is also why opening the section was slow on a cold
+  /// connection. M3U has no category endpoint, so its initials come from
+  /// the playlist's group titles. Call it lazily, on expand.
   Future<List<IptvInitial>> iptvInitials() async {
     final names = <String>[];
     if (_isXtream) {
-      final streams = await _liveStreams();
-      names.addAll(streams.map((s) => s.name));
-      final vod = await _vodStreams();
-      names.addAll(vod.map((s) => s.name));
-      final series = await _seriesList();
-      names.addAll(series.map((s) => s.name));
-      final liveCategories = await _xtreamApi
-          .getLiveCategories()
-          .catchError((Object e) {
-            appLogger.w(
-              'IPTV: live category list unavailable for initials: $e',
-            );
-            return const <XtreamCategory>[];
-          });
+      final liveCategories = await _xtreamApi.getLiveCategories().catchError((Object e) {
+        appLogger.w('IPTV: live category list unavailable for initials: $e');
+        return const <XtreamCategory>[];
+      });
       names.addAll(liveCategories.map((c) => c.name));
       final vodCategories = await _vodCategories();
       names.addAll(vodCategories.map((c) => c.name));
@@ -849,29 +877,79 @@ class IptvClient implements MediaServerClient {
       names.addAll(seriesCategories.map((c) => c.name));
     } else {
       final entries = await _m3uEntries();
-      names.addAll(entries.map((e) => e.name));
       for (final entry in entries) {
         final group = entry.groupTitle;
         if (group != null) names.add(group);
       }
     }
-    return initialsMeetingThreshold(countInitials(names));
+    return initialsMeetingThreshold(countCategoryInitials(names));
   }
 
-  /// Items in one category of a library, for the Categories tab.
+  /// Warms the series catalog in the background (build #10): starts the
+  /// unfiltered series load without awaiting it, so the NEXT search finds
+  /// a warm catalog. Called at startup bind (see
+  /// MultiServerManager.addIptvConnection). A load already in flight is
+  /// shared, so repeated calls are free; a failed load logs and the next
+  /// search retries it. Series only — movies search already works and
+  /// warming the 199k-row VOD catalog on every rebind is unnecessary cost.
+  void warmUpSeriesCatalog() {
+    if (!_isXtream || _seriesListLoaded) return;
+    unawaited(
+      _seriesList().catchError((Object e) {
+        appLogger.w('IPTV: background series catalog warm-up failed: $e');
+        return const <XtreamSeries>[];
+      }),
+    );
+  }
+
+  /// On-device series catalog diagnostics (build #10, diagnosis
+  /// recommendation 6): what Matt's phone can report about the series
+  /// catalog in one screenshot — the unfiltered row count, the series
+  /// category count, per-category row counts for the first few categories
+  /// (direct get_series calls, which directly settle (g)), and how many
+  /// initials/categories are turned off. Shown in the IPTV settings
+  /// screen.
+  Future<IptvCatalogDiagnostics> seriesCatalogDiagnostics() async {
+    final rows = await _seriesList().catchError((Object e) {
+      appLogger.w('IPTV: series catalog unavailable for diagnostics: $e');
+      return const <XtreamSeries>[];
+    });
+    final categories = await _seriesCategories().catchError((Object e) {
+      appLogger.w('IPTV: series category list unavailable for diagnostics: $e');
+      return const <XtreamCategory>[];
+    });
+    final perCategory = <String, int>{};
+    for (final category in categories.take(3)) {
+      final probe = await _xtreamApi.getSeries(categoryId: category.id).catchError((Object e) {
+        appLogger.w('IPTV: series probe for ${category.id} failed: $e');
+        return const <XtreamSeries>[];
+      });
+      perCategory['${category.name} (${category.id})'] = probe.length;
+    }
+    return IptvCatalogDiagnostics(
+      unfilteredSeriesRows: rows.length,
+      seriesCategoryCount: categories.length,
+      perCategorySeriesRows: perCategory,
+      disabledInitialsCount: _disabledInitials.length,
+      disabledCategoriesCount: _disabledCategories.length,
+    );
+  }
+
+  /// A hidden category (its own switch, or its category initial turned
+  /// off) returns [] without loading the catalog — the tab never lists
+  /// it, so reaching here with a hidden id means a stale deep link. A hidden
+  /// category (its own switch, or its category initial turned off) returns
+  /// [] without loading the catalog — the tab never lists it, so reaching
+  /// here with a hidden id means a stale deep link.
   Future<List<MediaItem>> iptvItemsForCategory(String libraryId, String categoryId) async {
     if (!_isXtream) return const [];
     if (libraryId == _moviesLibraryId) {
+      final categoryNames = await _vodCategoryNames();
+      if (_isHiddenCategory(categoryId, categoryNames[categoryId])) return const [];
       final streams = await _vodStreams();
       final favorites = await _favoriteItems();
-      final categoryNames = await _vodCategoryNames();
       return streams
-          .where(
-            (s) =>
-                s.categoryId == categoryId &&
-                !_isDisabled(s.categoryId) &&
-                !_isDisabledInitial(s.name),
-          )
+          .where((s) => s.categoryId == categoryId)
           .map(
             (s) => _movieItem(
               s,
@@ -882,16 +960,12 @@ class IptvClient implements MediaServerClient {
           .toList();
     }
     if (libraryId == _seriesLibraryId) {
+      final categoryNames = await _seriesCategoryNames();
+      if (_isHiddenCategory(categoryId, categoryNames[categoryId])) return const [];
       final series = await _seriesList();
       final favorites = await _favoriteItems();
-      final categoryNames = await _seriesCategoryNames();
       return series
-          .where(
-            (s) =>
-                s.categoryId == categoryId &&
-                !_isDisabled(s.categoryId) &&
-                !_isDisabledInitial(s.name),
-          )
+          .where((s) => s.categoryId == categoryId)
           .map(
             (s) => _seriesItem(
               s,
@@ -1163,8 +1237,8 @@ class IptvClient implements MediaServerClient {
   }
 
   /// Append this section's matches from [rows] to [out], honouring the
-  /// country/region + initials filters and the query, de-duplicated by
-  /// stream id (a panel may return the same row under two categories).
+  /// hidden-category filter and the query, de-duplicated by stream id (a
+  /// panel may return the same row under two categories).
   /// Shared by the warm path and the cold sweep so the two cannot drift.
   void _appendMovieMatches(
     List<XtreamVodStream> rows,
@@ -1178,7 +1252,7 @@ class IptvClient implements MediaServerClient {
     for (final stream in rows) {
       if (out.length >= limit) break;
       if (!seen.add(stream.streamId)) continue;
-      if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
+      if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) continue;
       if (!stream.name.toLowerCase().contains(needle)) continue;
       out.add(
         _movieItem(
@@ -1203,7 +1277,7 @@ class IptvClient implements MediaServerClient {
     for (final s in rows) {
       if (out.length >= limit) break;
       if (!seen.add(s.seriesId)) continue;
-      if (_isDisabled(s.categoryId) || _isDisabledInitial(s.name)) continue;
+      if (_isHiddenCategory(s.categoryId, categoryNames[s.categoryId])) continue;
       if (!s.name.toLowerCase().contains(needle)) continue;
       out.add(
         _seriesItem(
@@ -1257,13 +1331,19 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// Deadline for a cold-catalog sweep: 90% of the section budget, so the
-  /// sweep returns partial matches instead of being cut to [] by the outer
-  /// timeout, with room left for the merge.
-  DateTime _sweepDeadline() => DateTime.now().add(searchSectionBudget * 0.9);
+  /// Deadline for a cold-catalog sweep, measured from the SECTION start
+  /// (build #10): 90% of the section budget, so the sweep returns partial
+  /// matches instead of being cut to [] by the outer timeout, with room
+  /// left for the merge. Measured from the section start, not the sweep
+  /// start — the old version computed it when the sweep began, so a slow
+  /// category-names fetch before the sweep pushed the sweep past the
+  /// outer 50s timeout and its partial matches were discarded (T3).
+  DateTime _sweepDeadline(DateTime sectionStarted) =>
+      sectionStarted.add(searchSectionBudget * 0.9);
 
   Future<List<MediaItem>> _searchMovies(String needle, int limit) async {
     try {
+      final sectionStarted = DateTime.now();
       final favorites = await _favoriteItems();
       final categoryNames = await _vodCategoryNames();
       if (_vodStreamsLoaded) {
@@ -1272,32 +1352,66 @@ class IptvClient implements MediaServerClient {
         _appendMovieMatches(await _vodStreams(), needle, limit, favorites, categoryNames, out, <int>{});
         return out;
       }
-      // Cold catalog (build #9 Task 1a): the full 199k-row load may take
-      // minutes, and awaiting it before filtering a single title is why a
-      // cold search returned [] under the section budget. Kick the full
-      // load off in the background so the next search finds a warm catalog,
-      // and sweep per-category NOW so this search returns the matches that
-      // land before the budget fires.
+      // Cold catalog (build #9 Task 1a, reworked build #10): the full
+      // 199k-row load may take minutes, and awaiting it before filtering
+      // a single title is why a cold search returned [] under the section
+      // budget — but the sweep alone is not a safe substitute either. If
+      // the panel's per-category calls return [] (the (g) shape), the
+      // sweep finds nothing while the unfiltered load would have returned
+      // rows — and Recommended proves the unfiltered load DOES return rows
+      // on Matt's phone. So search races BOTH sources and returns
+      // whichever lands first: the unfiltered load, and the per-category
+      // sweep for when the load is the slow one.
+      final out = <MediaItem>[];
+      final seen = <int>{};
+      var loadLanded = false;
+      var finished = false;
+      final loadFuture = _vodStreams().catchError((Object e) {
+        appLogger.w('IPTV: VOD catalog load failed during search: $e');
+        return const <XtreamVodStream>[];
+      });
       unawaited(
-        _vodStreams().catchError((Object e) {
-          appLogger.w('IPTV: background VOD catalog warm-up failed: $e');
-          return const <XtreamVodStream>[];
+        loadFuture.then((rows) {
+          if (finished || rows.isEmpty) return;
+          loadLanded = true;
+          _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen);
         }),
       );
+      // One shared category-list fetch (build #10, T1): the names lookup
+      // above already fetched it, so this reuses the cached future
+      // instead of fetching it a second time — and a failure here does
+      // not re-fetch either.
       final categories = await _vodCategories().catchError((Object e) {
         appLogger.w('IPTV: VOD category list unavailable for search sweep: $e');
         return const <XtreamCategory>[];
       });
-      final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
-      final out = <MediaItem>[];
-      final seen = <int>{};
+      final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
       await _sweepCatalogCategories<XtreamVodStream>(
         wanted,
         (id) => _xtreamApi.getVodStreams(categoryId: id),
         (rows) => _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen),
-        () => out.length >= limit,
-        _sweepDeadline(),
+        () => out.length >= limit || loadLanded,
+        _sweepDeadline(sectionStarted),
       );
+      if (out.isEmpty && !loadLanded) {
+        // The sweep found NOTHING — instant [] per-category calls, or
+        // every category answered empty — before the load landed. Wait
+        // out the remaining budget for it; without this a fast-empty
+        // sweep wins over a slow-but-returning load and the search
+        // returns []. Only when the sweep found nothing: if it found
+        // matches, return them now and let the load keep warming the
+        // cache for the next search — waiting here would stall every
+        // cold search for the rest of the budget.
+        final remaining = sectionStarted.add(searchSectionBudget * 0.98).difference(DateTime.now());
+        if (!remaining.isNegative) {
+          final rows = await loadFuture.timeout(remaining, onTimeout: () => const <XtreamVodStream>[]);
+          if (rows.isNotEmpty && !loadLanded) {
+            loadLanded = true;
+            _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          }
+        }
+      }
+      finished = true;
       return out;
     } catch (e) {
       appLogger.w('IPTV: movie search failed: $e');
@@ -1307,6 +1421,7 @@ class IptvClient implements MediaServerClient {
 
   Future<List<MediaItem>> _searchSeries(String needle, int limit) async {
     try {
+      final sectionStarted = DateTime.now();
       final favorites = await _favoriteItems();
       final categoryNames = await _seriesCategoryNames();
       if (_seriesListLoaded) {
@@ -1315,29 +1430,57 @@ class IptvClient implements MediaServerClient {
         _appendSeriesMatches(await _seriesList(), needle, limit, favorites, categoryNames, out, <int>{});
         return out;
       }
-      // Cold catalog (build #9 Task 1a): same shape as movies — the full
-      // 46k-row series load is kicked off in the background while a
-      // per-category sweep returns the matches that land in time.
+      // Cold catalog (build #9 Task 1a, reworked build #10): same race
+      // as movies — the unfiltered 46k-row load that Recommended proves
+      // works, against the per-category sweep. Matt turned ALL initials
+      // back on and search STILL failed, so the sweep alone cannot be
+      // trusted: on this panel the per-category calls may return [] while
+      // the unfiltered load returns rows (g), or the sweep's pre-work
+      // eats the budget before any batch runs (T1/T3).
+      final out = <MediaItem>[];
+      final seen = <int>{};
+      var loadLanded = false;
+      var finished = false;
+      final loadFuture = _seriesList().catchError((Object e) {
+        appLogger.w('IPTV: series catalog load failed during search: $e');
+        return const <XtreamSeries>[];
+      });
       unawaited(
-        _seriesList().catchError((Object e) {
-          appLogger.w('IPTV: background series catalog warm-up failed: $e');
-          return const <XtreamSeries>[];
+        loadFuture.then((rows) {
+          if (finished || rows.isEmpty) return;
+          loadLanded = true;
+          _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen);
         }),
       );
+      // One shared category-list fetch (build #10, T1): the names lookup
+      // above already fetched it, so this reuses the cached future
+      // instead of fetching it a second time — and a failure here does
+      // not re-fetch either.
       final categories = await _seriesCategories().catchError((Object e) {
         appLogger.w('IPTV: series category list unavailable for search sweep: $e');
         return const <XtreamCategory>[];
       });
-      final wanted = categories.where((c) => !_isDisabled(c.id)).toList(growable: false);
-      final out = <MediaItem>[];
-      final seen = <int>{};
+      final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
       await _sweepCatalogCategories<XtreamSeries>(
         wanted,
         (id) => _xtreamApi.getSeries(categoryId: id),
         (rows) => _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen),
-        () => out.length >= limit,
-        _sweepDeadline(),
+        () => out.length >= limit || loadLanded,
+        _sweepDeadline(sectionStarted),
       );
+      if (out.isEmpty && !loadLanded) {
+        // The sweep found nothing before the load landed — wait out the
+        // remaining budget for the load (see movies above).
+        final remaining = sectionStarted.add(searchSectionBudget * 0.98).difference(DateTime.now());
+        if (!remaining.isNegative) {
+          final rows = await loadFuture.timeout(remaining, onTimeout: () => const <XtreamSeries>[]);
+          if (rows.isNotEmpty && !loadLanded) {
+            loadLanded = true;
+            _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          }
+        }
+      }
+      finished = true;
       return out;
     } catch (e) {
       appLogger.w('IPTV: series search failed: $e');
@@ -1356,10 +1499,9 @@ class IptvClient implements MediaServerClient {
       final out = <MediaItem>[];
       for (final entry in entries) {
         if (out.length >= limit) break;
-        // Disabled groups (country/region filter) stay out of search too.
-        if (_isDisabled(entry.groupTitle)) continue;
-        // And a disabled initial hides the entry by its name or its group.
-        if (_isDisabledInitial(entry.name) || _isDisabledInitial(entry.groupTitle)) continue;
+        // A hidden group (its own switch, or its category initial) hides
+        // its entries from search too. Item names are never filtered.
+        if (_isHiddenGroup(entry.groupTitle)) continue;
         if (!entry.name.toLowerCase().contains(needle)) continue;
         out.add(
           MediaItem.m3u(
@@ -1909,9 +2051,10 @@ class IptvClient implements MediaServerClient {
   Future<List<LiveTvChannel>> iptvChannels() async {
     if (_isXtream) {
       final streams = await _liveStreams();
+      final liveCategoryNames = await _liveCategoryNames();
       final channels = <LiveTvChannel>[];
       for (final stream in streams) {
-        if (_isDisabled(stream.categoryId) || _isDisabledInitial(stream.name)) continue;
+        if (_isHiddenCategory(stream.categoryId, liveCategoryNames[stream.categoryId])) continue;
         _xtreamChannelByKey['${stream.streamId}'] = stream;
         channels.add(
           LiveTvChannel(
@@ -1931,11 +2074,9 @@ class IptvClient implements MediaServerClient {
     final entries = await _m3uEntries();
     final channels = <LiveTvChannel>[];
     for (final entry in entries) {
-      // M3U categories are group titles; a disabled group hides its
+      // M3U categories are group titles; a hidden group hides its
       // channels from Live TV (same as Xtream's category filter above).
-      if (_isDisabled(entry.groupTitle)) continue;
-      // And a disabled initial hides the channel by its name or its group.
-      if (_isDisabledInitial(entry.name) || _isDisabledInitial(entry.groupTitle)) continue;
+      if (_isHiddenGroup(entry.groupTitle)) continue;
       final key = entry.tvgId ?? entry.url;
       _m3uChannelByKey[key] = entry;
       channels.add(
@@ -1976,4 +2117,36 @@ class IptvClient implements MediaServerClient {
   String timeshiftUrlForChannelKey(String key, DateTime start, int durationMinutes) {
     return _xtreamApi.timeshiftUrl(streamId: key, durationMinutes: durationMinutes, start: start);
   }
+}
+
+/// On-device series catalog diagnostics (build #10): what the phone
+/// reports about the series catalog — the unfiltered row count, the
+/// series category count, per-category row counts for the first few
+/// categories (direct get_series probes), and how many initials /
+/// categories are turned off. A series search that still fails with a
+/// healthy readout here points at timing, not at the data.
+class IptvCatalogDiagnostics {
+  const IptvCatalogDiagnostics({
+    required this.unfilteredSeriesRows,
+    required this.seriesCategoryCount,
+    required this.perCategorySeriesRows,
+    required this.disabledInitialsCount,
+    required this.disabledCategoriesCount,
+  });
+
+  /// Rows the unfiltered get_series call returned (what Recommended reads).
+  final int unfilteredSeriesRows;
+
+  /// How many series categories the panel lists.
+  final int seriesCategoryCount;
+
+  /// Direct per-category get_series row counts, keyed "name (id)", for
+  /// the first few series categories.
+  final Map<String, int> perCategorySeriesRows;
+
+  /// How many category initials are turned off on this connection.
+  final int disabledInitialsCount;
+
+  /// How many categories are turned off by their own switch.
+  final int disabledCategoriesCount;
 }

@@ -13,10 +13,11 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **333 files changed, 20097 insertions, 3129 deletions**
+- Scale of the fork vs base: **333 files changed, 20983 insertions, 3147 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-06 after the build #9 commit — was 320 files /
-  +18,751/−3,119 at build #8).
+  measured 2026-11-06 on the uncommitted build #10 tree, tracked files
+  only — the 9 new build #10 files were still untracked, so re-measure
+  after the commit; was 333 files / +20,097/−3,129 at build #9).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -285,6 +286,42 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   `lib/screens/settings/about_screen.dart` (changelog entry),
   `pubspec.yaml` (version `2.25.5+162`).
 - Progress notes: `IPTV_BUILD9_NOTES.md`.
+
+### 8. Build #10 — in-app update download + install, category-initials redesign, series search race + warm-up + diagnostics
+- New files: `lib/services/apk_update_downloader.dart`,
+  `lib/services/apk_installer.dart`,
+  `android/app/src/main/kotlin/com/matt/plezytv/ApkInstallChannel.kt`,
+  `test/services/apk_update_downloader_test.dart`,
+  `test/services/apk_installer_test.dart`,
+  `test/utils/update_dialog_test.dart`,
+  `test/services/iptv/iptv_category_initials_test.dart`.
+- Touched upstream files: `lib/utils/update_dialog.dart` (rewritten —
+  was the browser-download dialog), `lib/media/iptv_client.dart`
+  (category-initial filter replacing the name filter; search races the
+  unfiltered catalog against the per-category sweep; `warmUpSeriesCatalog`;
+  `seriesCatalogDiagnostics`), `lib/utils/iptv_initials.dart`
+  (`categoryInitial` / `countCategoryInitials`; `detectInitial` /
+  `initialOf` / `countInitials` deleted),
+  `lib/services/multi_server_manager.dart` (warm-up call in
+  `addIptvConnection`), `lib/services/update_service.dart`
+  (`apkAssetSize`), `lib/screens/settings/iptv_settings_screen.dart`
+  ("Category initials" rename + series catalog diagnostics widget),
+  `lib/screens/settings/edit_iptv_connection_screen.dart`
+  ("Category initials" rename),
+  `lib/widgets/iptv_initials_checklist.dart` (doc comment; the sort
+  itself was already alphabetical),
+  `lib/connection/connection.dart` (`disabledInitials` doc — same
+  storage, new meaning), `android/app/src/main/AndroidManifest.xml`
+  (`REQUEST_INSTALL_PACKAGES`),
+  `android/app/src/main/kotlin/com/matt/plezytv/PlezyActivity.kt`
+  (installer channel attach), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (updater + diagnostics strings; v2.25.4 changelog
+  line untouched — historical), `pubspec.yaml` (version `2.25.6+163`,
+  set by the parent at commit time).
+- Progress notes: `IPTV_BUILD10_NOTES.md` (redesign + search +
+  diagnostics), `IPTV_UPDATER_NOTES.md` (updater part),
+  `IPTV_BUILD10_DIAGNOSIS.md` (diagnosis; its (h) fix is superseded
+  by the redesign — note at the top of the doc).
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
