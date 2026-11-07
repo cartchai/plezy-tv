@@ -209,6 +209,18 @@ class XtreamApi {
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) =>
       _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'), timeout: timeout);
 
+/// Parse helpers for the disk cache (build #11): a cached payload is the
+/// same JSON the API returns, so it parses through the same isolate
+/// parsers as the network path — one parse shape, no second model.
+/// Categories are small (<1k rows), so they parse inline.
+static Future<List<XtreamLiveStream>> parseLiveStreamsBody(String body) => compute(_parseLiveStreams, body);
+
+static Future<List<XtreamVodStream>> parseVodStreamsBody(String body) => compute(_parseVodStreams, body);
+
+static Future<List<XtreamSeries>> parseSeriesBody(String body) => compute(_parseSeries, body);
+
+static List<XtreamCategory> parseCategoriesBody(String body) =>
+    _asObjectList(_decodeCatalogJson(body)).map(XtreamCategory.fromJson).toList();
   /// M3U playlist export for this account.
   Future<String> getM3u({String type = 'm3u_plus', String output = 'ts'}) => _getText(
     Uri.parse('$serverUrl/get.php').replace(
@@ -284,6 +296,10 @@ class XtreamCategory {
       parentId: json['parent_id']?.toString(),
     );
   }
+
+  /// API-shaped map (build #11): the disk cache stores the same JSON the
+  /// API returns, so a cached payload re-parses through [fromJson].
+  Map<String, dynamic> toJson() => {'category_id': id, 'category_name': name, 'parent_id': parentId};
 }
 
 class XtreamLiveStream {
@@ -323,6 +339,20 @@ class XtreamLiveStream {
       tvArchiveDuration: archiveDurationSeconds(flexibleInt(json['tv_archive_duration']) ?? 0),
     );
   }
+
+  /// API-shaped map (build #11) — see [XtreamCategory.toJson].
+  /// `tv_archive_duration` is stored in seconds (as held on this object):
+  /// a seconds value above 366 passes through [fromJson] unchanged, so
+  /// this round-trips (a 7-day archive is 604800s, not 7).
+  Map<String, dynamic> toJson() => {
+    'stream_id': streamId,
+    'name': name,
+    'stream_icon': streamIcon,
+    'epg_channel_id': epgChannelId,
+    'category_id': categoryId,
+    'tv_archive': tvArchive ? 1 : 0,
+    'tv_archive_duration': tvArchiveDuration,
+  };
 }
 
 class XtreamVodStream {
@@ -358,6 +388,18 @@ class XtreamVodStream {
       added: flexibleInt(json['added']),
     );
   }
+
+  /// API-shaped map (build #11) — see [XtreamCategory.toJson].
+  Map<String, dynamic> toJson() => {
+    'stream_id': streamId,
+    'name': name,
+    'stream_icon': streamIcon,
+    'cover': cover,
+    'rating': rating,
+    'category_id': categoryId,
+    'container_extension': containerExtension,
+    'added': added,
+  };
 }
 
 class XtreamSeries {
@@ -408,6 +450,23 @@ class XtreamSeries {
       episodeRunTime: flexibleInt(json['episode_run_time']),
     );
   }
+
+  /// API-shaped map (build #11) — see [XtreamCategory.toJson].
+  Map<String, dynamic> toJson() => {
+    'series_id': seriesId,
+    'name': name,
+    'cover': cover,
+    'plot': plot,
+    'cast': cast,
+    'director': director,
+    'genre': genre,
+    'releaseDate': releaseDate,
+    'rating': rating,
+    'category_id': categoryId,
+    'backdrop_path': backdropPath,
+    'youtube_trailer': youtubeTrailer,
+    'episode_run_time': episodeRunTime,
+  };
 }
 
 class XtreamEpisode {

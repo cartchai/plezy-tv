@@ -1414,6 +1414,13 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2257": [
+      "Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app",
+      "When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background",
+      "Refresh playlists in IPTV settings now clears the saved copy too, so you always get fresh data",
+      "The saved copy is per connection, so two IPTV sources never mix each other up",
+      "Pictures and posters still load from the internet as before — only the lists are saved"
+    ],
     "changelog2256": [
       "Updates now download inside the app, with an Install button when the download finishes — no browser needed",
       "Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once",

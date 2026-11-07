@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -29,11 +30,13 @@ import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
+import '../services/iptv/iptv_catalog_cache.dart';
 import '../services/playback_initialization_types.dart';
 import '../services/scrub_preview_source.dart';
 import '../utils/app_logger.dart';
 import '../utils/external_ids.dart';
 import '../utils/iptv_initials.dart';
+import '../utils/library_content_notifier.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_live_tv.dart';
 import '../services/iptv/iptv_item_favorites_repository.dart';
@@ -149,6 +152,17 @@ class IptvClient implements MediaServerClient {
   Future<List<XtreamVodStream>>? _vodStreamsFuture;
   Future<List<XtreamSeries>>? _seriesFuture;
 
+  // Disk catalog cache (build #11): raw API payloads under the app
+  // documents directory, per connection — a cold start reads these
+  // instead of re-fetching tens of thousands of rows. See
+  // [_readDiskCatalog] / [_refreshCatalogInBackground].
+  static const _catalogCache = IptvCatalogDiskCache();
+
+  /// Generation guard for background refreshes: bumped by
+  /// [clearCatalogCache], so a refresh started before a clear can never
+  /// resurrect the cleared catalog (memory or disk).
+  int _catalogGeneration = 0;
+
   /// Whether a FULL catalog load has completed with rows (build #9 Task 1).
   /// A future that is merely in flight — or that resolved empty — does not
   /// count: a cold search must sweep per-category instead of awaiting a
@@ -157,6 +171,7 @@ class IptvClient implements MediaServerClient {
   bool _seriesListLoaded = false;
   Future<List<XtreamCategory>>? _vodCategoriesFuture;
   Future<List<XtreamCategory>>? _seriesCategoriesFuture;
+  Future<List<XtreamCategory>>? _liveCategoriesFuture;
   Future<List<M3uEntry>>? _m3uEntriesFuture;
 
   // Category-name lookups (id -> name), for stripping the provider's
@@ -287,8 +302,14 @@ class IptvClient implements MediaServerClient {
   /// Drop the in-memory catalog caches so the next browse/guide load
   /// re-fetches channels, movies and series from the provider (the
   /// "Refresh playlists" action in IPTV settings). An in-flight fetch is
-  /// not cancelled; its result is simply discarded.
+  /// not cancelled; its result is simply discarded. The disk cache is
+  /// deleted too (build #11) — a refresh that only cleared memory would
+  /// just re-read the same stale files — and the library views are told
+  /// the catalog changed so the visible tab reloads with fresh data.
+  /// A background refresh started before this call is dropped by the
+  /// generation guard, so it can never resurrect the cleared catalog.
   void clearCatalogCache() {
+    _catalogGeneration++;
     _liveStreamsFuture = null;
     _vodStreamsFuture = null;
     _seriesFuture = null;
@@ -296,6 +317,7 @@ class IptvClient implements MediaServerClient {
     _seriesListLoaded = false;
     _vodCategoriesFuture = null;
     _seriesCategoriesFuture = null;
+    _liveCategoriesFuture = null;
     _m3uEntriesFuture = null;
     _vodCategoryNamesFuture = null;
     _seriesCategoryNamesFuture = null;
@@ -303,6 +325,21 @@ class IptvClient implements MediaServerClient {
     _favoriteItemsFuture = null;
     _xtreamChannelByKey.clear();
     _m3uChannelByKey.clear();
+    unawaited(_catalogCache.clear(connection.id));
+    _notifyCatalogRefreshed();
+  }
+
+  /// Tell the app's library views that this connection's catalog changed
+  /// (build #11): the Libraries/Home tabs already listen to
+  /// [LibraryContentNotifier] for server pushes, so a background refresh
+  /// landing (or a manual clear) reuses their paced, scroll-aware reload
+  /// — visible tabs update in place, hidden ones reload when next shown.
+  /// The Live TV guide does not listen to it; it re-reads the catalog on
+  /// its next load (source switch, Reload).
+  void _notifyCatalogRefreshed() {
+    LibraryContentNotifier().notifyChanged(
+      LibraryChangeEvent(serverId: ServerId(connection.id), itemsUpdated: true),
+    );
   }
 
   @override
@@ -357,18 +394,131 @@ class IptvClient implements MediaServerClient {
   @override
   Future<String?> getMachineIdentifier() async => connection.id;
 
-  // -- Catalog loading (lazy, in-memory) ----------------------------------
+  // -- Catalog loading (lazy, in-memory + disk) ---------------------------
 
-  Future<List<XtreamLiveStream>> _liveStreams() =>
-      _liveStreamsFuture ??= _xtreamApi.getLiveStreams().catchError((Object e) {
-        _liveStreamsFuture = null;
-        throw e;
-      });
+  /// Read a cached catalog payload from disk and parse it with the same
+  /// parser the network path uses. Returns null (a miss) when there is no
+  /// file, when it cannot be parsed, or when it parses to no rows — an
+  /// empty cached catalog is never served, for the same reason an empty
+  /// network result is never cached in memory (this panel returns [] for
+  /// the unfiltered call at 199k rows). A corrupt file is deleted so it
+  /// reads as a miss exactly once.
+  Future<({List<T> rows, DateTime fetchedAt})?> _readDiskCatalog<T>(
+    String dataset,
+    Future<List<T>> Function(String body) parse,
+  ) async {
+    final cached = await _catalogCache.read(connection.id, dataset);
+    if (cached == null) return null;
+    try {
+      final rows = await parse(cached.body);
+      if (rows.isEmpty) {
+        unawaited(_catalogCache.delete(connection.id, dataset));
+        return null;
+      }
+      return (rows: rows, fetchedAt: cached.fetchedAt);
+    } catch (e) {
+      appLogger.w('IPTV: cached $dataset catalog unreadable; refetching', error: e);
+      unawaited(_catalogCache.delete(connection.id, dataset));
+      return null;
+    }
+  }
+
+  /// Best-effort disk write for freshly fetched rows, serialized back to
+  /// the API's JSON shape so the cached payload re-parses through the
+  /// same parsers. Fire-and-forget: awaiting a tens-of-MB write would
+  /// gate the browse on file I/O. Empty results are never written.
+  /// Generation-guarded: a write scheduled before a [clearCatalogCache]
+  /// deletes its own file afterwards, so a late write can never resurrect
+  /// a catalog the user just cleared.
+  void _writeDiskCatalog<T>(String dataset, List<T> rows, Map<String, dynamic> Function(T row) toJson) {
+    if (rows.isEmpty) return;
+    _writeDiskText(dataset, jsonEncode(rows.map(toJson).toList()));
+  }
+
+  /// Same generation-guarded fire-and-forget write, for a raw text
+  /// payload (the M3U playlist). See [_writeDiskCatalog].
+  void _writeDiskText(String dataset, String body) {
+    if (body.isEmpty) return;
+    final generation = _catalogGeneration;
+    unawaited(
+      _catalogCache.write(connection.id, dataset, body).then((_) async {
+        if (generation != _catalogGeneration) {
+          await _catalogCache.delete(connection.id, dataset);
+        }
+      }),
+    );
+  }
+
+  /// Fetch a catalog in the background after serving a stale disk copy
+  /// (build #11): the fresh rows replace the disk file and the memoized
+  /// in-memory future, and the library views are told the catalog
+  /// changed. Dropped silently when the fetch fails or when a
+  /// [clearCatalogCache] landed first (generation guard) — the stale
+  /// rows stay on screen either way.
+  void _refreshCatalogInBackground<T>({
+    required String dataset,
+    required Future<List<T>> Function() fetch,
+    required Map<String, dynamic> Function(T row) toJson,
+    required void Function(List<T> rows) swap,
+  }) {
+    final generation = _catalogGeneration;
+    unawaited(
+      fetch().then((rows) async {
+        if (generation != _catalogGeneration || rows.isEmpty) return;
+        await _catalogCache.write(connection.id, dataset, jsonEncode(rows.map(toJson).toList()));
+        if (generation != _catalogGeneration) {
+          // A clear landed during the write: drop the resurrected file
+          // instead of serving pre-clear rows as fresh.
+          await _catalogCache.delete(connection.id, dataset);
+          return;
+        }
+        swap(rows);
+        _notifyCatalogRefreshed();
+      }).catchError((Object e) {
+        appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
+      }),
+    );
+  }
+
+  Future<List<XtreamLiveStream>> _liveStreams() async {
+    final cached = _liveStreamsFuture;
+    if (cached != null) return cached;
+    final future = _loadLiveStreamsCached().catchError((Object e) {
+      _liveStreamsFuture = null;
+      throw e;
+    });
+    _liveStreamsFuture = future;
+    return future;
+  }
+
+  /// Disk first (build #11): a cached live list is served immediately; a
+  /// stale one is served and refreshed in the background. No disk cache
+  /// (first run, cleared, corrupt) falls back to the network fetch.
+  Future<List<XtreamLiveStream>> _loadLiveStreamsCached() async {
+    final disk = await _readDiskCatalog<XtreamLiveStream>(
+      IptvCatalogDiskCache.liveDataset,
+      XtreamApi.parseLiveStreamsBody,
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamLiveStream>(
+          dataset: IptvCatalogDiskCache.liveDataset,
+          fetch: () => _xtreamApi.getLiveStreams(),
+          toJson: (r) => r.toJson(),
+          swap: (rows) => _liveStreamsFuture = Future.value(rows),
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _xtreamApi.getLiveStreams();
+    _writeDiskCatalog(IptvCatalogDiskCache.liveDataset, rows, (r) => r.toJson());
+    return rows;
+  }
 
   Future<List<XtreamVodStream>> _vodStreams() async {
     final cached = _vodStreamsFuture;
     if (cached != null) return cached;
-    final future = _loadVodStreams().catchError((Object e) {
+    final future = _loadVodStreamsCached().catchError((Object e) {
       _vodStreamsFuture = null;
       throw e;
     });
@@ -383,6 +533,34 @@ class IptvClient implements MediaServerClient {
       _vodStreamsLoaded = true;
     }
     return result;
+  }
+
+  /// Disk first (build #11); the network load (with its per-category
+  /// fallback) runs only on a miss, and the merged rows are written to
+  /// disk — so a panel whose unfiltered call returns [] still gets a
+  /// cached catalog from the fallback sweep.
+  Future<List<XtreamVodStream>> _loadVodStreamsCached() async {
+    final disk = await _readDiskCatalog<XtreamVodStream>(
+      IptvCatalogDiskCache.vodDataset,
+      XtreamApi.parseVodStreamsBody,
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamVodStream>(
+          dataset: IptvCatalogDiskCache.vodDataset,
+          fetch: _loadVodStreams,
+          toJson: (r) => r.toJson(),
+          swap: (rows) {
+            _vodStreamsFuture = Future.value(rows);
+            _vodStreamsLoaded = true;
+          },
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _loadVodStreams();
+    _writeDiskCatalog(IptvCatalogDiskCache.vodDataset, rows, (r) => r.toJson());
+    return rows;
   }
 
   /// Unfiltered first (the fast path when the panel answers); when it
@@ -422,7 +600,7 @@ class IptvClient implements MediaServerClient {
   Future<List<XtreamSeries>> _seriesList() async {
     final cached = _seriesFuture;
     if (cached != null) return cached;
-    final future = _loadSeries().catchError((Object e) {
+    final future = _loadSeriesCached().catchError((Object e) {
       _seriesFuture = null;
       throw e;
     });
@@ -434,6 +612,34 @@ class IptvClient implements MediaServerClient {
       _seriesListLoaded = true;
     }
     return result;
+  }
+
+  /// Disk first (build #11), same shape as [_loadVodStreamsCached]: the
+  /// startup warm-up ([warmUpSeriesCatalog]) now reads the disk copy, so
+  /// the second search after app start finds a warm catalog without ever
+  /// touching the network when the cache is fresh.
+  Future<List<XtreamSeries>> _loadSeriesCached() async {
+    final disk = await _readDiskCatalog<XtreamSeries>(
+      IptvCatalogDiskCache.seriesDataset,
+      XtreamApi.parseSeriesBody,
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamSeries>(
+          dataset: IptvCatalogDiskCache.seriesDataset,
+          fetch: _loadSeries,
+          toJson: (r) => r.toJson(),
+          swap: (rows) {
+            _seriesFuture = Future.value(rows);
+            _seriesListLoaded = true;
+          },
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _loadSeries();
+    _writeDiskCatalog(IptvCatalogDiskCache.seriesDataset, rows, (r) => r.toJson());
+    return rows;
   }
 
   /// Same empty-unfiltered fallback as [_loadVodStreams], for series.
@@ -469,33 +675,164 @@ class IptvClient implements MediaServerClient {
   }
 
   Future<List<M3uEntry>> _m3uEntries() {
-    return _m3uEntriesFuture ??= () async {
-      final response = await _http.get(Uri.parse(_m3u.playlistUrl)).timeout(const Duration(seconds: 30));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw MediaServerHttpException(
-          type: MediaServerHttpErrorType.unknown,
-          message: 'M3U playlist fetch failed with HTTP ${response.statusCode}',
-          statusCode: response.statusCode,
-        );
-      }
-      return parseM3u(response.body);
-    }().catchError((Object e) {
+    return _m3uEntriesFuture ??= _loadM3uEntriesCached().catchError((Object e) {
       _m3uEntriesFuture = null;
       throw e;
     });
   }
 
-  Future<List<XtreamCategory>> _vodCategories() =>
-      _vodCategoriesFuture ??= _xtreamApi.getVodCategories().catchError((Object e) {
-        _vodCategoriesFuture = null;
-        throw e;
-      });
+  /// Disk first (build #11): the playlist TEXT is the payload, stored
+  /// as-is and parsed with [parseM3u] on demand — no model serialization
+  /// needed. A stale playlist is served and refreshed in the background.
+  Future<List<M3uEntry>> _loadM3uEntriesCached() async {
+    final disk = await _catalogCache.read(connection.id, IptvCatalogDiskCache.m3uDataset);
+    if (disk != null) {
+      try {
+        final entries = await compute(parseM3u, disk.body);
+        if (entries.isNotEmpty) {
+          if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) _refreshM3uEntriesInBackground();
+          return entries;
+        }
+        unawaited(_catalogCache.delete(connection.id, IptvCatalogDiskCache.m3uDataset));
+      } catch (e) {
+        appLogger.w('IPTV: cached M3U playlist unreadable; refetching', error: e);
+        unawaited(_catalogCache.delete(connection.id, IptvCatalogDiskCache.m3uDataset));
+      }
+    }
+    final text = await _fetchM3uPlaylistText();
+    _writeDiskText(IptvCatalogDiskCache.m3uDataset, text);
+    return compute(parseM3u, text);
+  }
 
-  Future<List<XtreamCategory>> _seriesCategories() =>
-      _seriesCategoriesFuture ??= _xtreamApi.getSeriesCategories().catchError((Object e) {
-        _seriesCategoriesFuture = null;
-        throw e;
-      });
+  Future<String> _fetchM3uPlaylistText() async {
+    final response = await _http.get(Uri.parse(_m3u.playlistUrl)).timeout(const Duration(seconds: 30));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw MediaServerHttpException(
+        type: MediaServerHttpErrorType.unknown,
+        message: 'M3U playlist fetch failed with HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+      );
+    }
+    return response.body;
+  }
+
+  void _refreshM3uEntriesInBackground() {
+    final generation = _catalogGeneration;
+    unawaited(
+      _fetchM3uPlaylistText().then((text) async {
+        if (generation != _catalogGeneration || text.isEmpty) return;
+        await _catalogCache.write(connection.id, IptvCatalogDiskCache.m3uDataset, text);
+        if (generation != _catalogGeneration) {
+          // A clear landed during the write: drop the resurrected file.
+          await _catalogCache.delete(connection.id, IptvCatalogDiskCache.m3uDataset);
+          return;
+        }
+        _m3uEntriesFuture = Future.value(await compute(parseM3u, text));
+        _notifyCatalogRefreshed();
+      }).catchError((Object e) {
+        appLogger.w('IPTV: background M3U playlist refresh failed', error: e);
+      }),
+    );
+  }
+
+  Future<List<XtreamCategory>> _liveCategories() async {
+    final cached = _liveCategoriesFuture;
+    if (cached != null) return cached;
+    final future = _loadLiveCategoriesCached().catchError((Object e) {
+      _liveCategoriesFuture = null;
+      throw e;
+    });
+    _liveCategoriesFuture = future;
+    return future;
+  }
+
+  /// Disk first (build #11), same shape as the other category lists.
+  Future<List<XtreamCategory>> _loadLiveCategoriesCached() async {
+    final disk = await _readDiskCatalog<XtreamCategory>(
+      IptvCatalogDiskCache.liveCategoriesDataset,
+      (body) async => XtreamApi.parseCategoriesBody(body),
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamCategory>(
+          dataset: IptvCatalogDiskCache.liveCategoriesDataset,
+          fetch: () => _xtreamApi.getLiveCategories(),
+          toJson: (r) => r.toJson(),
+          swap: (rows) => _liveCategoriesFuture = Future.value(rows),
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _xtreamApi.getLiveCategories();
+    _writeDiskCatalog(IptvCatalogDiskCache.liveCategoriesDataset, rows, (r) => r.toJson());
+    return rows;
+  }
+
+  Future<List<XtreamCategory>> _vodCategories() async {
+    final cached = _vodCategoriesFuture;
+    if (cached != null) return cached;
+    final future = _loadVodCategoriesCached().catchError((Object e) {
+      _vodCategoriesFuture = null;
+      throw e;
+    });
+    _vodCategoriesFuture = future;
+    return future;
+  }
+
+  /// Disk first (build #11), same shape as [_loadLiveCategoriesCached].
+  Future<List<XtreamCategory>> _loadVodCategoriesCached() async {
+    final disk = await _readDiskCatalog<XtreamCategory>(
+      IptvCatalogDiskCache.vodCategoriesDataset,
+      (body) async => XtreamApi.parseCategoriesBody(body),
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamCategory>(
+          dataset: IptvCatalogDiskCache.vodCategoriesDataset,
+          fetch: () => _xtreamApi.getVodCategories(),
+          toJson: (r) => r.toJson(),
+          swap: (rows) => _vodCategoriesFuture = Future.value(rows),
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _xtreamApi.getVodCategories();
+    _writeDiskCatalog(IptvCatalogDiskCache.vodCategoriesDataset, rows, (r) => r.toJson());
+    return rows;
+  }
+
+  Future<List<XtreamCategory>> _seriesCategories() async {
+    final cached = _seriesCategoriesFuture;
+    if (cached != null) return cached;
+    final future = _loadSeriesCategoriesCached().catchError((Object e) {
+      _seriesCategoriesFuture = null;
+      throw e;
+    });
+    _seriesCategoriesFuture = future;
+    return future;
+  }
+
+  /// Disk first (build #11), same shape as [_loadLiveCategoriesCached].
+  Future<List<XtreamCategory>> _loadSeriesCategoriesCached() async {
+    final disk = await _readDiskCatalog<XtreamCategory>(
+      IptvCatalogDiskCache.seriesCategoriesDataset,
+      (body) async => XtreamApi.parseCategoriesBody(body),
+    );
+    if (disk != null) {
+      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        _refreshCatalogInBackground<XtreamCategory>(
+          dataset: IptvCatalogDiskCache.seriesCategoriesDataset,
+          fetch: () => _xtreamApi.getSeriesCategories(),
+          toJson: (r) => r.toJson(),
+          swap: (rows) => _seriesCategoriesFuture = Future.value(rows),
+        );
+      }
+      return disk.rows;
+    }
+    final rows = await _xtreamApi.getSeriesCategories();
+    _writeDiskCatalog(IptvCatalogDiskCache.seriesCategoriesDataset, rows, (r) => r.toJson());
+    return rows;
+  }
 
   /// Category id -> name for VOD, for stripping the provider's category
   /// tag from display titles. Fails open to {} — titles just keep their
@@ -538,8 +875,7 @@ class IptvClient implements MediaServerClient {
   Future<Map<String, String>> _liveCategoryNames() async {
     final cached = _liveCategoryNamesFuture;
     if (cached != null) return cached;
-    final future = _xtreamApi
-        .getLiveCategories()
+    final future = _liveCategories()
         .then(
           (categories) => {for (final c in categories) c.id: c.name},
           onError: (Object e) {
@@ -866,7 +1202,7 @@ class IptvClient implements MediaServerClient {
   Future<List<IptvInitial>> iptvInitials() async {
     final names = <String>[];
     if (_isXtream) {
-      final liveCategories = await _xtreamApi.getLiveCategories().catchError((Object e) {
+      final liveCategories = await _liveCategories().catchError((Object e) {
         appLogger.w('IPTV: live category list unavailable for initials: $e');
         return const <XtreamCategory>[];
       });

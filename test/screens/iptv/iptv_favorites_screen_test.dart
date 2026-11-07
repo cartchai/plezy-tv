@@ -11,6 +11,7 @@ import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/iptv/iptv_favorites_screen.dart';
 import 'package:plezy/screens/media_detail_screen.dart';
 import 'package:plezy/screens/video_player_screen.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/storage_service.dart';
@@ -137,6 +138,10 @@ Future<void> _pumpFavorites(WidgetTester tester, MultiServerProvider provider, L
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  tearDown(() {
+    IptvCatalogDiskCache.debugDisableDisk = false;
+  });
+
   // The prefs reset must run before Settings/Storage init, and the seeded
   // favourites (when wanted) must be in the store before the test body
   // starts — see the seeding note above. Each test calls this first.
@@ -145,6 +150,10 @@ void main() {
     LocaleSettings.setLocaleSync(AppLocale.en);
     await SettingsService.getInstance();
     await StorageService.getInstance();
+    // The catalog disk cache (build #11) is switched off here: its real
+    // dart:io never completes in testWidgets' fake async zone, and its
+    // behaviour is covered by the unit tests — see `debugDisableDisk`.
+    IptvCatalogDiskCache.debugDisableDisk = true;
   }
 
   testWidgets('three sections render with the favourited items, labelled by connection', (tester) async {

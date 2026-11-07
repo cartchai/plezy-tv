@@ -10,6 +10,7 @@ import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/screens/settings/edit_iptv_connection_screen.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/theme/mono_theme.dart';
 import 'package:plezy/widgets/focusable_list_tile.dart';
@@ -78,11 +79,16 @@ void main() {
       }
       return IptvClient.m3u(m3uConnection: connection as M3uConnection);
     };
+    // The catalog disk cache (build #11) is switched off here: its real
+    // dart:io never completes in testWidgets' fake async zone, and its
+    // behaviour is covered by the unit tests — see `debugDisableDisk`.
+    IptvCatalogDiskCache.debugDisableDisk = true;
   });
 
   tearDown(() {
     EditIptvConnectionScreen.debugHttpClient = null;
     IptvClient.debugClientFactory = null;
+    IptvCatalogDiskCache.debugDisableDisk = false;
   });
 
   XtreamConnection trexConnection() => XtreamConnection(

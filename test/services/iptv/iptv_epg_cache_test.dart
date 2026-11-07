@@ -99,7 +99,19 @@ void main() {
 
   tearDown(() async {
     IptvLiveTvSupport.debugEpgCacheDirectoryProvider = null;
-    if (await tempDir.exists()) await tempDir.delete(recursive: true);
+    // The EPG cache writes are fire-and-forget: a write started by the
+    // last fetch can still be in flight when tearDown runs, and a file
+    // landing mid-delete makes the recursive delete fail (ENOTEMPTY).
+    // Retry once after a short yield instead of failing the test on it.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 1) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   });
 
   /// A fresh support instance for the same connection — the stand-in for a

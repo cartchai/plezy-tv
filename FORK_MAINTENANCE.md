@@ -322,6 +322,41 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   `IPTV_BUILD10_DIAGNOSIS.md` (diagnosis; its (h) fix is superseded
   by the redesign — note at the top of the doc).
 
+### 9. Build #11 — IPTV catalog disk cache (v2.25.7)
+- New files: `lib/services/iptv/iptv_catalog_cache.dart`
+  (`IptvCatalogDiskCache` — documents dir, per-connection datasets,
+  TTL, total methods), `test/services/iptv/iptv_catalog_cache_test.dart`
+  (20 tests).
+- Touched upstream files: `lib/services/iptv/xtream_api.dart`
+  (`toJson` on the four catalog models + public parse helpers),
+  `lib/media/iptv_client.dart` (disk-first loaders for live/VOD/series/
+  all three category lists/M3U playlist, generic background refresh,
+  `_catalogGeneration` guard, `_liveCategories()`,
+  `clearCatalogCache` rewrite — also the manual-refresh affordance via
+  IPTV settings "Refresh playlists"), `lib/i18n/en.i18n.json` +
+  generated `strings*.g.dart` (`changelog2257`),
+  `lib/screens/settings/about_screen.dart` (changelog entry first),
+  `pubspec.yaml` (version `2.25.7+164`).
+- Touched test files: `test/services/iptv/iptv_epg_cache_test.dart`
+  (tearDown retries the recursive delete — a fire-and-forget EPG write
+  landing mid-delete made it flaky); the six widget-test files that
+  build real `IptvClient`s now set
+  `IptvCatalogDiskCache.debugDisableDisk = true` in setUp (the disk
+  cache's real dart:io never completes in `testWidgets`' fake async
+  zone — same reason the favourites repo has an in-memory stand-in):
+  `test/screens/livetv/guide_tab_iptv_test.dart`,
+  `test/screens/iptv/iptv_screens_test.dart`,
+  `test/screens/libraries/library_categories_tab_test.dart`,
+  `test/screens/iptv/iptv_favorites_screen_test.dart`,
+  `test/widgets/iptv_initials_checklist_test.dart`,
+  `test/screens/settings/edit_iptv_connection_screen_test.dart`.
+- NOT touched: EPG caching (build #7) except reusing its patterns;
+  the build #10 search race, warm-up and diagnostics row; image loading
+  (posters/artwork deliberately NOT cached — Matt's call).
+- Progress notes: `IPTV_BUILD11_NOTES.md` (design, storage layout,
+  TTL/refresh rules, ~91 MB size estimate at his provider scale,
+  limits, widget-test fake-async finding).
+
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
 - libass module keeps `com.edde746.plezy.libass` (its JNI names match).

@@ -8,6 +8,7 @@ import 'package:plezy/connection/connection.dart';
 import 'package:plezy/screens/hub_detail_screen.dart';
 import 'package:plezy/screens/libraries/libraries_screen.dart';
 import 'package:plezy/screens/libraries/tabs/library_categories_tab.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/iptv_item_favorites_repository.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/settings_service.dart';
@@ -119,6 +120,14 @@ void main() {
     SettingsService.resetForTesting();
     LocaleSettings.setLocaleSync(AppLocale.en);
     await SettingsService.getInstance();
+    // The catalog disk cache (build #11) is switched off here: its real
+    // dart:io never completes in testWidgets' fake async zone, and its
+    // behaviour is covered by the unit tests — see `debugDisableDisk`.
+    IptvCatalogDiskCache.debugDisableDisk = true;
+  });
+
+  tearDown(() {
+    IptvCatalogDiskCache.debugDisableDisk = false;
   });
 
   testWidgets('Movies library lists VOD categories with counts', (tester) async {

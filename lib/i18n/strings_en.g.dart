@@ -3679,6 +3679,13 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2257 => [
+		'Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app',
+		'When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background',
+		'Refresh playlists in IPTV settings now clears the saved copy too, so you always get fresh data',
+		'The saved copy is per connection, so two IPTV sources never mix each other up',
+		'Pictures and posters still load from the internet as before — only the lists are saved',
+	];
 	List<String> get changelog2256 => [
 		'Updates now download inside the app, with an Install button when the download finishes — no browser needed',
 		'Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once',
@@ -9858,6 +9865,11 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2257.0' => 'Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app',
+			'about.changelog2257.1' => 'When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background',
+			'about.changelog2257.2' => 'Refresh playlists in IPTV settings now clears the saved copy too, so you always get fresh data',
+			'about.changelog2257.3' => 'The saved copy is per connection, so two IPTV sources never mix each other up',
+			'about.changelog2257.4' => 'Pictures and posters still load from the internet as before — only the lists are saved',
 			'about.changelog2256.0' => 'Updates now download inside the app, with an Install button when the download finishes — no browser needed',
 			'about.changelog2256.1' => 'Name initials are now Category initials: turning one off hides every category with it, so you can switch off a whole region at once',
 			'about.changelog2256.2' => 'The initials list is in alphabetical order',
@@ -10096,13 +10108,13 @@ extension on Translations {
 			'explore.totalResults' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} result', other: '${n} results', ), 
 			'liveTv.title' => 'Live TV',
 			'liveTv.guide' => 'Guide',
+			_ => null,
+		} ?? switch (path) {
 			'liveTv.noChannels' => 'No channels available',
 			'liveTv.noDvr' => 'No DVR configured on any server',
 			'liveTv.serverUnavailable' => 'Live TV server is not available.',
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.noInformationAvailable' => 'No information available',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
 			'liveTv.unknownProgram' => 'Unknown Program',
@@ -10610,13 +10622,13 @@ extension on Translations {
 			'companionRemote.remote.next' => 'Next',
 			'companionRemote.remote.seekBack' => 'Seek Back',
 			'companionRemote.remote.stop' => 'Stop',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.seekForward' => 'Seek Fwd',
 			'companionRemote.remote.volume' => 'Volume',
 			'companionRemote.remote.volumeDown' => 'Down',
 			'companionRemote.remote.volumeUp' => 'Up',
 			'companionRemote.remote.fullscreen' => 'Fullscreen',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.subtitles' => 'Subtitles',
 			'companionRemote.remote.audio' => 'Audio',
 			'companionRemote.remote.searchHint' => 'Search on desktop...',

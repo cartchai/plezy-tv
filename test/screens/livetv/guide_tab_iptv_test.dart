@@ -13,6 +13,7 @@ import 'package:plezy/models/livetv_channel.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/livetv/tabs/guide_tab.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
@@ -183,13 +184,18 @@ void main() {
     // here, or the prefs read started from inside the widget load never
     // completes on pumps (fake async). And the persisted EPG cache
     // resolves its directory through path_provider (no mock in widget
-    // tests), so point it at a temp dir.
+    // tests), so point it at a temp dir. The catalog disk cache (build
+    // #11) is switched off in widget tests instead: its real dart:io
+    // never completes in testWidgets' fake async zone, and its behaviour
+    // is covered by the unit tests — see `debugDisableDisk`.
     await SettingsService.getInstance();
     epgTempDir = await Directory.systemTemp.createTemp('plezy_epg_guide_');
     IptvLiveTvSupport.debugEpgCacheDirectoryProvider = () async => epgTempDir;
+    IptvCatalogDiskCache.debugDisableDisk = true;
   });
 
   tearDown(() async {
+    IptvCatalogDiskCache.debugDisableDisk = false;
     IptvLiveTvSupport.debugEpgCacheDirectoryProvider = null;
     if (await epgTempDir.exists()) await epgTempDir.delete(recursive: true);
   });
