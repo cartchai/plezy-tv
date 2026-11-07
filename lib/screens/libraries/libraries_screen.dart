@@ -757,23 +757,41 @@ class _LibrariesScreenState extends State<LibrariesScreen>
           children: [
             AppIcon(ContentTypeHelper.getLibraryIcon(selectedLibrary.kind.id), fill: 1, size: 20),
             const SizedBox(width: 8),
+            // The title flexes and ellipsises so the row fits at narrow
+            // phone width (build #12: "trex — Movies" plus the four
+            // actions overflowed by 5px on the Fold 7 cover screen). The
+            // icon and dropdown arrow stay fixed; only the title shrinks.
             if (librariesSpanMultipleServers(visibleLibraries) && selectedLibrary.serverName != null)
-              Column(
-                crossAxisAlignment: .start,
-                mainAxisSize: .min,
-                children: [
-                  Text(selectedLibrary.title, style: Theme.of(context).textTheme.titleMedium),
-                  LibraryServerLabel(
-                    library: selectedLibrary,
-                    badgeSize: 10,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: .start,
+                  mainAxisSize: .min,
+                  children: [
+                    Text(
+                      selectedLibrary.title,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                ],
+                    LibraryServerLabel(
+                      library: selectedLibrary,
+                      badgeSize: 10,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Theme.of(context).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ],
+                ),
               )
             else
-              Text(selectedLibrary.title, style: Theme.of(context).textTheme.titleLarge),
+              Flexible(
+                child: Text(
+                  selectedLibrary.title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             const SizedBox(width: 4),
             const AppIcon(Symbols.arrow_drop_down_rounded, fill: 1, size: 24),
           ],

@@ -1414,6 +1414,13 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2258": [
+      "Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what's on",
+      "Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it",
+      "The small player has play/pause, mute and a fullscreen button, and catch-up still works from the guide",
+      "Turning the phone sideways plays video full screen like before — the small player is for holding the phone upright",
+      "The library title no longer runs off the edge on narrow phones — long names like trex — Movies now shorten with …"
+    ],
     "changelog2257": [
       "Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app",
       "When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background",

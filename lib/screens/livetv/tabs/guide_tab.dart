@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import '../../../media/ids.dart';
+import '../../../mpv/player/player.dart';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -25,6 +27,7 @@ import '../../../media/media_server_client.dart';
 import '../../../theme/mono_tokens.dart';
 import '../../../utils/app_logger.dart';
 import '../live_tv_actions_mixin.dart';
+import '../live_tv_mini_player.dart';
 import '../live_tv_refresh_mixin.dart';
 import '../live_tv_server_iteration.dart';
 import '../../video_player/live_tv_session_args.dart';
@@ -51,6 +54,15 @@ class GuideTab extends StatefulWidget {
   /// ([LiveTvChannel.hasCatchUp]). Wired to the IPTV settings toggle.
   final bool showCatchUpBadge;
 
+  /// Test seams for the portrait mini-player (build #12): a fake player
+  /// factory, a placeholder video surface, and a fullscreen stub. The
+  /// real paths construct a native [Player], render the real video
+  /// surface, and open the full player — no native surface is ever
+  /// created in widget tests.
+  final Player Function()? debugPlayerFactory;
+  final Widget Function(BuildContext context, Player player)? debugVideoBuilder;
+  final Future<void> Function(LiveTvChannel channel)? debugFullscreenHandler;
+
   const GuideTab({
     super.key,
     required this.channels,
@@ -59,6 +71,9 @@ class GuideTab extends StatefulWidget {
     this.onNavigateUp,
     this.onBack,
     this.showCatchUpBadge = true,
+    this.debugPlayerFactory,
+    this.debugVideoBuilder,
+    this.debugFullscreenHandler,
   });
 
   @override
@@ -129,6 +144,92 @@ class GuideTabState extends State<GuideTab>
   /// Minimum time away (backgrounded or on another section) before the
   /// viewport is realigned to the live line on return.
   static const _realignAfterAway = Duration(minutes: 30);
+
+  // Live TV mini-player (build #12): one player owned by the guide, shown
+  // above the grid on portrait phones only. The controller notifies on
+  // every play/pause/buffer change, but the guide itself only rebuilds
+  // when the slot appears or disappears ([_onMiniPlayerChanged]) — the
+  // slot's own ListenableBuilder handles its internal state, so scrolling
+  // the grid never rebuilds the player.
+  late final LiveTvMiniPlayerController _miniPlayer;
+  bool _miniPlayerVisible = false;
+
+  /// The mini-player exists only on phones in portrait: the Plex
+  /// reference is a portrait layout (video on top, guide below). Rotating
+  /// to landscape behaves as today — fullscreen video as normal — so the
+  /// guide has no mini-player there, and TV/tablet/desktop are untouched.
+  bool get _miniPlayerEnabled =>
+      PlatformDetector.isPhone(context) && MediaQuery.orientationOf(context) == Orientation.portrait;
+
+  void _onMiniPlayerChanged() {
+    final visible = _miniPlayer.status != LiveTvMiniPlayerStatus.idle;
+    if (visible == _miniPlayerVisible) return;
+    _miniPlayerVisible = visible;
+    setStateIfMounted(() {});
+  }
+
+  /// Guide tap-to-tune (build #12): on a portrait phone the channel plays
+  /// in the mini-player above the guide; everywhere else the tap opens
+  /// the full player exactly as before. Catch-up keeps its archive start
+  /// on both paths — the mini-player opens the timeshift URL, the full
+  /// player navigates with the same catch-up epoch as today.
+  Future<void> _tuneFromGuide(LiveTvChannel channel, {int? catchUpStartEpoch}) async {
+    if (_miniPlayerEnabled) {
+      await _miniPlayer.tune(
+        channel: channel,
+        multiServer: context.read<MultiServerProvider>(),
+        catchUpStartEpoch: catchUpStartEpoch,
+      );
+      return;
+    }
+    if (catchUpStartEpoch != null) {
+      await navigateToLiveTv(
+        context,
+        multiServer: context.read<MultiServerProvider>(),
+        channel: channel,
+        channels: liveTvChannels,
+        startPosition: LiveTvStartPosition.beginning,
+        catchUpStartEpoch: catchUpStartEpoch,
+      );
+      return;
+    }
+    await tuneChannel(channel);
+  }
+
+  /// Mini-player fullscreen: release the stream, then open the full
+  /// player for the same channel. The mini-player stays as a stopped
+  /// card, so one tap resumes it on return.
+  Future<void> _openMiniPlayerFullscreen() async {
+    final channel = _miniPlayer.channel;
+    if (channel == null) return;
+    await _miniPlayer.stopForFullscreen();
+    if (!mounted) return;
+    final handler = widget.debugFullscreenHandler;
+    if (handler != null) {
+      await handler(channel);
+      return;
+    }
+    await navigateToLiveTv(
+      context,
+      multiServer: context.read<MultiServerProvider>(),
+      channel: channel,
+      channels: liveTvChannels,
+    );
+  }
+
+  Future<void> _resumeMiniPlayer() async {
+    if (!mounted) return;
+    await _miniPlayer.retry(multiServer: context.read<MultiServerProvider>());
+  }
+
+  /// Title of the programme currently airing on [channel], from the
+  /// guide's EPG — the mini-player's "now playing" line.
+  String? _nowPlayingTitleFor(LiveTvChannel? channel) {
+    if (channel == null) return null;
+    final index = widget.channels.indexWhere((c) => c.key == channel.key);
+    if (index < 0) return null;
+    return _findCurrentProgram(index)?.title;
+  }
 
   List<LiveTvProgram> _programs = [];
   Map<String, List<LiveTvProgram>> _programsByChannelScope = const {};
@@ -320,11 +421,25 @@ class GuideTabState extends State<GuideTab>
   @override
   void initState() {
     super.initState();
+    _miniPlayer = LiveTvMiniPlayerController(playerFactory: widget.debugPlayerFactory);
+    _miniPlayer.addListener(_onMiniPlayerChanged);
     _initTimeRange();
     _loadPrograms();
 
     _gridHorizontalController.addListener(_syncGridToHeader);
     _headerHorizontalController.addListener(_syncHeaderToGrid);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Rotating to landscape (or leaving the phone form factor) releases
+    // the stream: landscape behaves as today — fullscreen video as
+    // normal — and there is no video surface in the landscape guide, so a
+    // mini-player left playing would be audio with no picture.
+    if (!_miniPlayerEnabled && _miniPlayer.status != LiveTvMiniPlayerStatus.idle) {
+      unawaited(_miniPlayer.stop());
+    }
   }
 
   // Not the gated data-refresh timer the other tabs run: the tick is a
@@ -375,6 +490,8 @@ class GuideTabState extends State<GuideTab>
   @override
   void dispose() {
     _programLoadGeneration++;
+    _miniPlayer.removeListener(_onMiniPlayerChanged);
+    unawaited(_miniPlayer.dispose());
     _selectLongPressController.dispose();
     _guideFocusNode.dispose();
     _gridVerticalController.dispose();
@@ -1294,7 +1411,7 @@ class GuideTabState extends State<GuideTab>
       if (_gridChannelIndex >= 0 && _gridChannelIndex < widget.channels.length) {
         final channel = widget.channels[_gridChannelIndex];
         if (_gridColumn == 0) {
-          tuneChannel(channel);
+          _tuneFromGuide(channel);
         } else if (_focusedProgram != null) {
           _activateProgram(channel, _focusedProgram!);
         }
@@ -1458,6 +1575,18 @@ class GuideTabState extends State<GuideTab>
     final rows = _guideRows;
     return Column(
       children: [
+        // Live TV mini-player (build #12): video on top, guide below,
+        // both visible at once — the Plex reference layout, portrait
+        // phones only. The slot appears once a channel is tuned and hides
+        // when playback stops; scrolling the grid never touches it.
+        if (_miniPlayerEnabled && _miniPlayer.status != LiveTvMiniPlayerStatus.idle)
+          LiveTvMiniPlayer(
+            controller: _miniPlayer,
+            nowPlayingTitle: _nowPlayingTitleFor(_miniPlayer.channel),
+            onFullscreen: _openMiniPlayerFullscreen,
+            onResume: _resumeMiniPlayer,
+            videoBuilder: widget.debugVideoBuilder,
+          ),
         _buildTimeNavigation(theme),
         // Subtle EPG loading indicator (Task B): a thin bar under the time
         // navigation, visible only while a visible IPTV channel's guide is
@@ -1889,7 +2018,7 @@ class GuideTabState extends State<GuideTab>
           client: client,
           channel: channel,
           theme: theme,
-          onTap: () => tuneChannel(channel),
+          onTap: () => _tuneFromGuide(channel),
           onLongPress: widget.onToggleFavorite != null ? () => widget.onToggleFavorite!(channel) : null,
           isFocused: isFocused,
           isFavorite: widget.isFavoriteChannel?.call(channel) ?? false,
@@ -2171,6 +2300,7 @@ class GuideTabState extends State<GuideTab>
       posterServerId: channel.serverId,
       onRecordingStateChanged: (isScheduled) => _handleRecordingStateChanged(program, isScheduled),
       onCatchUp: _catchUpActionFor(channel, program),
+      onTuneChannel: () => _tuneFromGuide(channel),
     );
   }
 
@@ -2194,15 +2324,7 @@ class GuideTabState extends State<GuideTab>
   Future<void> _catchUpToProgram(LiveTvChannel channel, LiveTvProgram program) async {
     final beginsAt = program.beginsAt;
     if (beginsAt == null) return;
-    final multiServer = context.read<MultiServerProvider>();
-    await navigateToLiveTv(
-      context,
-      multiServer: multiServer,
-      channel: channel,
-      channels: liveTvChannels,
-      startPosition: LiveTvStartPosition.beginning,
-      catchUpStartEpoch: beginsAt,
-    );
+    await _tuneFromGuide(channel, catchUpStartEpoch: beginsAt);
   }
 }
 

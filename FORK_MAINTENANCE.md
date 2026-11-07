@@ -357,6 +357,42 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   TTL/refresh rules, ~91 MB size estimate at his provider scale,
   limits, widget-test fake-async finding).
 
+### 10. Build #12 — Live TV mini-player (portrait) + library header overflow (v2.25.8)
+- **CORRECTED scope (Matt, 2026-11-07 ~00:24 EST): the mini-player is
+  PORTRAIT, exactly like the Plex screenshot — "landscape" in the
+  original brief was a misstatement.** Rotating to landscape behaves as
+  today (fullscreen video as normal); no landscape mini-player was
+  built.
+- New files: `lib/screens/livetv/live_tv_mini_player.dart`
+  (`LiveTvMiniPlayerController` — one `Player`, generation-guarded
+  tunes, `force-seekable=no`, coordinator registration — +
+  `LiveTvMiniPlayer` widget, 16:9 + info/control bar),
+  `test/screens/livetv/live_tv_mini_player_test.dart` (8 widget tests),
+  `test/screens/livetv/live_tv_mini_player_controller_test.dart` (6
+  unit tests), `test/screens/libraries/library_header_overflow_test.dart`
+  (1 widget test, failed before the fix with a 98px RenderFlex overflow
+  at 360dp).
+- Touched upstream files: `lib/screens/livetv/tabs/guide_tab.dart`
+  (owns the controller; slot at the top of `_buildGuideGrid` when phone
+  + portrait; `_tuneFromGuide` routes channel taps, D-pad select,
+  detail-sheet tune and catch-up; `didChangeDependencies` stops the
+  player on leaving portrait),
+  `lib/screens/livetv/live_tv_actions_mixin.dart`
+  (`showProgramDetails` gains optional `onTuneChannel`, default
+  unchanged), `lib/screens/libraries/libraries_screen.dart` (title
+  `Flexible` + ellipsis in `_buildLibraryDropdownTitle`),
+  `lib/i18n/en.i18n.json` + generated `strings*.g.dart`
+  (`changelog2258`), `lib/screens/settings/about_screen.dart`
+  (changelog entry first), `pubspec.yaml` (version `2.25.8+165`).
+- NOT touched: TV/tablet/desktop layouts, TV D-pad navigation, the
+  What's On tab (no mini-player there; switching tabs stops playback),
+  the full player open sequence (the mini-player mirrors it, it does not
+  share code with it), series search / category initials / EPG /
+  disk cache behaviour.
+- Progress notes: `IPTV_BUILD12_NOTES.md` (design, test seams, the
+  broadcast-cancel fake-async finding, the theme-platform finding,
+  phone verification list).
+
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
 - libass module keeps `com.edde746.plezy.libass` (its JNI names match).

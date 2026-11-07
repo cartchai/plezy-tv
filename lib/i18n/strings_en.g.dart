@@ -3679,6 +3679,13 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2258 => [
+		'Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what\'s on',
+		'Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it',
+		'The small player has play/pause, mute and a fullscreen button, and catch-up still works from the guide',
+		'Turning the phone sideways plays video full screen like before — the small player is for holding the phone upright',
+		'The library title no longer runs off the edge on narrow phones — long names like trex — Movies now shorten with …',
+	];
 	List<String> get changelog2257 => [
 		'Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app',
 		'When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background',
@@ -9865,6 +9872,11 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2258.0' => 'Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what\'s on',
+			'about.changelog2258.1' => 'Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it',
+			'about.changelog2258.2' => 'The small player has play/pause, mute and a fullscreen button, and catch-up still works from the guide',
+			'about.changelog2258.3' => 'Turning the phone sideways plays video full screen like before — the small player is for holding the phone upright',
+			'about.changelog2258.4' => 'The library title no longer runs off the edge on narrow phones — long names like trex — Movies now shorten with …',
 			'about.changelog2257.0' => 'Your channels, movies and shows are now saved on the phone, so they load straight away instead of downloading every time you open the app',
 			'about.changelog2257.1' => 'When the saved copy gets old, the app shows it straight away and quietly fetches the new one in the background',
 			'about.changelog2257.2' => 'Refresh playlists in IPTV settings now clears the saved copy too, so you always get fresh data',
@@ -10103,13 +10115,13 @@ extension on Translations {
 			'explore.detail.favoritedBy' => ({required Object who}) => 'Favorited by ${who}',
 			'explore.detail.unairedEpisodes' => ({required Object n}) => '${n} not aired yet',
 			'explore.detail.recommendedByPercent' => ({required Object percent}) => 'Recommended by ${percent} of viewers',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.relatedTitles' => 'Related titles',
 			'explore.detail.background' => 'Background',
 			'explore.totalResults' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} result', other: '${n} results', ), 
 			'liveTv.title' => 'Live TV',
 			'liveTv.guide' => 'Guide',
-			_ => null,
-		} ?? switch (path) {
 			'liveTv.noChannels' => 'No channels available',
 			'liveTv.noDvr' => 'No DVR configured on any server',
 			'liveTv.serverUnavailable' => 'Live TV server is not available.',
@@ -10617,13 +10629,13 @@ extension on Translations {
 			'companionRemote.remote.tabSearch' => 'Search',
 			'companionRemote.remote.tabDownloads' => 'Downloads',
 			'companionRemote.remote.tabSettings' => 'Settings',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Previous',
 			'companionRemote.remote.playPause' => 'Play/Pause',
 			'companionRemote.remote.next' => 'Next',
 			'companionRemote.remote.seekBack' => 'Seek Back',
 			'companionRemote.remote.stop' => 'Stop',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.seekForward' => 'Seek Fwd',
 			'companionRemote.remote.volume' => 'Volume',
 			'companionRemote.remote.volumeDown' => 'Down',
