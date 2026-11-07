@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **344 files changed, 23111 insertions, 3147 deletions**
+- Scale of the fork vs base: **347 files changed, 24557 insertions, 3147 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-06 after the build #10 commit — was 333 files /
-  +20,097/−3,129 at build #9).
+  verified 2026-11-06 after the build #11 commit — was 344 files /
+  +23,111/−3,147 at build #10).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
