@@ -152,12 +152,16 @@ void main() {
       }
     });
 
-    test('DIAGNOSIS: a match in a late category is unreachable when per-category calls are slow', () async {
-      // 24 series categories; the only match sits in category 20 (batch
-      // 3 of 8); each per-category call takes 400ms of a 1000ms budget
-      // (sweep deadline 900ms). Batch 1 lands at 400ms, batch 2 at
-      // 800ms, batch 3 would land at 1200ms — past both deadlines — so
-      // the sweep returns [] although the match exists on the panel.
+    test('FIXED (build #13): a match in a late category is reachable when per-category calls are slow', () async {
+      // Was a DIAGNOSIS test (build #10): 24 series categories; the only
+      // match sits in category 20 (batch 3 of 8); each per-category call
+      // takes 400ms of a 1000ms budget (sweep deadline 900ms). Batch 1
+      // landed at 400ms, batch 2 at 800ms, batch 3 would land at 1200ms
+      // — past both deadlines — so the sweep returned [] although the
+      // match existed on the panel. Build #13 doubled the sweep/crawl
+      // batch to 16, so category 20 lands in batch 2 (800ms, inside the
+      // deadline) and the partial-row publication hands the match to the
+      // search as soon as the batch lands.
       final client = xtreamClient(
         api: _TimedSeriesFakeXtreamApi(
           categoryDelay: const Duration(milliseconds: 400),
@@ -169,7 +173,7 @@ void main() {
       IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
       try {
         final results = await client.searchItems('alpha');
-        expect(results.map((i) => i.title), ['Alpha Movie']);
+        expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
       } finally {
         IptvClient.searchSectionBudget = previousBudget;
         client.close();
@@ -195,14 +199,15 @@ void main() {
       }
     });
 
-    test('DIAGNOSIS: a slow category-names fetch plus slow per-category calls loses a batch-2 match', () async {
-      // The names fetch eats 600ms of a 1000ms budget before the sweep
-      // even starts; each per-category call takes 250ms, so batch 1
-      // lands at 850ms and batch 2 (holding the match) would land at
-      // 1100ms. Post-fix (build #10) the sweep deadline is measured from
-      // the SECTION start (900ms), so it — not the outer budget — is the
-      // binding constraint, and the unfiltered load in this fake never
-      // completes, so the race cannot rescue the match either.
+    test('FIXED (build #13): a slow category-names fetch plus slow per-category calls still finds a batch-2 match', () async {
+      // Was a DIAGNOSIS test (build #10): the names fetch eats 600ms of
+      // a 1000ms budget before the sweep even starts; each per-category
+      // call takes 250ms, so batch 1 landed at 850ms and batch 2
+      // (holding the match) would land at 1100ms — past the sweep
+      // deadline. Build #13 doubled the sweep/crawl batch to 16, so the
+      // match's category 9 lands in batch 1 (850ms, inside the 900ms
+      // deadline) and the partial-row publication hands it to the
+      // search as soon as the batch lands.
       final client = xtreamClient(
         api: _TimedSeriesFakeXtreamApi(
           namesDelay: const Duration(milliseconds: 600),
@@ -215,7 +220,7 @@ void main() {
       IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
       try {
         final results = await client.searchItems('alpha');
-        expect(results.map((i) => i.title), ['Alpha Movie']);
+        expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
       } finally {
         IptvClient.searchSectionBudget = previousBudget;
         client.close();

@@ -959,17 +959,29 @@ class MultiServerManager {
       _iptvByConnectionId[connection.id] = client;
       _clients[connection.id] = client;
 
+      // Warm the catalogs in the background (build #10 series, build #13
+      // VOD + live): the unfiltered loads take a while on a cold
+      // connection, and the first search/browse after app start would
+      // otherwise race them. Started BEFORE the health probe so the
+      // probe's round trip doesn't delay the warm-up. Unawaited on
+      // purpose — binding must not wait for 46k/199k/55k-row loads.
+      client.warmUpSeriesCatalog();
+      client.warmUpVodCatalog();
+      client.warmUpLiveCatalog();
+
       final health = await client.checkHealth();
       final healthy = health == HealthStatus.online;
       _iptvHealthByConnectionId[connection.id] = health;
       _applyHealth(ServerId(connection.id), health);
 
-      // Warm the series catalog in the background (build #10): the
-      // unfiltered load takes a while on a cold connection, and the
-      // first search after app start would otherwise race it. Starting
-      // it here means the second search finds a warm catalog. Unawaited
-      // on purpose — binding must not wait for a 46k-row load.
-      client.warmUpSeriesCatalog();
+      // A replacement (filter toggle, edit save) must tell the library
+      // tabs and the guide to reload (build #13): the rebind swaps the
+      // client underneath them, but nothing else fires — the library
+      // epoch only bumps on server pushes and the guide only reloads
+      // when the server-id set changes — so without this the toggled
+      // categories stay visible until a restart. A first bind needs no
+      // notification: the status emission drives the initial load.
+      if (oldClient != null) client.notifyCatalogRefreshed();
 
       appLogger.i(
         'Added IPTV server: ${client.serverName ?? connection.id}${healthy ? '' : ' (unhealthy)'}',

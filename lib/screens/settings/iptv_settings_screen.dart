@@ -511,6 +511,7 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
   bool _loading = false;
   bool _failed = false;
   IptvCatalogDiagnostics? _diagnostics;
+  IptvSearchDiagnostics? _lastSearch;
 
   Future<void> _load() async {
     if (_loading) return;
@@ -518,18 +519,56 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
       _loading = true;
       _failed = false;
     });
-    final client = IptvClient.forConnection(widget.connection);
+    // The LAST search readout lives on the BOUND client (the one that ran
+    // the searches), not a fresh one — resolve it, falling back to a
+    // fresh client when the connection isn't bound (a fresh client has
+    // no last-search record, so the row shows "no search yet").
+    IptvClient? liveClient;
+    try {
+      final bound = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (bound is IptvClient) liveClient = bound;
+    } catch (_) {
+      liveClient = null;
+    }
+    final client = liveClient ?? IptvClient.forConnection(widget.connection);
     try {
       final diagnostics = await client.seriesCatalogDiagnostics();
       if (!mounted) return;
-      setState(() => _diagnostics = diagnostics);
+      setState(() {
+        _diagnostics = diagnostics;
+        _lastSearch = client.lastSearchDiagnostics;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() => _failed = true);
     } finally {
-      client.close();
+      // Only close a client we created; the bound one belongs to the manager.
+      if (liveClient == null) client.close();
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// One section line of the last-search readout.
+  String _lastSearchSectionLine(String section, IptvSearchSectionDiagnostics s) {
+    if (s.skipped) return t.iptv.lastSearchSectionSkipped(section: section);
+    if (s.loadRows < 0) {
+      return t.iptv.lastSearchSectionLoadNeverLanded(
+        section: section,
+        returned: s.returned,
+        sweep: s.sweepMatches,
+        partial: s.partialMatches,
+        ms: s.ms,
+      );
+    }
+    return t.iptv.lastSearchSection(
+      section: section,
+      returned: s.returned,
+      loadRows: s.loadRows,
+      loadMs: s.loadMs,
+      sweep: s.sweepMatches,
+      partial: s.partialMatches,
+      ms: s.ms,
+    );
   }
 
   @override
@@ -602,6 +641,32 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
                                 ),
                                 style: theme.textTheme.bodySmall,
                               ),
+                              const SizedBox(height: 8),
+                              Text(t.iptv.lastSearchTitle, style: theme.textTheme.titleSmall),
+                              if (_lastSearch == null)
+                                Text(t.iptv.lastSearchNone, style: theme.textTheme.bodySmall)
+                              else ...[
+                                Text(
+                                  t.iptv.lastSearchQuery(
+                                    query: _lastSearch!.query,
+                                    totalMs: _lastSearch!.totalMs,
+                                    scoped: _lastSearch!.scoped ? t.iptv.lastSearchScopedSuffix : '',
+                                  ),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                                Text(
+                                  _lastSearchSectionLine('Movies', _lastSearch!.movies),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                                Text(
+                                  _lastSearchSectionLine('Series', _lastSearch!.series),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                                Text(
+                                  _lastSearchSectionLine('Live TV', _lastSearch!.live),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ],
                             ],
                           ),
           ),

@@ -39,39 +39,90 @@ class IptvInitial {
 
 /// The initial a CATEGORY name carries, or null when it carries none.
 ///
-/// The initial is the category's leading prefix token:
-/// - "|EN| UK SERIES" → "EN" (the pipe-first form is stripped first);
-/// - "EN - Movies", "AR | Channels", "ASIA: Shows" → "EN", "AR", "ASIA"
-///   (2–4 capital letters followed by a separator `-`, `|`, `:`, `/`);
-/// - a category that IS just an initial ("NF") → "NF";
-/// - "24/7 ACTION & ADVENTURE VIP" → "24/7" (a short leading token
-///   before the first space, when it is a tag rather than a word).
+/// The initial is found by scanning the category's pipe-separated
+/// segments (build #13): the region is often buried after a content-type
+/// prefix — "MOVIES | EN | Action", "SERIES | FR | Drama", "LIVE TV |
+/// AR | News" — so only reading a leading prefix missed it entirely.
+/// The LAST matching segment wins, so "TV | EN" yields EN, not TV.
+/// Matching is case-insensitive ("en | …" counts) and bracketed
+/// segments ("[EN] …") count; the result is canonical uppercase.
 ///
-/// A bare space is NOT a separator — "UK Series" carries no initial, and
-/// neither does a plain category name ("Action", "IT Crowd"). Those
-/// categories are ungrouped: always shown, toggled individually via the
-/// existing per-category switches.
+/// Per segment, in order:
+/// - a bracketed initial: "[EN] …" → "EN";
+/// - a segment that IS an initial: "EN", "NF" → itself;
+/// - a leading 2–4 letter token + separator: "EN - Movies", "AR |
+///   Channels", "ASIA: Shows" → "EN", "AR", "ASIA" (a bare space is NOT
+///   a separator — "UK Series" carries no initial);
+/// - a short tag token before the first space: "24/7 ACTION …" → "24/7".
+///
+/// A plain category name ("Action", "IT Crowd") carries no initial.
+/// Those categories are ungrouped: always shown, toggled individually
+/// via the existing per-category switches.
+/// The initial a category belongs to. The derivation is a pure function
+/// of the name, so results are memoized (build #13): the search and
+/// browse filter 199k rows through this function, and re-running the
+/// splits + regexes per row froze the UI for ~600ms. The cache is
+/// bounded by the number of distinct category names (833 on Matt's
+/// provider) and never invalidated — the derivation depends on no
+/// mutable state.
+final Map<String, String?> _categoryInitialCache = {};
+
 String? categoryInitial(String? categoryName) {
   if (categoryName == null) return null;
-  var s = categoryName.trim();
-  if (s.isEmpty) return null;
-  // Strip the pipe-first form: "|EN| UK SERIES" -> "EN| UK SERIES".
-  s = s.replaceFirst(RegExp(r'^\|+\s*'), '');
-  if (s.isEmpty) return null;
-  // 2–4 capital letters + separator: "EN| ...", "AR - ...", "ASIA: ...".
-  final prefixed = _categoryInitialPattern.firstMatch(s);
-  if (prefixed != null) return prefixed.group(1);
-  // A name that IS just an initial: a category called "NF".
-  if (_bareInitialPattern.hasMatch(s)) return s;
-  // Leading token before the first space, when it is a short tag rather
-  // than a word: "24/7 ACTION ..." -> "24/7".
-  final token = s.split(RegExp(r'\s+')).first;
-  if (token.length <= 4 && RegExp(r'[0-9/]').hasMatch(token)) return token;
-  return null;
+  if (_categoryInitialCache.containsKey(categoryName)) return _categoryInitialCache[categoryName];
+  final derived = _deriveCategoryInitial(categoryName);
+  _categoryInitialCache[categoryName] = derived;
+  return derived;
 }
 
-final RegExp _categoryInitialPattern = RegExp(r'^([A-Z]{2,4})\s*[-|:/]');
-final RegExp _bareInitialPattern = RegExp(r'^[A-Z]{2,4}$');
+String? _deriveCategoryInitial(String? categoryName) {
+  if (categoryName == null) return null;
+  final s = categoryName.trim();
+  if (s.isEmpty) return null;
+  String? found;
+  for (final rawSegment in s.split('|')) {
+    final segment = rawSegment.trim();
+    if (segment.isEmpty) continue;
+    // Bracketed initial: "[EN] Movies" or a "[FR]" segment.
+    final bracketed = _bracketedInitialPattern.firstMatch(segment);
+    if (bracketed != null && _isCodeCase(bracketed.group(1)!)) {
+      found = bracketed.group(1)!.toUpperCase();
+      continue;
+    }
+    // A segment that IS just an initial: "EN", "NF", "en". Title Case
+    // words ("News", "Kids") are content, not codes — they must not
+    // override an earlier region ("LIVE TV | AR | News" is AR).
+    final bare = _bareInitialPattern.firstMatch(segment);
+    if (bare != null && _isCodeCase(bare.group(1)!)) {
+      found = bare.group(1)!.toUpperCase();
+      continue;
+    }
+    // 2–4 letters + separator: "EN - Movies", "AR | Channels",
+    // "ASIA: Shows". Case-insensitive; canonical uppercase out. Same
+    // code-case rule: a Title Case prefix ("En - …") is a word.
+    final prefixed = _categoryInitialPattern.firstMatch(segment);
+    if (prefixed != null && _isCodeCase(prefixed.group(1)!)) {
+      found = prefixed.group(1)!.toUpperCase();
+      continue;
+    }
+    // Leading token before the first space, when it is a short tag
+    // rather than a word: "24/7 ACTION ..." -> "24/7".
+    final token = segment.split(RegExp(r'\s+')).first;
+    if (token.length <= 4 && RegExp(r'[0-9/]').hasMatch(token)) {
+      found = token.toUpperCase();
+    }
+  }
+  return found;
+}
+
+/// True when [token] looks like a code, not a word: all capitals ("EN",
+/// "FR") or all lowercase ("en", "fr"). Title Case ("News", "En") is a
+/// word and never an initial.
+bool _isCodeCase(String token) => token == token.toUpperCase() || token == token.toLowerCase();
+
+final RegExp _bracketedInitialPattern = RegExp(r'^\[([A-Za-z]{2,4})\]');
+final RegExp _categoryInitialPattern = RegExp(r'^([A-Za-z]{2,4})\s*[-:/]', caseSensitive: false);
+final RegExp _bareInitialPattern = RegExp(r'^([A-Za-z]{2,4})$');
 
 /// Counts of each initial across [categoryNames].
 Map<String, int> countCategoryInitials(Iterable<String?> categoryNames) {

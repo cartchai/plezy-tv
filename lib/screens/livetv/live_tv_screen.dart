@@ -1,5 +1,7 @@
 import 'dart:async';
 import '../../media/ids.dart';
+import '../../media/library_change_event.dart';
+import '../../utils/library_content_notifier.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -92,6 +94,13 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   Set<String> _knownLiveTvServerIds = {};
   bool _reloadAfterLoad = false;
 
+  /// Catalog changes (a filter toggle rebinding an IPTV client, a
+  /// background refresh landing) reload the guide's channels (build
+  /// #13): before this the guide only reloaded when the server-id SET
+  /// changed, so a rebind with the same ids left toggled categories
+  /// visible until a restart.
+  StreamSubscription<LibraryChangeEvent>? _catalogSubscription;
+
   // Favorites
   bool _showFavoritesOnly = false;
   Set<String> _favoriteKeys = {};
@@ -181,6 +190,20 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     _multiServer = provider;
     _knownLiveTvServerIds = provider.liveTvServers.map((s) => s.serverId).toSet();
     provider.addListener(_onLiveTvServersChanged);
+    _catalogSubscription = LibraryContentNotifier().stream.listen((event) {
+      // Only our own servers' catalogs matter; other servers' refreshes
+      // must not reload this guide (and a rebind of one of ours is
+      // exactly what this is for).
+      if (!_multiServer.liveTvServers.any((s) => s.serverId == event.serverId)) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_channelsLoadFuture != null) {
+          _reloadAfterLoad = true;
+        } else {
+          unawaited(_loadChannels());
+        }
+      });
+    });
     final initialTabs = _tabStateFor(provider);
     _visibleTabs = initialTabs.tabs;
     _canProcessRules = initialTabs.canProcessRules;
@@ -190,6 +213,7 @@ class _LiveTvScreenState extends State<LiveTvScreen>
 
   @override
   void dispose() {
+    _catalogSubscription?.cancel();
     _multiServer.removeListener(_onLiveTvServersChanged);
     _guideTabFocusNode.dispose();
     _whatsOnTabFocusNode.dispose();

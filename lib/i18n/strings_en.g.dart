@@ -3679,6 +3679,15 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2259 => [
+		'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
+		'TV show search is fixed: it no longer gives up while the show list is still loading',
+		'Movie and TV show lists now load from the phone first, so browsing feels quicker after the first open',
+		'Movies and TV libraries always show up now, even if every category in them is turned off',
+		'Turning off a country or region now actually hides those categories everywhere — in the lists, the guide and search',
+		'The small Live TV player shows video again, not just sound',
+		'Settings now shows what your last search found, and where it came from, so a search that finds nothing can be figured out',
+	];
 	List<String> get changelog2258 => [
 		'Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what\'s on',
 		'Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it',
@@ -6603,6 +6612,27 @@ class Translations$iptv$en {
 
 	/// en: 'Categories turned off: ${count}'
 	String catalogDiagnosticsDisabledCategories({required Object count}) => 'Categories turned off: ${count}';
+
+	/// en: 'Last search'
+	String get lastSearchTitle => 'Last search';
+
+	/// en: 'No search yet — search for something, then check back here.'
+	String get lastSearchNone => 'No search yet — search for something, then check back here.';
+
+	/// en: '“${query}” · ${totalMs} ms${scoped}'
+	String lastSearchQuery({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}';
+
+	/// en: ' · scoped'
+	String get lastSearchScopedSuffix => ' · scoped';
+
+	/// en: '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms'
+	String lastSearchSection({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms';
+
+	/// en: '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms'
+	String lastSearchSectionLoadNeverLanded({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms';
+
+	/// en: '${section}: skipped'
+	String lastSearchSectionSkipped({required Object section}) => '${section}: skipped';
 }
 
 // Path: appIcon.names
@@ -9872,6 +9902,13 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2259.0' => 'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
+			'about.changelog2259.1' => 'TV show search is fixed: it no longer gives up while the show list is still loading',
+			'about.changelog2259.2' => 'Movie and TV show lists now load from the phone first, so browsing feels quicker after the first open',
+			'about.changelog2259.3' => 'Movies and TV libraries always show up now, even if every category in them is turned off',
+			'about.changelog2259.4' => 'Turning off a country or region now actually hides those categories everywhere — in the lists, the guide and search',
+			'about.changelog2259.5' => 'The small Live TV player shows video again, not just sound',
+			'about.changelog2259.6' => 'Settings now shows what your last search found, and where it came from, so a search that finds nothing can be figured out',
 			'about.changelog2258.0' => 'Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what\'s on',
 			'about.changelog2258.1' => 'Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it',
 			'about.changelog2258.2' => 'The small player has play/pause, mute and a fullscreen button, and catch-up still works from the guide',
@@ -10108,6 +10145,8 @@ extension on Translations {
 			'explore.detail.watchTrailer' => 'Watch trailer',
 			'explore.detail.openOn' => ({required Object site}) => 'Open on ${site}',
 			'explore.detail.crew' => 'Crew',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.ratings' => 'Ratings',
 			'explore.detail.schedule' => 'Schedule',
 			'explore.detail.recommendedByUsers' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Recommended by ${n} user', other: 'Recommended by ${n} users', ), 
@@ -10115,8 +10154,6 @@ extension on Translations {
 			'explore.detail.favoritedBy' => ({required Object who}) => 'Favorited by ${who}',
 			'explore.detail.unairedEpisodes' => ({required Object n}) => '${n} not aired yet',
 			'explore.detail.recommendedByPercent' => ({required Object percent}) => 'Recommended by ${percent} of viewers',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.relatedTitles' => 'Related titles',
 			'explore.detail.background' => 'Background',
 			'explore.totalResults' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} result', other: '${n} results', ), 
@@ -10622,6 +10659,8 @@ extension on Translations {
 			'companionRemote.remote.tabRemote' => 'Remote',
 			'companionRemote.remote.tabPlay' => 'Play',
 			'companionRemote.remote.tabMore' => 'More',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Tab Navigation',
 			'companionRemote.remote.tabDiscover' => 'Discover',
@@ -10629,8 +10668,6 @@ extension on Translations {
 			'companionRemote.remote.tabSearch' => 'Search',
 			'companionRemote.remote.tabDownloads' => 'Downloads',
 			'companionRemote.remote.tabSettings' => 'Settings',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.previous' => 'Previous',
 			'companionRemote.remote.playPause' => 'Play/Pause',
 			'companionRemote.remote.next' => 'Next',
@@ -11080,6 +11117,13 @@ extension on Translations {
 			'iptv.catalogDiagnosticsPerCategory' => ({required Object category, required Object count}) => 'In ${category}: ${count}',
 			'iptv.catalogDiagnosticsDisabledInitials' => ({required Object count}) => 'Category initials turned off: ${count}',
 			'iptv.catalogDiagnosticsDisabledCategories' => ({required Object count}) => 'Categories turned off: ${count}',
+			'iptv.lastSearchTitle' => 'Last search',
+			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
+			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',
+			'iptv.lastSearchScopedSuffix' => ' · scoped',
+			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms',
+			'iptv.lastSearchSectionLoadNeverLanded' => ({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms',
+			'iptv.lastSearchSectionSkipped' => ({required Object section}) => '${section}: skipped',
 			_ => null,
 		};
 	}

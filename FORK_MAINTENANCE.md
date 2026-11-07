@@ -393,6 +393,60 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   broadcast-cancel fake-async finding, the theme-platform finding,
   phone verification list).
 
+### 11. Build #13 — Search fixes (live + series), missing VOD libraries, black mini-player, category initials, cache/fluidity (v2.25.9)
+- New files: `IPTV_BUILD13_NOTES.md` (diagnosis, root causes with proof,
+  measured cache/fluidity timings, phone verification list),
+  `test/services/iptv/iptv_build13_diagnosis_test.dart` (9 failing-first
+  reproduction tests — cold crawl trap, live search, diagnostics),
+  `test/services/iptv/iptv_build13_initials_test.dart` (7 tests),
+  `test/services/iptv/iptv_build13_cache_benchmark_test.dart` (6 tests,
+  Trex-scale timings + jank ticker),
+  `test/services/iptv/iptv_build13_browse_benchmark_test.dart` (2 tests,
+  paged browse + hub at Trex scale),
+  `test/screens/iptv_build13_search_screen_test.dart` (3 screen tests),
+  `test/screens/libraries/iptv_build13_libraries_screen_test.dart` (4
+  screen tests, 360×800 Fold 7 cover viewport),
+  `test/mpv/video_first_frame_test.dart` (3 widget tests).
+- Touched upstream files: `lib/media/iptv_client.dart` (Xtream live
+  search leg `_searchLive` + `_liveChannelItem` + `fetchItem` `'live'`
+  case; partial-row publication + sweep-skips-crawled + batch 16 +
+  non-destructive section timeout; `seriesCatalogDiagnostics` probes
+  directly; VOD+live warm-ups before `checkHealth`;
+  `fetchLibraries` always lists the Xtream Movies/Series libraries —
+  `_allCategoriesDisabled` probe deleted; raw-body disk writes
+  `_writeCatalogRows` + `rawBody` on the background refresh; row-level
+  paging `_filteredVodRows`/`_filteredSeriesRows` +
+  `_vodPageItems`/`_seriesPageItems` (paged browse, hubs,
+  `fetchMoreHubItemsPage`) + `totalCount` on `_recommendedHub`;
+  allocation-free matching via one case-insensitive RegExp per call;
+  `lastSearchDiagnostics` + `_SectionTrace`/`IptvSearchDiagnostics`),
+  `lib/services/iptv/xtream_api.dart` (`lastLiveStreamsBody` /
+  `lastVodStreamsBody` / `lastSeriesBody` — unfiltered calls only),
+  `lib/services/iptv/iptv_catalog_cache.dart` (directory-create race on
+  concurrent writes), `lib/utils/iptv_initials.dart` (buried/lowercase/
+  bracket derivation, code-case rule, memoization),
+  `lib/services/multi_server_manager.dart`
+  (`notifyCatalogRefreshed()` on client replace — was private),
+  `lib/screens/livetv/live_tv_screen.dart` (guide subscribes to
+  `LibraryContentNotifier`), `lib/mpv/video.dart` (latched
+  `hasRenderedFrame` at `initState` / player change),
+  `lib/screens/settings/iptv_settings_screen.dart` ("Last search"
+  diagnostics row), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (`changelog2259`, last-search strings),
+  `lib/screens/settings/about_screen.dart` (changelog entry first),
+  `pubspec.yaml` (version `2.25.9+166`).
+- Touched test files: `test/services/iptv/iptv_build10_diagnosis_test.dart`
+  (2 tests DIAGNOSIS → FIXED — the late-category matches are now found),
+  `test/services/iptv/iptv_build13_diagnosis_test.dart` (B1/B2 margins
+  widened: 120 categories / match 110 / 80ms — the post-fix crawl sat
+  exactly on the 1000ms budget and flaked under suite load).
+- NOT touched: EPG behaviour, the mini-player controller/tuning, the
+  in-app updater, TV/tablet layouts, `fetchMoreHubItems` (no limit —
+  still builds the full item list once per hub-detail expansion; the hub
+  detail's section filter runs over it — row-level section filter is
+  future work), image loading (still not cached).
+- Progress notes: `IPTV_BUILD13_NOTES.md`.
+
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
 - libass module keeps `com.edde746.plezy.libass` (its JNI names match).

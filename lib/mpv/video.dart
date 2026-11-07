@@ -56,7 +56,17 @@ class _VideoState extends State<Video> {
   @override
   void initState() {
     super.initState();
-    _hasFirstFrame = widget.hasFirstFrame?.value ?? false;
+    // The player's latched state is the source of truth at mount (build
+    // #13): without an external notifier the first frame is learned from
+    // the playbackRestart broadcast, and an event fired BEFORE this
+    // widget subscribed is missed forever — the Live TV mini-player
+    // inserts its Video only after tune() awaits open(), so the restart
+    // that fires during open() is missed and the black cover stays up
+    // while audio plays. The player latches hasRenderedFrame when the
+    // restart is processed, so reading it here catches the already-
+    // rendered case; the subscription below still catches a restart
+    // that arrives after mount.
+    _hasFirstFrame = widget.hasFirstFrame?.value ?? widget.player.state.hasRenderedFrame;
     widget.hasFirstFrame?.addListener(_syncExternalFirstFrame);
     _listenForPlaybackRestart();
   }
@@ -73,6 +83,11 @@ class _VideoState extends State<Video> {
     if (oldWidget.player != widget.player) {
       _listenForPlaybackRestart();
       _syncExternalFirstFrame();
+      // A replacement player may already have rendered (same missed-
+      // event shape as mount): read its latched state too.
+      if (widget.hasFirstFrame == null) {
+        _setHasFirstFrame(widget.player.state.hasRenderedFrame);
+      }
       // The cache describes the old player's native surface. Keeping it would
       // let the next frame short-circuit as "geometry unchanged", and the
       // replacement surface stays sizeless — invisible, with no Texture

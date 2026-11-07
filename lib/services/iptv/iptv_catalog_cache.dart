@@ -104,7 +104,15 @@ class IptvCatalogDiskCache {
     if (debugDisableDisk) return;
     try {
       final file = await _file(connectionId, dataset);
-      await file.parent.create(recursive: true);
+      // Concurrent writes for different datasets race this create
+      // (build #13): two recursive creates for the same new directory
+      // can throw PathNotFoundException on the loser. A create that
+      // fails only because the directory now exists is not an error.
+      try {
+        await file.parent.create(recursive: true);
+      } on FileSystemException catch (_) {
+        if (!await file.parent.exists()) rethrow;
+      }
       await file.writeAsString(body);
     } catch (e) {
       appLogger.w('IPTV catalog cache write failed for $dataset', error: e);

@@ -33,6 +33,22 @@ class XtreamApi {
 
   void close() => _http.close();
 
+  /// Raw response body of the most recent UNFILTERED catalog call, per
+  /// dataset (build #13). The client caches this body verbatim on disk —
+  /// it is exactly what the panel sent, so the disk cache re-parses
+  /// through the same parsers — instead of re-encoding the parsed rows
+  /// back to JSON on the UI isolate (jsonEncode of 199k VOD rows froze
+  /// the UI for ~1.3s on first launch; benchmark
+  /// `iptv_build13_cache_benchmark_test.dart`). Null when the last call
+  /// was per-category (a per-category body is never the full catalog),
+  /// when the call failed, or when a test fake overrides the getter
+  /// without setting it — the client falls back to the re-encode write
+  /// then. Read synchronously right after the awaited call returns; no
+  /// other call can interleave on this isolate in between.
+  String? lastLiveStreamsBody;
+  String? lastVodStreamsBody;
+  String? lastSeriesBody;
+
   Uri _playerApiUri({String? action, Map<String, String>? extra}) {
     return Uri.parse('$serverUrl/player_api.php').replace(
       queryParameters: {
@@ -148,6 +164,7 @@ class XtreamApi {
       _playerApiUri(action: 'get_live_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
     );
+    lastLiveStreamsBody = categoryId == null ? body : null;
     return compute(_parseLiveStreams, body);
   }
 
@@ -159,6 +176,7 @@ class XtreamApi {
       _playerApiUri(action: 'get_vod_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
     );
+    lastVodStreamsBody = categoryId == null ? body : null;
     return compute(_parseVodStreams, body);
   }
 
@@ -167,6 +185,7 @@ class XtreamApi {
       _playerApiUri(action: 'get_series', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
     );
+    lastSeriesBody = categoryId == null ? body : null;
     return compute(_parseSeries, body);
   }
 

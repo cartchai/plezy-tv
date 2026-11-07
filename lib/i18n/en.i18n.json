@@ -1414,6 +1414,15 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2259": [
+      "Live TV channels can be searched now, just like movies and TV shows — searching finds channels too",
+      "TV show search is fixed: it no longer gives up while the show list is still loading",
+      "Movie and TV show lists now load from the phone first, so browsing feels quicker after the first open",
+      "Movies and TV libraries always show up now, even if every category in them is turned off",
+      "Turning off a country or region now actually hides those categories everywhere — in the lists, the guide and search",
+      "The small Live TV player shows video again, not just sound",
+      "Settings now shows what your last search found, and where it came from, so a search that finds nothing can be figured out"
+    ],
     "changelog2258": [
       "Live TV now plays in a small player at the top of the guide on your phone, so you can watch while you browse what's on",
       "Tapping another channel in the guide switches the small player to that channel — scrolling the guide never restarts it",
@@ -2775,6 +2784,13 @@
     "catalogDiagnosticsCategoryCount": "Series categories: ${count}",
     "catalogDiagnosticsPerCategory": "In ${category}: ${count}",
     "catalogDiagnosticsDisabledInitials": "Category initials turned off: ${count}",
-    "catalogDiagnosticsDisabledCategories": "Categories turned off: ${count}"
+    "catalogDiagnosticsDisabledCategories": "Categories turned off: ${count}",
+    "lastSearchTitle": "Last search",
+    "lastSearchNone": "No search yet — search for something, then check back here.",
+    "lastSearchQuery": "“${query}” · ${totalMs} ms${scoped}",
+    "lastSearchScopedSuffix": " · scoped",
+    "lastSearchSection": "${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms",
+    "lastSearchSectionLoadNeverLanded": "${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms",
+    "lastSearchSectionSkipped": "${section}: skipped"
   }
 }
