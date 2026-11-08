@@ -23,6 +23,8 @@ SnackBar _buildSnackBar(
   required Color? backgroundColor,
   required Duration duration,
   bool? dismissible,
+  String? actionLabel,
+  VoidCallback? onAction,
 }) {
   final isDesktop = PlatformDetector.isDesktopOS();
   final tapToDismiss = dismissible ?? isDesktop;
@@ -44,6 +46,9 @@ SnackBar _buildSnackBar(
     behavior: isDesktop ? SnackBarBehavior.floating : null,
     width: isDesktop ? _desktopSnackBarWidth(context) : null,
     padding: tapToDismiss ? EdgeInsets.zero : null,
+    action: actionLabel == null || onAction == null
+        ? null
+        : SnackBarAction(label: actionLabel, onPressed: onAction),
   );
 }
 
@@ -72,6 +77,8 @@ void showSnackBar(
   SnackBarType type = SnackBarType.info,
   Duration? duration,
   bool? dismissible,
+  String? actionLabel,
+  VoidCallback? onAction,
 }) {
   if (!context.mounted) return;
 
@@ -85,6 +92,8 @@ void showSnackBar(
       backgroundColor: backgroundColor,
       duration: duration ?? defaultDuration,
       dismissible: dismissible,
+      actionLabel: actionLabel,
+      onAction: onAction,
     ),
   );
 }

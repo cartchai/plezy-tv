@@ -2229,6 +2229,19 @@ class _MainScreenState extends State<MainScreen>
 
   Widget _buildPortraitShell(BuildContext context) {
     return Scaffold(
+      // Build #17: transparent while the Live TV tab is showing, so the
+      // mini-player's video hole can reveal the native surface below the
+      // Flutter view. A Scaffold paints its backgroundColor opaque over
+      // the whole screen — with the theme bg here, the hole stayed black
+      // no matter what the mini-player did (the black Container was only
+      // the innermost cover). The background behind it is the Android
+      // window, which PlezyActivity syncs to the theme mode (dark
+      // #0E0F12, OLED black, light #F7F7F8), so the tab looks the same;
+      // tinted palettes (ember, glacier) show the dark window shade in
+      // unpainted gaps on this tab only. Every other tab keeps the theme
+      // background. The Live TV screen's own Scaffold is transparent
+      // too — both layers must be clear for the hole to show video.
+      backgroundColor: _currentTab == NavigationTabId.liveTv ? Colors.transparent : null,
       body: _buildTickerAwareStack(),
       bottomNavigationBar: Column(
         key: _navBarKey,

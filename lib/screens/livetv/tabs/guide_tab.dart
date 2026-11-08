@@ -30,6 +30,7 @@ import '../live_tv_actions_mixin.dart';
 import '../live_tv_mini_player.dart';
 import '../live_tv_refresh_mixin.dart';
 import '../live_tv_server_iteration.dart';
+import '../guide_category.dart';
 import '../../video_player/live_tv_session_args.dart';
 import '../../../utils/formatters.dart';
 import '../../../utils/live_tv_grouping.dart';
@@ -47,12 +48,26 @@ class GuideTab extends StatefulWidget {
   final List<LiveTvChannel> channels;
   final bool Function(LiveTvChannel channel)? isFavoriteChannel;
   final void Function(LiveTvChannel)? onToggleFavorite;
+
+  /// Hide a channel (build #17, §9): the long-press menu's "Hide channel"
+  /// item calls this; the screen persists it and drops the row. IPTV
+  /// channels only — Plex/Jellyfin/Emby have no hide store, so the menu
+  /// omits the item for them.
+  final void Function(LiveTvChannel)? onHideChannel;
   final VoidCallback? onNavigateUp;
   final VoidCallback? onBack;
 
   /// Show the catch-up badge on channels that offer catch-up TV
   /// ([LiveTvChannel.hasCatchUp]). Wired to the IPTV settings toggle.
   final bool showCatchUpBadge;
+
+  /// Guide category picker (build #17, §11): the visible live TV
+  /// categories on the current source scope, the selected one, and the
+  /// callback that applies the selection. An empty list (Plex-only
+  /// lineups, or categories not loaded yet) hides the picker.
+  final List<GuideCategoryEntry> guideCategories;
+  final GuideCategoryEntry? selectedGuideCategory;
+  final void Function(GuideCategoryEntry? entry)? onSelectGuideCategory;
 
   /// Test seams for the portrait mini-player (build #12): a fake player
   /// factory, a placeholder video surface, and a fullscreen stub. The
@@ -68,9 +83,13 @@ class GuideTab extends StatefulWidget {
     required this.channels,
     this.isFavoriteChannel,
     this.onToggleFavorite,
+    this.onHideChannel,
     this.onNavigateUp,
     this.onBack,
     this.showCatchUpBadge = true,
+    this.guideCategories = const [],
+    this.selectedGuideCategory,
+    this.onSelectGuideCategory,
     this.debugPlayerFactory,
     this.debugVideoBuilder,
     this.debugFullscreenHandler,
@@ -105,6 +124,19 @@ class GuideTab extends StatefulWidget {
 }
 
 enum _GuideZone { timeNav, grid }
+
+/// One item in the guide channel long-press menu (build #17, §9): a stable
+/// [id], a label, an icon, and the action that runs after the menu closes.
+/// The menu is built from a list of these so more items slot in later
+/// without touching the menu code.
+class ChannelMenuItem {
+  final String id;
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  const ChannelMenuItem({required this.id, required this.label, required this.icon, required this.onPressed});
+}
 
 typedef _GuideFocusSnapshot = ({
   bool hasFocus,
@@ -173,12 +205,19 @@ class GuideTabState extends State<GuideTab>
   /// the full player exactly as before. Catch-up keeps its archive start
   /// on both paths — the mini-player opens the timeshift URL, the full
   /// player navigates with the same catch-up epoch as today.
-  Future<void> _tuneFromGuide(LiveTvChannel channel, {int? catchUpStartEpoch}) async {
+  /// [catchUpProgrammeTitle] names the programme for the
+  /// missing-recording card (build #17).
+  Future<void> _tuneFromGuide(
+    LiveTvChannel channel, {
+    int? catchUpStartEpoch,
+    String? catchUpProgrammeTitle,
+  }) async {
     if (_miniPlayerEnabled) {
       await _miniPlayer.tune(
         channel: channel,
         multiServer: context.read<MultiServerProvider>(),
         catchUpStartEpoch: catchUpStartEpoch,
+        catchUpProgrammeTitle: catchUpProgrammeTitle,
       );
       return;
     }
@@ -220,6 +259,14 @@ class GuideTabState extends State<GuideTab>
   Future<void> _resumeMiniPlayer() async {
     if (!mounted) return;
     await _miniPlayer.retry(multiServer: context.read<MultiServerProvider>());
+  }
+
+  /// Missing-recording card's Watch live (build #17): the same channel,
+  /// live — the panel has no recording for the programme, but the live
+  /// stream works.
+  Future<void> _watchLiveMiniPlayer() async {
+    if (!mounted) return;
+    await _miniPlayer.watchLive(multiServer: context.read<MultiServerProvider>());
   }
 
   /// Title of the programme currently airing on [channel], from the
@@ -953,6 +1000,17 @@ class GuideTabState extends State<GuideTab>
     final gridEndEpoch = _gridEnd.millisecondsSinceEpoch ~/ 1000;
     if (gridEndEpoch <= gridStartEpoch) return real;
 
+    // A channel whose fetch finished with no programmes at all — neither
+    // the feed nor get_short_epg had anything — says so once, for the
+    // whole window (build #17, §10), instead of an hour of "No
+    // information available" blocks, which implied the app failed to load
+    // rather than the source having no data. (A channel whose fetch
+    // FAILED never reaches this list: the row builder short-circuits it
+    // to the retry row first.)
+    if (real.isEmpty) {
+      return [_noGuideDataPlaceholder(channel, gridStartEpoch, gridEndEpoch)];
+    }
+
     // Covered intervals, clipped to the window and merged.
     final covered = <(int, int)>[];
     for (final program in real) {
@@ -1005,6 +1063,23 @@ class GuideTabState extends State<GuideTab>
       if (cursor >= end) return;
     }
     if (cursor < end) out.add(_hourPlaceholder(channel, cursor, end));
+  }
+
+  /// One "No guide data for this channel" block, spanning the whole
+  /// window (build #17, §10). Same shape as [_hourPlaceholder] — a real
+  /// program entry marked [LiveTvProgram.isPlaceholder], so the grid
+  /// renders it muted and the sheet offers only the slot actions.
+  LiveTvProgram _noGuideDataPlaceholder(LiveTvChannel channel, int beginsAt, int endsAt) {
+    return LiveTvProgram(
+      key: 'no-guide-data:${channel.key}:$beginsAt',
+      title: t.liveTv.noGuideDataForChannel,
+      beginsAt: beginsAt,
+      endsAt: endsAt,
+      channelIdentifier: channel.key,
+      serverId: channel.serverId,
+      serverName: channel.serverName,
+      isPlaceholder: true,
+    );
   }
 
   /// One "No information available" block. It is a real program entry (same
@@ -1223,12 +1298,79 @@ class GuideTabState extends State<GuideTab>
     return widget.channels[_gridChannelIndex];
   }
 
-  /// TV SELECT on a channel cell: a short press tunes and a hold toggles the
-  /// favorite, the same split as a tap and a long press on the cell.
+  /// One item in the guide channel long-press menu (build #17, §9). The
+  /// menu is built from a list of these, so more items (e.g. "Channel
+  /// info", "Record this channel") slot in without touching the menu code.
+  /// [id] is stable for tests; [onPressed] runs after the menu closes.
+  List<ChannelMenuItem> _channelMenuItems(LiveTvChannel channel) {
+    final items = <ChannelMenuItem>[];
+    // Hide is IPTV-only: the hide store lives on IptvLiveTvSupport, per
+    // IPTV connection. Plex/Jellyfin/Emby channels get the favorite item
+    // only.
+    if (widget.onHideChannel != null && _iptvSupportFor(channel) != null) {
+      items.add(
+        ChannelMenuItem(
+          id: 'hide',
+          label: t.liveTv.hideChannel,
+          icon: Symbols.visibility_off_rounded,
+          onPressed: () => widget.onHideChannel!(channel),
+        ),
+      );
+    }
+    if (widget.onToggleFavorite != null) {
+      final isFavorite = widget.isFavoriteChannel?.call(channel) ?? false;
+      items.add(
+        ChannelMenuItem(
+          id: isFavorite ? 'remove-favorite' : 'add-favorite',
+          label: isFavorite ? t.mediaMenu.removeFromFavorites : t.mediaMenu.addToFavorites,
+          icon: isFavorite ? Symbols.star_rounded : Symbols.star_outline_rounded,
+          onPressed: () => widget.onToggleFavorite!(channel),
+        ),
+      );
+    }
+    return items;
+  }
+
+  /// The guide channel long-press menu (build #17, §9): a dropdown
+  /// anchored to the channel cell (or the screen centre for keyboard
+  /// triggers, which have no cell rect). Long-press opens the menu — it
+  /// never toggles anything directly.
+  Future<void> _showChannelMenu(LiveTvChannel channel, {BuildContext? anchorContext}) async {
+    final items = _channelMenuItems(channel);
+    if (items.isEmpty) return;
+    final size = MediaQuery.sizeOf(context);
+    var anchor = Offset.zero & size;
+    final box = anchorContext?.findRenderObject() as RenderBox?;
+    if (box != null && box.hasSize) {
+      anchor = box.localToGlobal(Offset.zero) & box.size;
+    }
+    final selected = await showMenu<ChannelMenuItem>(
+      context: context,
+      position: RelativeRect.fromRect(anchor, Offset.zero & size),
+      items: [
+        for (final item in items)
+          PopupMenuItem<ChannelMenuItem>(
+            value: item,
+            child: Row(
+              mainAxisSize: .min,
+              children: [
+                Icon(item.icon, size: 20),
+                const SizedBox(width: 12),
+                Flexible(child: Text(item.label)),
+              ],
+            ),
+          ),
+      ],
+    );
+    selected?.onPressed();
+  }
+
+  /// TV SELECT on a channel cell: a short press tunes and a hold opens the
+  /// channel menu, the same split as a tap and a long press on the cell.
   KeyEventResult _handleFocusedChannelSelectKey(KeyEvent event) {
-    final onToggleFavorite = widget.onToggleFavorite;
     final channel = _focusedChannelTarget();
-    if (onToggleFavorite == null || channel == null) return KeyEventResult.ignored;
+    if (channel == null) return KeyEventResult.ignored;
+    if (widget.onToggleFavorite == null && widget.onHideChannel == null) return KeyEventResult.ignored;
 
     final ownerChannelIndex = _gridChannelIndex;
     return _selectLongPressController.handleKeyEvent(
@@ -1237,19 +1379,20 @@ class GuideTabState extends State<GuideTab>
       onShortPress: () => tuneChannel(channel),
       onLongPress: () {
         _selectLongPressController.reset();
-        onToggleFavorite(channel);
+        unawaited(_showChannelMenu(channel));
       },
     );
   }
 
-  /// The context-menu key (gamepad X, keyboard Menu) toggles the focused
-  /// channel's favorite. Down only, so a held key cannot flip it back and forth.
+  /// The context-menu key (gamepad X, keyboard Menu) opens the focused
+  /// channel's menu. Down only, so a held key cannot re-open it
+  /// repeatedly.
   KeyEventResult _handleFocusedChannelContextMenuKey(KeyEvent event) {
     if (!event.logicalKey.isContextMenuKey) return KeyEventResult.ignored;
-    final onToggleFavorite = widget.onToggleFavorite;
     final channel = _focusedChannelTarget();
-    if (onToggleFavorite == null || channel == null) return KeyEventResult.ignored;
-    if (event is KeyDownEvent) onToggleFavorite(channel);
+    if (channel == null) return KeyEventResult.ignored;
+    if (widget.onToggleFavorite == null && widget.onHideChannel == null) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) unawaited(_showChannelMenu(channel));
     return KeyEventResult.handled;
   }
 
@@ -1592,8 +1735,10 @@ class GuideTabState extends State<GuideTab>
             nowPlayingTitle: _nowPlayingTitleFor(_miniPlayer.channel),
             onFullscreen: _openMiniPlayerFullscreen,
             onResume: _resumeMiniPlayer,
+            onWatchLive: _watchLiveMiniPlayer,
             videoBuilder: widget.debugVideoBuilder,
           ),
+        _buildCategoryPicker(),
         _buildTimeNavigation(theme),
         // Subtle EPG loading indicator (Task B): a thin bar under the time
         // navigation, visible only while a visible IPTV channel's guide is
@@ -1874,6 +2019,46 @@ class GuideTabState extends State<GuideTab>
     );
   }
 
+  /// Guide category picker (build #17, §11): a horizontal chip row above
+  /// the time navigation — "All categories" plus one chip per visible
+  /// live TV category on the current source scope. Hidden categories
+  /// never appear (the entries come from
+  /// [IptvClient.visibleLiveCategories], the same hidden rule as the
+  /// guide rows). Switching is an in-memory filter over the loaded rows
+  /// — no network call, no reload — so the rows appear immediately.
+  /// Empty when the lineup has no IPTV categories (Plex-only) or the
+  /// entries have not loaded yet.
+  Widget _buildCategoryPicker() {
+    final categories = widget.guideCategories;
+    if (categories.isEmpty) return const SizedBox.shrink();
+    final selected = widget.selectedGuideCategory;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Row(
+          children: [
+            ChoiceChip(
+              label: Text(t.liveTv.allCategories),
+              selected: selected == null,
+              showCheckmark: false,
+              onSelected: (_) => widget.onSelectGuideCategory?.call(null),
+            ),
+            for (final entry in categories) ...[
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: Text(entry.label),
+                selected: selected?.serverId == entry.serverId && selected?.categoryId == entry.categoryId,
+                showCheckmark: false,
+                onSelected: (_) => widget.onSelectGuideCategory?.call(entry),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTimeNavigation(ThemeData theme) {
     final timeLabel = formatClockTime(_gridStart, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context));
     final dayLabel = _dayLabel(_gridStart);
@@ -2026,7 +2211,12 @@ class GuideTabState extends State<GuideTab>
           channel: channel,
           theme: theme,
           onTap: () => _tuneFromGuide(channel),
-          onLongPress: widget.onToggleFavorite != null ? () => widget.onToggleFavorite!(channel) : null,
+          // Long-press opens the channel menu (build #17, §9) — it never
+          // toggles anything directly. The menu is anchored to the cell
+          // via the builder context.
+          onLongPress: widget.onToggleFavorite != null || widget.onHideChannel != null
+              ? () => unawaited(_showChannelMenu(channel, anchorContext: context))
+              : null,
           isFocused: isFocused,
           isFavorite: widget.isFavoriteChannel?.call(channel) ?? false,
           showCatchUpBadge: widget.showCatchUpBadge,
@@ -2331,7 +2521,7 @@ class GuideTabState extends State<GuideTab>
   Future<void> _catchUpToProgram(LiveTvChannel channel, LiveTvProgram program) async {
     final beginsAt = program.beginsAt;
     if (beginsAt == null) return;
-    await _tuneFromGuide(channel, catchUpStartEpoch: beginsAt);
+    await _tuneFromGuide(channel, catchUpStartEpoch: beginsAt, catchUpProgrammeTitle: program.title);
   }
 }
 

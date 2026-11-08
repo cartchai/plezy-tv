@@ -8,6 +8,7 @@ import '../../media/live_tv_support.dart';
 import '../../models/livetv_channel.dart';
 import '../../mpv/models.dart';
 import '../../mpv/player/player.dart';
+import '../../mpv/player/video_rect_support.dart';
 import '../../mpv/video.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../services/playback_coordinator.dart';
@@ -35,7 +36,25 @@ enum LiveTvMiniPlayerStatus {
   stopped,
 }
 
-/// How the mini-player's video was first revealed for one tune (build #15).
+/// What kind of failure ended the last tune (build #17). The failed card
+/// and the diagnostic branch on it — a catch-up 404 is a missing
+/// recording, not a generic load failure, and a 458 is a busy line, not a
+/// missing recording (parent probe 2026-11-08 ~13:02 EST: 458 is
+/// transient; only 404 is a stable "no recording").
+enum LiveTvMiniPlayerFailureKind {
+  /// Any other failure: the generic "Could not start" card + Retry.
+  generic,
+
+  /// Catch-up tune whose panel answered 404: the panel has no recording
+  /// for that programme on that channel. Card: "No recording available
+  /// for `<programme>` on `<channel>`" + Watch live. Never retried — the
+  /// panel already answered.
+  missingRecording,
+
+  /// Any tune whose panel answered 458: the single connection slot is in
+  /// use (max_connections = 1). Card: "Line busy" + Retry.
+  lineBusy,
+}
 ///
 /// - [event]: a `playback-restart` arrived on the controller's subscription.
 /// - [latch]: the player's latched `hasRenderedFrame` was already true when
@@ -58,6 +77,7 @@ class LiveTvMiniPlayerDiagnostic {
     required this.restartObserved,
     required this.reveal,
     required this.videoRectSent,
+    this.videoRect,
     this.msToReveal,
     this.failReason,
   });
@@ -79,6 +99,12 @@ class LiveTvMiniPlayerDiagnostic {
 
   /// Whether the native video rect was ever sent successfully.
   final bool videoRectSent;
+
+  /// The rect actually sent to the native plane, as
+  /// "left,top,right,bottom@dpr" in physical pixels (build #17) — the
+  /// diagnostic proves the rect equals the laid-out hole instead of just
+  /// saying "yes". Null when no rect was ever sent.
+  final String? videoRect;
 
   /// Milliseconds from tune start to reveal, when revealed.
   final int? msToReveal;
@@ -151,6 +177,11 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   LiveTvMiniPlayerStatus _status = LiveTvMiniPlayerStatus.idle;
   LiveTvChannel? _channel;
   int? _catchUpStartEpoch;
+
+  /// Title of the programme a catch-up tune is replaying (build #17) —
+  /// the guide passes it so the missing-recording card can name the
+  /// programme. Null on live tunes.
+  String? _catchUpProgrammeTitle;
   Player? _player;
   LiveTvPlaybackSession? _session;
   bool _isPlaying = false;
@@ -164,6 +195,13 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   StreamSubscription<PlayerError>? _errorSubscription;
   StreamSubscription<void>? _fileLoadFailedSubscription;
   StreamSubscription<void>? _playbackRestartSubscription;
+
+  /// The player's log stream (build #17): ffmpeg logs the HTTP status
+  /// one warn-level line ahead of the error (`http: HTTP error 404 Not
+  /// Found`), and mpv collapses every status into the same "file failed
+  /// to load" — the log is the only place the panel's answer survives.
+  /// Same latch the full player screen keeps (`_onPlayerLog`).
+  StreamSubscription<PlayerLog>? _logSubscription;
   Timer? _firstFrameWatchdog;
 
   /// First-frame state for the current tune (build #15).
@@ -172,9 +210,38 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   DateTime? _tuneStartedAt;
   bool _videoRectSent = false;
 
+  /// The rect actually sent for the current tune (build #17), as
+  /// "left,top,right,bottom@dpr" in physical pixels.
+  String? _videoRect;
+
+  /// Completes when the first rect is sent for the current tune (build
+  /// #17): tune() waits on it before opening, so mpv attaches to the
+  /// final surface once instead of being stranded by a post-open resize.
+  /// Re-created per tune; a tune whose widget never mounts times out
+  /// instead of hanging.
+  Completer<void>? _rectSentCompleter;
+
+  /// The HTTP status the panel answered with for the current tune's
+  /// stream (build #17), latched from the player's log stream. Null
+  /// when the log named none — a failure with no status stays generic
+  /// and must never be reported as a missing recording.
+  int? _lastHttpStatus;
+
   /// Why the current tune failed, when it did (build #16 — see
   /// [LiveTvMiniPlayerDiagnostic.failReason]).
   String? _failReason;
+
+  /// What kind of failure ended the current tune (build #17).
+  LiveTvMiniPlayerFailureKind _failureKind = LiveTvMiniPlayerFailureKind.generic;
+
+  /// What kind of failure ended the current tune.
+  LiveTvMiniPlayerFailureKind get failureKind => _failureKind;
+
+  /// Title of the programme a catch-up tune is replaying, if any.
+  String? get catchUpProgrammeTitle => _catchUpProgrammeTitle;
+
+  /// The rect actually sent for the current tune, if any.
+  String? get videoRect => _videoRect;
 
   /// How the current tune's surface was revealed ([LiveTvMiniPlayerReveal.none]
   /// while it is still covered).
@@ -202,6 +269,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       restartObserved: _restartObserved,
       reveal: _revealMethod,
       videoRectSent: _videoRectSent,
+      videoRect: _videoRect,
       msToReveal: startedAt == null || _revealMethod == LiveTvMiniPlayerReveal.none
           ? null
           : DateTime.now().difference(startedAt).inMilliseconds,
@@ -260,14 +328,23 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _revealMethod = LiveTvMiniPlayerReveal.none;
     _tuneStartedAt = DateTime.now();
     _videoRectSent = false;
+    _videoRect = null;
+    _rectSentCompleter = Completer<void>();
+    _lastHttpStatus = null;
     _failReason = null;
+    _failureKind = LiveTvMiniPlayerFailureKind.generic;
     hasFirstFrame.value = false;
   }
 
   /// Called by the [Video] surface when the native rect is first sent
   /// successfully (build #15). Feeds the diagnostic: a watchdog reveal
-  /// with no rect sent means the plane was never positioned.
-  void noteVideoRectSent() {
+  /// with no rect sent means the plane was never positioned. [rect] is
+  /// the exact "left,top,right,bottom@dpr" the native plane received
+  /// (build #17). Completes the tune's rect wait so the open can start
+  /// on the final surface.
+  void noteVideoRectSent(String rect) {
+    _videoRect = rect;
+    _rectSentCompleter?.complete();
     if (_videoRectSent) return;
     _videoRectSent = true;
     _recordDiagnostic();
@@ -288,11 +365,14 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
 
   /// Tune (or retune) the mini-player to [channel], opening the stream on
   /// the one player. [catchUpStartEpoch] starts the archive at the
-  /// programme's own start time (guide catch-up entry points).
+  /// programme's own start time (guide catch-up entry points);
+  /// [catchUpProgrammeTitle] names that programme for the
+  /// missing-recording card (build #17).
   Future<void> tune({
     required LiveTvChannel channel,
     required MultiServerProvider multiServer,
     int? catchUpStartEpoch,
+    String? catchUpProgrammeTitle,
   }) async {
     final generation = ++_generation;
     final previousSession = _session;
@@ -300,6 +380,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     if (previousSession != null) unawaited(previousSession.discard());
     _channel = channel;
     _catchUpStartEpoch = catchUpStartEpoch;
+    _catchUpProgrammeTitle = catchUpProgrammeTitle;
     _status = LiveTvMiniPlayerStatus.tuning;
     _isPlaying = false;
     _isBuffering = true;
@@ -313,6 +394,31 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       return;
     }
     final client = multiServer.getClientForServer(ServerId(serverInfo.serverId));
+
+    // Build #17 — rect BEFORE open: create the player now and mount the
+    // hole (notify) so the Video sends the rect to the native plane
+    // before any stream opens. On v2.25.12 the rect arrived after open()
+    // and its container resize destroyed and recreated the SurfaceView
+    // while mpv was starting, stranding mpv on a placeholder surface
+    // with no frame ever reported ("Restart seen: no"). Attaching to the
+    // final surface once removes that race instead of hardening it.
+    // Players without rect support (fakes, non-Android backends) skip
+    // the wait — there is no rect to wait for.
+    final player = _ensurePlayer();
+    _notify();
+    if (player is VideoRectSupport) {
+      await _rectSentCompleter?.future.timeout(
+        const Duration(milliseconds: 500),
+        onTimeout: () {
+          appLogger.w(
+            'LiveTvMiniPlayer: no video rect within 500ms for ${channel.displayName} — '
+            'opening without one (the widget may not be mounted)',
+          );
+        },
+      );
+      if (generation != _generation) return;
+    }
+
     LiveTvPlaybackSession? session;
     if (client != null) {
       try {
@@ -354,7 +460,6 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       return;
     }
 
-    final player = _ensurePlayer();
     try {
       // Live streams are not seekable: the same one-line option the full
       // player applies before every live open.
@@ -378,11 +483,26 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   }
 
   /// Re-tune the last channel (failed card's Retry, stopped card's
-  /// resume). No-op when nothing was ever tuned.
+  /// resume). No-op when nothing was ever tuned. A catch-up retry
+  /// replays the same programme from its start.
   Future<void> retry({required MultiServerProvider multiServer}) async {
     final channel = _channel;
     if (channel == null) return;
-    await tune(channel: channel, multiServer: multiServer, catchUpStartEpoch: _catchUpStartEpoch);
+    await tune(
+      channel: channel,
+      multiServer: multiServer,
+      catchUpStartEpoch: _catchUpStartEpoch,
+      catchUpProgrammeTitle: _catchUpProgrammeTitle,
+    );
+  }
+
+  /// Watch the last channel live (build #17): the missing-recording
+  /// card's one action. Same channel, no catch-up epoch — the panel has
+  /// no recording for the programme, but the live stream works.
+  Future<void> watchLive({required MultiServerProvider multiServer}) async {
+    final channel = _channel;
+    if (channel == null) return;
+    await tune(channel: channel, multiServer: multiServer);
   }
 
   Future<void> togglePlayPause() async {
@@ -414,6 +534,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _status = LiveTvMiniPlayerStatus.idle;
     _channel = null;
     _catchUpStartEpoch = null;
+    _catchUpProgrammeTitle = null;
     _isPlaying = false;
     _isBuffering = false;
     await _releasePlayerAndSession();
@@ -454,8 +575,20 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       _isBuffering = buffering;
       _notify();
     });
-    _errorSubscription = player.streams.error.listen((error) => _onPlayerError(_reasonForError(error)));
-    _fileLoadFailedSubscription = player.streams.fileLoadFailed.listen((_) => _onPlayerError('file failed to load'));
+    _errorSubscription = player.streams.error.listen((error) {
+      _onPlayerError(
+        _reasonForError(error),
+        _classifyFailure(errorCause: error.cause),
+      );
+    });
+    _fileLoadFailedSubscription = player.streams.fileLoadFailed.listen(
+      (_) => _onPlayerError('file failed to load', _classifyFailure()),
+    );
+    // Build #17: the log stream carries the panel's HTTP answer (ffmpeg
+    // logs `http: HTTP error <status>` before the end-file); mpv
+    // collapses every status into the same "file failed to load", so
+    // without this latch a catch-up 404 and a busy line look identical.
+    _logSubscription = player.streams.log.listen(_onPlayerLog);
     // Build #15: subscribe the moment the player is created — BEFORE any
     // open() — so a restart fired during the open is caught. The build #13
     // Video-widget subscription mounted after open() returned and missed it.
@@ -466,12 +599,39 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     return player;
   }
 
+  /// Latch the panel's HTTP answer for the current tune from the
+  /// player's log stream (build #17). ffmpeg logs the status one
+  /// warn-level line ahead of the error; the full player screen keeps
+  /// the same latch (`_onPlayerLog`). Reset per tune, so a stale status
+  /// from an earlier tune can never mislabel the next failure.
+  void _onPlayerLog(PlayerLog log) {
+    final status = PlayerError.httpStatusFromLog(log.text);
+    if (status != null) _lastHttpStatus = status;
+  }
+
+  /// Classify a playback failure from the panel's answer (build #17).
+  /// 458 is the busy line on any tune (the single slot is in use);
+  /// 404 is a missing recording ONLY on a catch-up tune — a live 404
+  /// is a dead stream, not a missing recording. Anything else, and
+  /// anything with no HTTP status at all, stays generic: a network
+  /// error, an auth failure, or a bad URL must never be reported as a
+  /// missing recording. [errorCause] is the error event's cause tag
+  /// (`server-http-404`), a fallback when the log line never arrived.
+  LiveTvMiniPlayerFailureKind _classifyFailure({String? errorCause}) {
+    final status = _lastHttpStatus ?? (errorCause == PlayerError.serverHttp404 ? 404 : null);
+    if (status == 458) return LiveTvMiniPlayerFailureKind.lineBusy;
+    if (status == 404 && _catchUpStartEpoch != null) {
+      return LiveTvMiniPlayerFailureKind.missingRecording;
+    }
+    return LiveTvMiniPlayerFailureKind.generic;
+  }
+
   /// A load/playback failure once a stream is up: the slot shows the
   /// failed card with a retry. Errors during a tune are handled by the
   /// tune itself (the open's catch), not here.
-  void _onPlayerError([String? reason]) {
+  void _onPlayerError([String? reason, LiveTvMiniPlayerFailureKind kind = LiveTvMiniPlayerFailureKind.generic]) {
     if (_status != LiveTvMiniPlayerStatus.active) return;
-    _fail(reason);
+    _fail(reason, kind);
   }
 
   /// Short failure reason for the diagnostic from a player error (build
@@ -488,8 +648,18 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     return line.isEmpty ? 'player error' : line;
   }
 
-  void _fail([String? reason]) {
-    _failReason = reason;
+  void _fail([String? reason, LiveTvMiniPlayerFailureKind kind = LiveTvMiniPlayerFailureKind.generic]) {
+    _failureKind = kind;
+    // Build #17: the diagnostic carries the missing-recording / line-busy
+    // state distinctly from a generic load failure, naming the programme
+    // and channel — "Could not start: file failed to load" told Matt
+    // nothing about a catch-up that the panel simply has no recording for.
+    _failReason = switch (kind) {
+      LiveTvMiniPlayerFailureKind.missingRecording =>
+        'no recording for ${_catchUpProgrammeTitle ?? 'this programme'} on ${_channel?.displayName ?? 'this channel'}',
+      LiveTvMiniPlayerFailureKind.lineBusy => 'line busy: HTTP 458',
+      LiveTvMiniPlayerFailureKind.generic => reason,
+    };
     _status = LiveTvMiniPlayerStatus.failed;
     _isPlaying = false;
     _isBuffering = false;
@@ -527,11 +697,13 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     unawaited(_errorSubscription?.cancel());
     unawaited(_fileLoadFailedSubscription?.cancel());
     unawaited(_playbackRestartSubscription?.cancel());
+    unawaited(_logSubscription?.cancel());
     _playingSubscription = null;
     _bufferingSubscription = null;
     _errorSubscription = null;
     _fileLoadFailedSubscription = null;
     _playbackRestartSubscription = null;
+    _logSubscription = null;
     _firstFrameWatchdog?.cancel();
     _firstFrameWatchdog = null;
     PlaybackCoordinator.instance.unregisterVideoSession(_coordinatorShutdown);
@@ -569,6 +741,7 @@ class LiveTvMiniPlayer extends StatelessWidget {
     required this.nowPlayingTitle,
     required this.onFullscreen,
     required this.onResume,
+    this.onWatchLive,
     this.videoBuilder,
   });
 
@@ -585,6 +758,11 @@ class LiveTvMiniPlayer extends StatelessWidget {
   /// Retry (failed card) / resume (stopped card): re-tunes the last
   /// channel. The guide supplies the provider.
   final Future<void> Function() onResume;
+
+  /// Watch live (build #17): the missing-recording card's one action —
+  /// re-tunes the last channel live, without the catch-up epoch. The
+  /// guide supplies it; null falls back to [onResume].
+  final Future<void> Function()? onWatchLive;
 
   /// Builds the video surface for [player]. Defaults to the real [Video]
   /// widget; tests inject a placeholder so no native surface is created.
@@ -604,9 +782,14 @@ class LiveTvMiniPlayer extends StatelessWidget {
         final isFailed = status == LiveTvMiniPlayerStatus.failed;
         final isTuning = status == LiveTvMiniPlayerStatus.tuning;
         final nowPlaying = nowPlayingTitle;
+        // Build #17: NO opaque color on this container. On v2.25.12 it
+        // was black, and the native surface below the Flutter view can
+        // only show through transparent Flutter pixels — so the Video's
+        // own transparent hole revealed this black, not the video, on
+        // every tune. Black survives only where it is a fallback: the
+        // stopped card (no player) and the failed overlay below.
         return Container(
           key: const Key('live-tv-mini-player'),
-          color: Colors.black,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -664,17 +847,43 @@ class LiveTvMiniPlayer extends StatelessWidget {
                             children: [
                               const Icon(Icons.error_outline, color: Colors.white, size: 32),
                               const SizedBox(height: 8),
+                              // Build #17: the failure kind decides the
+                              // card. A missing recording names the
+                              // programme and channel and offers Watch
+                              // live — never a retry (the panel already
+                              // answered) and never the generic "Could not
+                              // start". A busy line offers Retry.
                               Text(
-                                t.liveTv.failedToStartChannel,
+                                switch (controller.failureKind) {
+                                  LiveTvMiniPlayerFailureKind.missingRecording =>
+                                    controller.catchUpProgrammeTitle != null
+                                        ? t.iptv.miniPlayerMissingRecording(
+                                            programme: controller.catchUpProgrammeTitle!,
+                                            channel: channel.displayName,
+                                          )
+                                        : t.iptv.miniPlayerMissingRecordingNoProgramme(
+                                            channel: channel.displayName,
+                                          ),
+                                  LiveTvMiniPlayerFailureKind.lineBusy => t.iptv.miniPlayerLineBusy,
+                                  LiveTvMiniPlayerFailureKind.generic => t.liveTv.failedToStartChannel,
+                                },
                                 style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white),
                                 textAlign: TextAlign.center,
                               ),
                               const SizedBox(height: 8),
-                              TextButton(
-                                key: const Key('mini-player-retry'),
-                                onPressed: () => unawaited(onResume()),
-                                child: Text(t.common.retry),
-                              ),
+                              if (controller.failureKind == LiveTvMiniPlayerFailureKind.missingRecording &&
+                                  onWatchLive != null)
+                                TextButton(
+                                  key: const Key('mini-player-watch-live'),
+                                  onPressed: () => unawaited(onWatchLive!()),
+                                  child: Text(t.iptv.miniPlayerWatchLive),
+                                )
+                              else
+                                TextButton(
+                                  key: const Key('mini-player-retry'),
+                                  onPressed: () => unawaited(onResume()),
+                                  child: Text(t.common.retry),
+                                ),
                             ],
                           ),
                         ),

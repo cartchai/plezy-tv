@@ -443,7 +443,7 @@ void main() {
     _expectFocusedChannel(tester, 'B');
   });
 
-  testWidgets('the context-menu key toggles the focused channel favorite once per press', (tester) async {
+  testWidgets('the context-menu key opens the channel menu once per press', (tester) async {
     final toggled = <String?>[];
     final harness = _GuideHarness.oneServer();
     addTearDown(harness.dispose);
@@ -454,12 +454,20 @@ void main() {
     await tester.sendKeyDownEvent(LogicalKeyboardKey.gameButtonX);
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.gameButtonX);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.gameButtonX);
-    await tester.pump();
+    await tester.pumpAndSettle();
 
+    // Build #17 §9: the context-menu key opens the channel menu — it
+    // never toggles the favorite directly, and a held key cannot re-open
+    // it repeatedly (KeyDown only; the repeat is ignored).
+    expect(find.text('Add to favourites'), findsOneWidget);
+    expect(toggled, isEmpty);
+
+    await tester.tap(find.text('Add to favourites'));
+    await tester.pumpAndSettle();
     expect(toggled, ['A']);
   });
 
-  testWidgets('on TV a SELECT hold on a channel cell toggles its favorite', (tester) async {
+  testWidgets('on TV a SELECT hold on a channel cell opens the channel menu', (tester) async {
     TvDetectionService.debugSetAppleTVOverride(true);
     final toggled = <String?>[];
     final harness = _GuideHarness.oneServer();
@@ -473,6 +481,13 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
     await tester.pumpAndSettle();
 
+    // Build #17 §9: a SELECT hold opens the channel menu — the favorite
+    // toggles only when its item is picked in the menu.
+    expect(find.text('Add to favourites'), findsOneWidget);
+    expect(toggled, isEmpty);
+
+    await tester.tap(find.text('Add to favourites'));
+    await tester.pumpAndSettle();
     expect(toggled, ['A']);
   });
 

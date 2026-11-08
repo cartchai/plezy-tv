@@ -85,6 +85,14 @@ class LiveTvChannel {
   @JsonKey(includeFromJson: false, includeToJson: false)
   final bool hasCatchUp;
 
+  /// The live TV category this channel belongs to (build #17): the
+  /// Xtream category id, or the M3U group title. Set by the IPTV client
+  /// at channel-build time; never serialized. Null for Plex/Jellyfin/
+  /// Emby channels, which have no IPTV category — they never match a
+  /// selected guide category. The guide category picker filters on it.
+  @JsonKey(includeFromJson: false, includeToJson: false)
+  final String? categoryId;
+
   LiveTvChannel({
     required this.key,
     this.identifier,
@@ -104,6 +112,7 @@ class LiveTvChannel {
     this.favoriteSource,
     this.favoriteStoreKey,
     this.hasCatchUp = false,
+    this.categoryId,
   });
 
   factory LiveTvChannel.fromJson(Map<String, dynamic> json) => _$LiveTvChannelFromJson(json);
@@ -116,6 +125,7 @@ class LiveTvChannel {
     String? favoriteSource,
     String? favoriteStoreKey,
     bool? hasCatchUp,
+    String? categoryId,
   }) {
     return LiveTvChannel(
       key: key,
@@ -136,6 +146,7 @@ class LiveTvChannel {
       favoriteSource: favoriteSource ?? this.favoriteSource,
       favoriteStoreKey: favoriteStoreKey ?? this.favoriteStoreKey,
       hasCatchUp: hasCatchUp ?? this.hasCatchUp,
+      categoryId: categoryId ?? this.categoryId,
     );
   }
 

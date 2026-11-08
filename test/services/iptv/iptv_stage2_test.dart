@@ -606,11 +606,27 @@ https://example.com/cnn.m3u8
 
     test('fetchChildren returns seasons then episodes with the stripped parent title', () async {
       final client = xtreamClient(api: _PrefixedFakeXtreamApi());
-      final children = await client.fetchChildren('series:10');
-      expect(children.map((i) => i.title), ['Pilot', 'Second', 'Return']);
-      expect(children.map((i) => i.parentIndex), [1, 1, 2]);
-      expect(children.map((i) => i.index), [1, 2, 1]);
-      expect(children.every((i) => i.parentTitle == 'Alice'), isTrue);
+      // Build #17 §12: fetchChildren(series) returns one synthetic season
+      // item per season — the old flat episode list made every episode
+      // render as a season tab and fetching that "season"'s children
+      // return [] ("No episodes found").
+      final seasons = await client.fetchChildren('series:10');
+      expect(seasons.map((i) => i.title), ['Season 1', 'Season 2']);
+      expect(seasons.map((i) => i.index), [1, 2]);
+      expect(seasons.map((i) => i.leafCount), [2, 1]);
+      expect(seasons.every((i) => i.parentTitle == 'Alice'), isTrue);
+      // Each season's episodes come from fetchChildren(season:<id>:<n>),
+      // with the stripped parent title carried through.
+      final season1 = await client.fetchChildren('season:10:1');
+      expect(season1.map((i) => i.title), ['Pilot', 'Second']);
+      expect(season1.map((i) => i.parentIndex), [1, 1]);
+      expect(season1.map((i) => i.index), [1, 2]);
+      expect(season1.every((i) => i.parentTitle == 'Alice'), isTrue);
+      final season2 = await client.fetchChildren('season:10:2');
+      expect(season2.map((i) => i.title), ['Return']);
+      expect(season2.map((i) => i.parentIndex), [2]);
+      expect(season2.map((i) => i.index), [1]);
+      expect(season2.every((i) => i.parentTitle == 'Alice'), isTrue);
       client.close();
     });
   });

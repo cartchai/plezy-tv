@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../connection/connection.dart';
 import '../i18n/strings.g.dart';
@@ -19,6 +20,69 @@ import '../services/iptv/xmltv_parser.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import 'iptv_client.dart';
+
+/// Which source served a channel's EPG (build #17, §10) — the split the
+/// guide coverage diagnostic reports. `unknown` is for entries read from
+/// disk files written before this build recorded the source.
+enum IptvEpgSource { feedById, feedByName, shortEpg, none, unknown }
+
+/// Guide coverage over the channels the guide has loaded EPG for (build
+/// #17, §10): how many have programmes, split by the source that served
+/// them, plus the tvg-id match rate over the same set — the numbers the
+/// phone needs to prove the guide is fuller. `feedChannelIds` is the
+/// distinct channel-id count of the last loaded XMLTV feed (0 when no
+/// feed has loaded yet); it is context, not a denominator.
+class IptvGuideCoverage {
+  final int total;
+  final int withPrograms;
+  final int fromFeedById;
+  final int fromFeedByName;
+  final int fromShortEpg;
+  final int none;
+  final int unknown;
+  final int feedChannelIds;
+
+  const IptvGuideCoverage({
+    required this.total,
+    required this.withPrograms,
+    required this.fromFeedById,
+    required this.fromFeedByName,
+    required this.fromShortEpg,
+    required this.none,
+    required this.unknown,
+    required this.feedChannelIds,
+  });
+
+  const IptvGuideCoverage.empty()
+    : total = 0,
+      withPrograms = 0,
+      fromFeedById = 0,
+      fromFeedByName = 0,
+      fromShortEpg = 0,
+      none = 0,
+      unknown = 0,
+      feedChannelIds = 0;
+
+  /// Share of loaded channels with programmes, 0–100 (0 when none loaded).
+  int get percentWithPrograms => total == 0 ? 0 : (withPrograms * 100 / total).round();
+}
+
+/// Normalize a channel name for the EPG name-fallback match (build #17,
+/// §10): strip a leading region/category tag ("US| ", "|EN| ",
+/// "UK-NOWTV| "), lowercase, strip non-alphanumerics. "US| COMEDY
+/// CENTRAL HD" and "Comedy Central HD" both normalize to
+/// "comedycentralhd", so a feed whose channel ids are plain names matches
+/// a playlist whose names carry region prefixes — and vice versa. No
+/// fuzzy matching: the normalized strings must be exactly equal.
+@visibleForTesting
+String normalizeEpgChannelName(String name) {
+  var s = name.trim();
+  // Leading "|XX| " tag ("|EN| TOP SERIES").
+  s = s.replaceFirst(RegExp(r'^\|[^|]*\|\s*'), '');
+  // Leading "XX| " tag ("US| COMEDY CENTRAL HD", "UK-NOWTV| ...").
+  s = s.replaceFirst(RegExp(r'^[^|\s][^|]{0,15}\|\s*'), '');
+  return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+}
 
 /// Live TV for IPTV connections (M3U + Xtream Codes).
 ///
@@ -35,6 +99,82 @@ class IptvLiveTvSupport implements LiveTvSupport {
     : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository();
 
   String get _favoritesPrefsKey => 'iptv_fav_channels:${_client.connection.id}';
+
+  /// Per-channel hide store (build #17, §9): `iptv_hidden_channels:<connectionId>`
+  /// (SharedPreferences string list, same pattern as the favourites store
+  /// above). A channel is identified by the SAME key derivation as
+  /// favourites — the favorite source + channel key — so hide and favorite
+  /// agree on identity. Per-connection, so hiding a Trex channel never
+  /// hides a Plex one. The in-memory set is loaded lazily and kept in sync
+  /// by [hideChannel]/[unhideChannel]; [isHiddenChannel] reads the
+  /// in-memory set (empty until [loadHiddenChannels] has run — callers
+  /// load first, then filter).
+  String get _hiddenChannelsPrefsKey => 'iptv_hidden_channels:${_client.connection.id}';
+  final Set<String> _hiddenChannelKeys = {};
+  bool _hiddenChannelsLoaded = false;
+
+  /// The favorite source string, factored out of [buildFavoriteChannelSource]
+  /// so the hide key uses the identical derivation.
+  String get _favoriteChannelSource => 'server://${_client.connection.id}/iptv';
+
+  /// The stored hidden-channel key for [channel] — the same derivation as
+  /// its favorite key.
+  String hiddenKeyForChannel(LiveTvChannel channel) => favoriteChannelKey(_favoriteChannelSource, channel.key);
+
+  /// The stored hidden keys (for the Settings → IPTV hidden-channels list).
+  /// Empty until [loadHiddenChannels] has run.
+  Set<String> get hiddenChannelKeys => Set.unmodifiable(_hiddenChannelKeys);
+
+  /// Load the hidden set from disk (no-op when already loaded).
+  Future<Set<String>> loadHiddenChannels() async {
+    if (_hiddenChannelsLoaded) return Set.unmodifiable(_hiddenChannelKeys);
+    final prefs = await SharedPreferences.getInstance();
+    _hiddenChannelKeys
+      ..clear()
+      ..addAll(prefs.getStringList(_hiddenChannelsPrefsKey) ?? const []);
+    _hiddenChannelsLoaded = true;
+    return Set.unmodifiable(_hiddenChannelKeys);
+  }
+
+  bool isHiddenChannel(LiveTvChannel channel) => _hiddenChannelKeys.contains(hiddenKeyForChannel(channel));
+
+  /// Sync check by channel key (the part after the source separator in a
+  /// stored hidden key) — the search filter's funnel, which runs after the
+  /// set has been loaded.
+  bool isHiddenChannelKey(String channelKey) =>
+      _hiddenChannelKeys.contains(favoriteChannelKey(_favoriteChannelSource, channelKey));
+
+  Future<void> hideChannel(LiveTvChannel channel) async {
+    await loadHiddenChannels();
+    if (_hiddenChannelKeys.add(hiddenKeyForChannel(channel))) await _persistHiddenChannels();
+  }
+
+  Future<void> unhideChannel(LiveTvChannel channel) async {
+    await loadHiddenChannels();
+    if (_hiddenChannelKeys.remove(hiddenKeyForChannel(channel))) await _persistHiddenChannels();
+  }
+
+  /// Remove a hidden entry by its channel key (the Settings list holds
+  /// stored keys, not channel objects — the key is the part after the
+  /// source separator).
+  Future<void> unhideChannelKey(String channelKey) async {
+    await loadHiddenChannels();
+    if (_hiddenChannelKeys.remove(favoriteChannelKey(_favoriteChannelSource, channelKey))) {
+      await _persistHiddenChannels();
+    }
+  }
+
+  Future<void> unhideAllChannels() async {
+    await loadHiddenChannels();
+    if (_hiddenChannelKeys.isEmpty) return;
+    _hiddenChannelKeys.clear();
+    await _persistHiddenChannels();
+  }
+
+  Future<void> _persistHiddenChannels() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_hiddenChannelsPrefsKey, _hiddenChannelKeys.toList(growable: false));
+  }
 
   bool get _isXtream => _client.connection is XtreamConnection;
 
@@ -192,10 +332,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
 
     List<LiveTvProgram> programs;
+    IptvEpgSource source;
     try {
-      programs = _isXtream
+      final fetched = _isXtream
           ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl)
           : await _fetchM3uEpg(channelKey, settings, fetchFrom, fetchTo, ttl);
+      programs = fetched.programs;
+      source = fetched.source;
     } catch (e) {
       // Build #8 Task 3: a failed fetch must surface (see the doc comment
       // above) — swallowing it as [] recorded failures as loaded-empty.
@@ -204,7 +347,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       rethrow;
     }
 
-    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo);
+    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo, source: source);
     _epgCache[channelKey] = entry;
     // Best-effort and fire-and-forget: a failed write never breaks the
     // guide — the in-memory entry above still serves this launch — and
@@ -363,7 +506,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// partial feed — and a fetch only THROWS when both sources fail: if
   /// either source answers (even empty), that answer stands, so a genuine
   /// empty is never misread as a failure.
-  Future<List<LiveTvProgram>> _fetchXtreamEpg(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -388,7 +531,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (shortEpg != null && shortEpg.isNotEmpty) {
       // The background feed still lands in the shared cache for later
       // fetches (its error is already observed above).
-      return shortEpg;
+      return (programs: shortEpg, source: IptvEpgSource.shortEpg);
     }
     // get_short_epg had nothing (or failed): use the feed (already
     // loading). A feed that loads but has nothing for the channel returns
@@ -402,19 +545,25 @@ class IptvLiveTvSupport implements LiveTvSupport {
           'IPTV: xmltv.php fetch failed for channel $channelKey; get_short_epg already answered empty',
           error: e,
         );
-        return const [];
+        return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
       }
       rethrow;
     }
   }
 
-  /// Programmes for one channel out of the login's `xmltv.php` feed.
+  /// Programmes for one channel out of the login's `xmltv.php` feed, plus
+  /// which match served them (build #17, §10).
   /// The feed is fetched lazily (only when a channel's cached entry is
   /// stale or missing) and the parsed file is shared by every channel in
   /// the guide — never one fetch per channel. Matching is by the channel's
   /// tvg-id (`epg_channel_id`); some panels use the stream id as the XMLTV
-  /// channel id, so that matches too.
-  Future<List<LiveTvProgram>> _fetchXtreamXmltvPrograms(
+  /// channel id, so that matches too. When neither hits, the channel's
+  /// normalized name is tried against the feed's normalized channel ids —
+  /// a feed whose ids are plain names matches a playlist whose names carry
+  /// region prefixes. The source names what actually served programmes
+  /// (after window filtering): a match whose programmes all fall outside
+  /// the window still counts as `none` — the guide shows nothing for it.
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamXmltvPrograms(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -422,11 +571,20 @@ class IptvLiveTvSupport implements LiveTvSupport {
     Duration? ttl,
   ) async {
     final guide = await _xtreamXmltvGuide(ttl: ttl);
+    _lastXmltvFeedChannelIds = guide.byChannel.length;
     final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
-    final entries = <XmltvProgram>[];
-    if (epgChannelId != null) entries.addAll(guide.byChannel[epgChannelId] ?? const []);
-    if (epgChannelId != channelKey) entries.addAll(guide.byChannel[channelKey] ?? const []);
-    return _mapXmltvPrograms(entries, channelKey, settings, from, to, keyPrefix: 'xtream');
+    final byId = <XmltvProgram>[];
+    if (epgChannelId != null) byId.addAll(guide.byChannel[epgChannelId] ?? const []);
+    if (epgChannelId != channelKey) byId.addAll(guide.byChannel[channelKey] ?? const []);
+    var programs = _mapXmltvPrograms(byId, channelKey, settings, from, to, keyPrefix: 'xtream');
+    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById);
+    final channelName = _client.channelNameForChannelKey(channelKey);
+    if (channelName != null && channelName.isNotEmpty) {
+      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
+      programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'xtream');
+      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName);
+    }
+    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
   }
 
   /// One channel's `get_short_epg` listings — the fallback when the
@@ -504,7 +662,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (_shortEpgWaiters.isNotEmpty) _shortEpgWaiters.removeAt(0).complete();
   }
 
-  Future<List<LiveTvProgram>> _fetchM3uEpg(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchM3uEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -512,15 +670,25 @@ class IptvLiveTvSupport implements LiveTvSupport {
     Duration? ttl,
   ) async {
     final connection = _client.connection;
-    if (connection is! M3uConnection) return const [];
+    if (connection is! M3uConnection) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
     final epgUrl = connection.epgUrl;
-    if (epgUrl == null || epgUrl.isEmpty) return const [];
+    if (epgUrl == null || epgUrl.isEmpty) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
     // The XMLTV `channel` attribute matches the entry's tvg-id, which is
-    // also the M3U channel key when present.
+    // also the M3U channel key when present. When it misses, the entry's
+    // normalized name is tried (build #17, §10) — same fallback as Xtream.
     final tvgId = _client.tvgIdForChannelKey(channelKey);
-    if (tvgId == null) return const [];
+    if (tvgId == null) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
     final guide = await _xmltvGuide(epgUrl, ttl: ttl);
-    return _mapXmltvPrograms(guide.byChannel[tvgId] ?? const [], channelKey, settings, from, to, keyPrefix: 'm3u');
+    _lastXmltvFeedChannelIds = guide.byChannel.length;
+    var programs = _mapXmltvPrograms(guide.byChannel[tvgId] ?? const [], channelKey, settings, from, to, keyPrefix: 'm3u');
+    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById);
+    final channelName = _client.channelNameForChannelKey(channelKey);
+    if (channelName != null && channelName.isNotEmpty) {
+      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
+      programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'm3u');
+      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName);
+    }
+    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
   }
 
   /// Map parsed XMLTV programmes for one channel to guide programs,
@@ -728,16 +896,67 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// diagnostics.
   DateTime? get lastEpgUpdatedAt => _lastEpgUpdatedAt;
 
+  /// Distinct channel-id count of the last loaded XMLTV feed (build #17,
+  /// §10) — context for the coverage diagnostic. 0 before any feed loads;
+  /// reset by [clearEpgCache].
+  int _lastXmltvFeedChannelIds = 0;
+
+  /// Guide coverage over the channels this support has loaded EPG for
+  /// (build #17, §10): the guide only fetches visible rows, so this set
+  /// IS the visible guide. Computed from the per-channel cache entries
+  /// (in-memory + persisted), so it survives a relaunch; entries read
+  /// from disk files written before this build report `unknown`.
+  IptvGuideCoverage guideCoverage() {
+    var withPrograms = 0;
+    var fromFeedById = 0;
+    var fromFeedByName = 0;
+    var fromShortEpg = 0;
+    var none = 0;
+    var unknown = 0;
+    for (final entry in _epgCache.values) {
+      if (entry.programs.isEmpty) {
+        none++;
+        continue;
+      }
+      withPrograms++;
+      switch (entry.source) {
+        case IptvEpgSource.feedById:
+          fromFeedById++;
+        case IptvEpgSource.feedByName:
+          fromFeedByName++;
+        case IptvEpgSource.shortEpg:
+          fromShortEpg++;
+        case IptvEpgSource.none:
+          // A fetch that recorded `none` cannot have programmes; treat a
+          // non-empty entry as unknown rather than dropping the row.
+          unknown++;
+        case IptvEpgSource.unknown:
+          unknown++;
+      }
+    }
+    return IptvGuideCoverage(
+      total: _epgCache.length,
+      withPrograms: withPrograms,
+      fromFeedById: fromFeedById,
+      fromFeedByName: fromFeedByName,
+      fromShortEpg: fromShortEpg,
+      none: none,
+      unknown: unknown,
+      feedChannelIds: _lastXmltvFeedChannelIds,
+    );
+  }
+
   /// Empty the EPG caches (Update now / Clear guide). The next guide visit
   /// re-fetches visible channels; the guide watches [epgVersion] to reset
   /// its own per-channel state.
   ///
   /// This is the "Clear guide" behaviour: [fetchEpgForChannel] stays empty
   /// until something refreshes ([refreshEpgCache] or the start-up refresh),
-  /// so the guide shows "No information available" hour blocks.
+  /// so the guide shows "No guide data for this channel" blocks.
   Future<void> clearEpgCache() async {
     _epgCache.clear();
     _xmltvCache.clear();
+    _lastXmltvFeedChannelIds = 0;
     // A clear is an explicit retry: forget a failed feed too, so the next
     // guide visit downloads instead of hitting the negative cache.
     _xmltvFailedAt.clear();
@@ -795,7 +1014,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   }
 
   @override
-  Future<String> buildFavoriteChannelSource({String? lineup}) async => 'server://${_client.connection.id}/iptv';
+  Future<String> buildFavoriteChannelSource({String? lineup}) async => _favoriteChannelSource;
 
   @override
   String get favoriteStoreKey => 'iptv:${_client.connection.id}';
@@ -935,17 +1154,25 @@ class _CachedChannelEpg {
   final DateTime windowFrom;
   final DateTime windowTo;
 
+  /// Which source served these programmes (build #17, §10) — the split
+  /// the guide coverage diagnostic reports. Persisted, so a disk-served
+  /// entry still knows its source; files written before this build lack
+  /// the field and read back as [IptvEpgSource.unknown].
+  final IptvEpgSource source;
+
   const _CachedChannelEpg({
     required this.programs,
     required this.fetchedAt,
     required this.windowFrom,
     required this.windowTo,
+    this.source = IptvEpgSource.unknown,
   });
 
   Map<String, dynamic> toJson() => {
     'fetchedAt': fetchedAt.toIso8601String(),
     'windowFrom': windowFrom.toIso8601String(),
     'windowTo': windowTo.toIso8601String(),
+    'source': source.name,
     'programs': programs.map((p) => p.toJson()).toList(),
   };
 
@@ -956,6 +1183,10 @@ class _CachedChannelEpg {
     if (fetchedAt == null || windowFrom == null || windowTo == null) {
       throw const FormatException('Invalid cached EPG entry');
     }
+    final source = IptvEpgSource.values.firstWhere(
+      (s) => s.name == json['source'] as String?,
+      orElse: () => IptvEpgSource.unknown,
+    );
     final programs = <LiveTvProgram>[];
     final raw = json['programs'];
     if (raw is List) {
@@ -968,7 +1199,7 @@ class _CachedChannelEpg {
         }
       }
     }
-    return _CachedChannelEpg(programs: programs, fetchedAt: fetchedAt, windowFrom: windowFrom, windowTo: windowTo);
+    return _CachedChannelEpg(programs: programs, fetchedAt: fetchedAt, windowFrom: windowFrom, windowTo: windowTo, source: source);
   }
 
   bool covers(DateTime from, DateTime to) => !windowFrom.isAfter(from) && !windowTo.isBefore(to);
@@ -987,10 +1218,27 @@ class _CachedXmltvGuide {
 
   late final Map<String, List<XmltvProgram>> byChannel = _index(programs);
 
+  /// Programmes indexed by the channel id's normalized name (build #17,
+  /// §10) — the name-fallback match. The feed's channel ids are often
+  /// plain names ("Comedy Central HD") while the playlist's names carry
+  /// region prefixes ("US| COMEDY CENTRAL HD"); normalizing both sides
+  /// the same way makes them match when the exact tvg-id lookup misses.
+  late final Map<String, List<XmltvProgram>> byNormalizedName = _indexByNormalizedName(programs);
+
   static Map<String, List<XmltvProgram>> _index(List<XmltvProgram> programs) {
     final map = <String, List<XmltvProgram>>{};
     for (final program in programs) {
       (map[program.channelId] ??= []).add(program);
+    }
+    return map;
+  }
+
+  static Map<String, List<XmltvProgram>> _indexByNormalizedName(List<XmltvProgram> programs) {
+    final map = <String, List<XmltvProgram>>{};
+    for (final program in programs) {
+      final key = normalizeEpgChannelName(program.channelId);
+      if (key.isEmpty) continue;
+      (map[key] ??= []).add(program);
     }
     return map;
   }

@@ -106,7 +106,7 @@ void main() {
       WidgetTester tester,
       Player player, {
       Size hole = const Size(320, 180),
-      VoidCallback? onVideoRectSent,
+      void Function(String rect)? onVideoRectSent,
     }) async {
       // Physical pixels == logical pixels (see the header note).
       tester.view.devicePixelRatio = 1.0;
@@ -189,7 +189,7 @@ void main() {
       final player = mpvPlayer();
       var sent = false;
 
-      await pumpVideo(tester, player, onVideoRectSent: () => sent = true);
+      await pumpVideo(tester, player, onVideoRectSent: (_) => sent = true);
 
       expect(rectCalls(mpvCalls), hasLength(1));
       expect(sent, isTrue);

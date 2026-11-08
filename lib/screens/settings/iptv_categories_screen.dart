@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../connection/connection.dart';
 import '../../connection/connection_registry.dart';
@@ -102,6 +103,44 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
         _ => <String>{},
       };
 
+  /// Collapsed sections (build #17): the section ids the user collapsed
+  /// on this screen, persisted per connection so a relaunch restores
+  /// them. Display-only — collapsing builds no rows and triggers no
+  /// rebind. Default: expanded (empty set).
+  Set<String> _collapsed = <String>{};
+
+  String get _collapsedPrefsKey => 'iptv_categories_collapsed:${widget.connection.id}';
+
+  Future<Set<String>> _readCollapsed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getStringList(_collapsedPrefsKey)?.toSet() ?? <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  void _toggleSection(String sectionId) {
+    setState(() {
+      if (_collapsed.contains(sectionId)) {
+        _collapsed.remove(sectionId);
+      } else {
+        _collapsed.add(sectionId);
+      }
+    });
+    unawaited(_saveCollapsed());
+  }
+
+  Future<void> _saveCollapsed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_collapsedPrefsKey, _collapsed.toList());
+    } catch (_) {
+      // Display-only state: a failed write just means the collapse does
+      // not survive a relaunch. Never surface an error for it.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -137,6 +176,11 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       _loading = true;
       _failed = false;
     });
+    // Collapsed state loads with the lists, before anything renders, so
+    // a relaunch never flashes expanded sections that then collapse.
+    final collapsed = await _readCollapsed();
+    if (!mounted) return;
+    setState(() => _collapsed = collapsed);
     final client = _resolveClient();
     _client = client;
     List<_CategoryRow> rows(List<XtreamCategory> categories) {
@@ -346,18 +390,21 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
         else ...[
           if (_isXtream) ...[
             _section(
+              sectionId: 'live',
               heading: t.iptvCategories.liveTvHeading,
               rows: _live,
               failed: _liveFailed,
               hidden: _liveHidden,
             ),
             _section(
+              sectionId: 'movies',
               heading: t.iptvCategories.moviesHeading,
               rows: _movies,
               failed: _moviesFailed,
               hidden: _moviesHidden,
             ),
             _section(
+              sectionId: 'series',
               heading: t.iptvCategories.seriesHeading,
               rows: _series,
               failed: _seriesFailed,
@@ -365,6 +412,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
             ),
           ] else
             _section(
+              sectionId: 'groups',
               heading: t.iptvCategories.groupsHeading,
               rows: _groups,
               failed: _groupsFailed,
@@ -377,7 +425,13 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
     );
   }
 
-  Widget _section({required String heading, required List<_CategoryRow>? rows, required bool failed, required int hidden}) {
+  Widget _section({
+    required String sectionId,
+    required String heading,
+    required List<_CategoryRow>? rows,
+    required bool failed,
+    required int hidden,
+  }) {
     if (rows == null) {
       if (!failed) return const SliverToBoxAdapter(child: SizedBox.shrink());
       return SliverPadding(
@@ -396,12 +450,35 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       );
     }
     final title = '$heading · ${t.iptvCategories.sectionCount(total: rows.length, hidden: hidden)}';
+    // Build #17: tapping the header collapses the section to the header
+    // alone (itemCount 1) — the rows are simply not built, exactly like
+    // a section scrolled out of view, so the build #16 virtualization
+    // holds. The collapsed header keeps showing the count, so it still
+    // tells Matt what is inside it. Collapsing changes no counts and
+    // triggers no recompute or rebind.
+    final collapsed = _collapsed.contains(sectionId);
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
       sliver: SliverList.builder(
-        itemCount: rows.length + 1,
+        itemCount: collapsed ? 1 : rows.length + 1,
         itemBuilder: (context, index) {
-          if (index == 0) return SettingsSectionHeader(title);
+          if (index == 0) {
+            return InkWell(
+              onTap: () => _toggleSection(sectionId),
+              child: Row(
+                children: [
+                  Expanded(child: SettingsSectionHeader(title)),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 16, top: 24),
+                    child: Icon(
+                      collapsed ? Icons.expand_more : Icons.expand_less,
+                      color: tokens(context).textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
           final i = index - 1;
           final row = rows[i];
           return _groupCard(

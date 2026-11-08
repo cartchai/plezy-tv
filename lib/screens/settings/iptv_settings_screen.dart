@@ -375,6 +375,11 @@ class _MiniPlayerDiagnosticTile extends StatelessWidget {
                     diagnostic.videoRectSent ? t.iptv.miniPlayerRectYes : t.iptv.miniPlayerRectNo,
                     style: theme.textTheme.bodyMedium,
                   ),
+                  if (diagnostic.videoRect != null)
+                    Text(
+                      t.iptv.miniPlayerRectValues(rect: diagnostic.videoRect!),
+                      style: theme.textTheme.bodyMedium,
+                    ),
                   if (diagnostic.failReason != null)
                     Text(
                       t.iptv.miniPlayerFailReason(reason: diagnostic.failReason!),
@@ -421,6 +426,8 @@ class _IptvConnectionsList extends StatelessWidget {
           children: [
             for (final connection in connections) ...[
               _IptvConnectionTile(connection: connection),
+              if (connection is XtreamConnection || connection is M3uConnection)
+                _HiddenChannelsTile(connection: connection),
               if (connection is XtreamConnection)
                 _IptvCatalogDiagnostics(connection: connection),
             ],
@@ -475,6 +482,131 @@ class _IptvConnectionTile extends StatelessWidget {
           context,
         ).push(MaterialPageRoute(builder: (_) => IptvCategoriesScreen(connection: connection)));
       },
+    );
+  }
+}
+
+/// Hidden channels for one IPTV connection (build #17, §9): the un-hide
+/// path for the guide's long-press "Hide channel". The count loads on
+/// first build (a cheap prefs read); channel names resolve from the live
+/// lineup only when first expanded (disk-first, no extra network when
+/// warm). Each row has an Unhide button, plus an "Unhide all" action. A
+/// channel gone from the playlist keeps its raw channel key as its name.
+class _HiddenChannelsTile extends StatefulWidget {
+  final Connection connection;
+
+  const _HiddenChannelsTile({required this.connection});
+
+  @override
+  State<_HiddenChannelsTile> createState() => _HiddenChannelsTileState();
+}
+
+class _HiddenChannelsTileState extends State<_HiddenChannelsTile> {
+  Set<String> _hiddenKeys = {};
+  Map<String, String> _namesByKey = {};
+  bool _namesLoaded = false;
+  bool _loadingNames = false;
+
+  IptvLiveTvSupport? _boundSupport() {
+    try {
+      final client = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (client is! IptvClient) return null;
+      final support = client.liveTv;
+      return support is IptvLiveTvSupport ? support : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadKeys());
+  }
+
+  Future<void> _loadKeys() async {
+    final support = _boundSupport();
+    if (support == null) return;
+    final keys = await support.loadHiddenChannels();
+    if (!mounted) return;
+    setState(() => _hiddenKeys = keys);
+  }
+
+  Future<void> _loadNames() async {
+    if (_namesLoaded || _loadingNames) return;
+    setState(() => _loadingNames = true);
+    try {
+      final client = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (client is IptvClient) {
+        final channels = await client.iptvChannels();
+        if (!mounted) return;
+        setState(() {
+          _namesByKey = {for (final c in channels) c.key: c.title ?? c.key};
+          _namesLoaded = true;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _loadingNames = false);
+    }
+  }
+
+  String _channelKey(String stored) => stored.split('\u0000').last;
+
+  String _nameFor(String stored) => _namesByKey[_channelKey(stored)] ?? _channelKey(stored);
+
+  Future<void> _unhide(String stored) async {
+    final support = _boundSupport();
+    if (support == null) return;
+    await support.unhideChannelKey(_channelKey(stored));
+    if (!mounted) return;
+    setState(() => _hiddenKeys = _hiddenKeys.where((k) => k != stored).toSet());
+  }
+
+  Future<void> _unhideAll() async {
+    final support = _boundSupport();
+    if (support == null) return;
+    await support.unhideAllChannels();
+    if (!mounted) return;
+    setState(() => _hiddenKeys = {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      leading: const Icon(Symbols.visibility_off_rounded),
+      title: Text(t.iptv.hiddenChannelsTitle),
+      subtitle: Text(
+        _hiddenKeys.isEmpty
+            ? t.iptv.hiddenChannelsNone
+            : t.iptv.hiddenChannelsCount(count: _hiddenKeys.length),
+      ),
+      onExpansionChanged: (expanded) {
+        if (expanded) unawaited(_loadNames());
+      },
+      children: [
+        if (_loadingNames)
+          const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
+        else
+          for (final stored in _hiddenKeys)
+            ListTile(
+              title: Text(_nameFor(stored)),
+              trailing: TextButton(
+                onPressed: () => unawaited(_unhide(stored)),
+                child: Text(t.liveTv.unhide),
+              ),
+            ),
+        if (_hiddenKeys.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: .centerRight,
+              child: TextButton(
+                onPressed: () => unawaited(_unhideAll()),
+                child: Text(t.iptv.unhideAll),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -622,6 +754,49 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
     );
   }
 
+  /// The "Guide coverage" readout (build #17, §10), rendered
+  /// synchronously from the bound client's in-memory EPG cache — the
+  /// guide only fetches visible rows, so the cached set IS the visible
+  /// guide. Shows the share of loaded channels with programmes, the
+  /// split by source (feed by tvg-id / feed by name / short guide /
+  /// none), and the feed's distinct channel-id count.
+  Widget _buildGuideCoverage(ThemeData theme) {
+    final client = _boundClient();
+    final support = client?.liveTv;
+    final coverage = support is IptvLiveTvSupport ? support.guideCoverage() : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(t.iptv.guideCoverageTitle, style: theme.textTheme.titleSmall),
+        if (coverage == null || coverage.total == 0)
+          Text(t.iptv.guideCoverageNone, style: theme.textTheme.bodySmall)
+        else ...[
+          Text(
+            t.iptv.guideCoverageLine(
+              percent: coverage.percentWithPrograms,
+              withPrograms: coverage.withPrograms,
+              total: coverage.total,
+            ),
+            style: theme.textTheme.bodySmall,
+          ),
+          Text(
+            t.iptv.guideCoverageSplit(
+              byId: coverage.fromFeedById,
+              byName: coverage.fromFeedByName,
+              shortEpg: coverage.fromShortEpg,
+              none: coverage.none,
+            ),
+            style: theme.textTheme.bodySmall,
+          ),
+          if (coverage.unknown > 0)
+            Text(t.iptv.guideCoverageUnknown(count: coverage.unknown), style: theme.textTheme.bodySmall),
+          if (coverage.feedChannelIds > 0)
+            Text(t.iptv.guideCoverageFeedIds(count: coverage.feedChannelIds), style: theme.textTheme.bodySmall),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -649,6 +824,8 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildLastSearch(theme),
+                const SizedBox(height: 8),
+                _buildGuideCoverage(theme),
                 const SizedBox(height: 8),
                 _loading
                     ? Text(t.iptv.catalogDiagnosticsLoading, style: theme.textTheme.bodySmall)

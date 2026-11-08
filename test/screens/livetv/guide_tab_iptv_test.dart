@@ -29,10 +29,12 @@ import '../../test_helpers/prefs.dart';
 /// - Task B: while the EPG is in flight the guide shows a thin linear
 ///   progress bar in the header area — never a full-screen spinner, never
 ///   blocking — and it disappears when the programs arrive.
-/// - Task G: a channel with no EPG renders one clickable "No information
-///   available" block per hour of the guide window (and only in the hours
-///   a partial EPG leaves uncovered); tapping one opens the program detail,
-///   with a catch-up action only where the channel offers it.
+/// - Task G: a channel with no EPG renders one clickable "No guide data
+///   for this channel" block spanning the window (build #17 §10 — the old
+///   one-"No information available"-block-per-hour implied the app failed
+///   to load); a partial EPG still gets "No information" blocks only in
+///   the hours it leaves uncovered. Tapping a block opens the program
+///   detail, with a catch-up action only where the channel offers it.
 
 XtreamConnection _trexConnection() => XtreamConnection(
   id: 'trex',
@@ -235,9 +237,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LinearProgressIndicator), findsNothing);
-    // 5 hour blocks per row are in the tree at this viewport (1280px wide,
-    // 180px slots + one slot of overscan) — the rest are virtualized away.
-    expect(find.text('No information available'), findsNWidgets(10));
+    // Build #17 §10: a channel whose fetch finished with no programmes
+    // at all shows ONE "No guide data for this channel" block spanning
+    // the window per row — not an hour of "No information available"
+    // blocks per hour, which implied the app failed to load.
+    expect(find.text('No information available'), findsNothing);
+    expect(find.text(t.liveTv.noGuideDataForChannel), findsNWidgets(2));
   });
 
   testWidgets('a failed EPG fetch shows a retry state, and tapping it retries', (tester) async {
@@ -273,7 +278,7 @@ void main() {
     expect(find.text('Retried Show'), findsOneWidget);
   });
 
-  testWidgets('channel with no EPG renders one hour block per hour of the window', (tester) async {
+  testWidgets('channel with no EPG renders one no-guide-data block for the window', (tester) async {
     final harness = _IptvGuideHarness();
     addTearDown(harness.dispose);
     await harness.init();
@@ -284,9 +289,11 @@ void main() {
     harness.api.completeEmpty('101');
     await tester.pumpAndSettle();
 
-    // Two channels x 5 visible hour blocks per row (see the loading test
-    // above for why 5, not 6-7: the row virtualizes past the viewport).
-    expect(find.text('No information available'), findsNWidgets(10));
+    // Build #17 §10: one "No guide data for this channel" block per row
+    // (spanning the window), not one "No information available" block
+    // per hour — the source has no data, the app did not fail to load.
+    expect(find.text('No information available'), findsNothing);
+    expect(find.text(t.liveTv.noGuideDataForChannel), findsNWidgets(2));
   });
 
   testWidgets('channel with partial EPG gets hour blocks only in uncovered hours', (tester) async {
@@ -310,11 +317,14 @@ void main() {
     expect(find.text('Hour Show One'), findsOneWidget);
     expect(find.text('Hour Show Two'), findsOneWidget);
     // Channel 100 lost its two covered hours (both visible at this
-    // viewport); channel 101 lost none: 3 + 5 = 8 blocks.
-    expect(find.text('No information available'), findsNWidgets(8));
+    // viewport): 3 "No information" blocks. Channel 101 is empty, so
+    // (build #17 §10) it shows one "No guide data" block, not 5 more
+    // "No information" blocks.
+    expect(find.text('No information available'), findsNWidgets(3));
+    expect(find.text(t.liveTv.noGuideDataForChannel), findsOneWidget);
   });
 
-  testWidgets('tapping a no-information block opens the detail with catch-up', (tester) async {
+  testWidgets('tapping a no-guide-data block opens the detail with catch-up', (tester) async {
     final harness = _IptvGuideHarness();
     addTearDown(harness.dispose);
     await harness.init();
@@ -326,11 +336,14 @@ void main() {
     await tester.pumpAndSettle();
 
     // First block belongs to channel 100 (catch-up) and is in the past.
-    await tester.tap(find.text('No information available').first);
+    await tester.tap(find.text(t.liveTv.noGuideDataForChannel).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Watch Channel'), findsOneWidget);
-    expect(find.textContaining('Watch from start'), findsOneWidget);
+    // The block spans the whole window, so it is currently airing: the
+    // tune action reads "Play" and catch-up reads "Start from beginning"
+    // (not "Watch Channel" / "Watch from start (X min ago)").
+    expect(find.text(t.common.play), findsOneWidget);
+    expect(find.text(t.liveTv.startFromBeginning), findsOneWidget);
   });
 
   testWidgets('no catch-up action for a channel without an archive', (tester) async {
@@ -343,10 +356,13 @@ void main() {
     harness.api.completeEmpty('101');
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('No information available').first);
+    await tester.tap(find.text(t.liveTv.noGuideDataForChannel).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('Watch Channel'), findsOneWidget);
+    // Currently airing (the block spans the window), so the tune action
+    // reads "Play"; channel 101 has no archive, so no catch-up action.
+    expect(find.text(t.common.play), findsOneWidget);
+    expect(find.text(t.liveTv.startFromBeginning), findsNothing);
     expect(find.textContaining('Watch from start'), findsNothing);
   });
 

@@ -11,6 +11,8 @@ import 'package:provider/provider.dart';
 import '../../exceptions/media_server_exceptions.dart';
 import '../../focus/focusable_action_bar.dart';
 import '../../i18n/strings.g.dart';
+import '../../media/iptv_client.dart';
+import '../../media/iptv_live_tv.dart';
 import '../../media/live_tv_support.dart';
 import '../../media/media_server_client.dart';
 import '../../models/livetv_channel.dart';
@@ -27,6 +29,7 @@ import '../../utils/desktop_window_padding.dart';
 import '../../utils/live_tv_matching.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/serial_future_queue.dart';
+import 'guide_category.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/focusable_tab_chip.dart';
 import '../../widgets/overlay_sheet.dart';
@@ -88,6 +91,42 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   /// playlist), the picker above the guide switches between them.
   String? _selectedLiveTvServerId;
 
+  /// Guide category picker (build #17): the selected live TV category, or
+  /// null for all categories. Reset whenever the source changes, so a
+  /// category picked on one source never hides another source's channels.
+  GuideCategoryEntry? _selectedGuideCategory;
+
+  /// Visible live categories per live-TV server id, as (id, name) pairs
+  /// from [IptvClient.visibleLiveCategories] — the same hidden rule as
+  /// the guide rows. Plex/Jellyfin/Emby servers have no entry. Loaded
+  /// after the channels (disk-first, no extra network when warm) and
+  /// reloaded with them on catalog changes, so a category turned off in
+  /// settings disappears from the picker at the same time as its rows.
+  final Map<String, List<({String id, String name})>> _guideCategoriesByServer = {};
+
+  /// Picker entries for the current source scope: one server's categories
+  /// when a source is picked, the union otherwise. A category name that
+  /// exists on more than one visible source is prefixed with its source
+  /// ("Trex — US"), so a category never shows another source's channels.
+  List<GuideCategoryEntry> get _guideCategoryEntries {
+    final selected = _selectedLiveTvServerId;
+    final servers = selected == null ? _guideCategoriesByServer.keys.toList(growable: false) : [selected];
+    final nameCounts = <String, int>{};
+    for (final id in servers) {
+      for (final c in _guideCategoriesByServer[id] ?? const <({String id, String name})>[]) {
+        nameCounts[c.name] = (nameCounts[c.name] ?? 0) + 1;
+      }
+    }
+    final entries = <GuideCategoryEntry>[];
+    for (final id in servers) {
+      for (final c in _guideCategoriesByServer[id] ?? const <({String id, String name})>[]) {
+        final label = (nameCounts[c.name] ?? 0) > 1 ? '${_multiServer.liveTvServerName(id)} — ${c.name}' : c.name;
+        entries.add((serverId: id, categoryId: c.id, label: label));
+      }
+    }
+    return entries;
+  }
+
   /// Live-TV server ids seen at the last channel load. A listener on the
   /// provider reloads channels when a server binds late (e.g. an IPTV
   /// connection finishing its health probe after this screen opened).
@@ -125,31 +164,56 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   bool _favoritesLoaded = false;
   bool _favoritesWritable = false;
 
+  // Hidden channels (build #17, §9): per-IPTV-connection hidden keys,
+  // loaded alongside favorites. The guide filters them out of every
+  // channel list (rows, search sheet, counts); hide wins over favorite
+  // for display, the favorite itself is kept, so un-hiding restores it.
+  Set<String> _hiddenChannelKeys = {};
+  bool _hiddenChannelsLoaded = false;
+
+  /// Guide channels with hidden channels removed (build #17, §9). Until
+  /// the hidden sets have loaded, nothing is filtered (same flash-guard
+  /// as favorites: a hidden channel may show briefly on first load).
+  List<LiveTvChannel> get _visibleChannels => _hiddenChannelsLoaded
+      ? _channels.where((c) => !_hiddenChannelKeys.contains(_favoriteKeyForChannel(c))).toList(growable: false)
+      : _channels;
+
+  /// True when every loaded channel is hidden, so the guide tab shows an
+  /// explanatory empty state instead of the favorites one.
+  bool get _guideShowsHiddenEmptyState => _channels.isNotEmpty && _visibleChannels.isEmpty;
+
   List<LiveTvChannel> get _filteredChannels => filterLiveTvChannelsForFavorites(
-    channels: _channels,
+    channels: _visibleChannels,
     favoritesOnly: _showFavoritesOnly,
     favoritesLoaded: _favoritesLoaded,
     favorites: _favoriteChannels,
     sourceForChannel: _sourceForChannel,
   );
 
-  /// Guide channels after the source picker: only the selected server's
-  /// channels when one is picked, otherwise every loaded channel.
-  List<LiveTvChannel> get _sourceFilteredChannels {
-    final selected = _selectedLiveTvServerId;
-    if (selected == null) return _filteredChannels;
-    return _filteredChannels.where((c) => c.serverId == selected).toList();
-  }
+  /// Guide channels after the source picker and the category picker:
+  /// only the selected server's channels when one is picked, and only
+  /// the selected live TV category's channels when one is picked —
+  /// filtered in memory over the loaded rows, never re-fetched (build
+  /// #17, §11). Switching the category composes with the favorites
+  /// filter above and the source picker.
+  List<LiveTvChannel> get _sourceFilteredChannels => filterGuideChannels(
+    channels: _filteredChannels,
+    sourceId: _selectedLiveTvServerId,
+    category: _selectedGuideCategory,
+  );
 
   /// Search-sheet channels: the selected server's channels, but WITHOUT
   /// the favorites filter — the sheet searches the full lineup of the
   /// current source, and the jump drops the favorites filter so the
-  /// target row exists to land on (build #15, item 2).
-  List<LiveTvChannel> get _searchSheetChannels {
-    final selected = _selectedLiveTvServerId;
-    if (selected == null) return _channels;
-    return _channels.where((c) => c.serverId == selected).toList();
-  }
+  /// target row exists to land on (build #15, item 2). The selected
+  /// guide category DOES apply here (build #17, §11): searching runs
+  /// within the selected category. Hidden channels (build #17, §9) never
+  /// appear here either — they have no guide row to jump to.
+  List<LiveTvChannel> get _searchSheetChannels => filterGuideChannels(
+    channels: _visibleChannels,
+    sourceId: _selectedLiveTvServerId,
+    category: _selectedGuideCategory,
+  );
 
   /// True when a source is picked but none of its channels loaded — a
   /// provider fetch failure, not an empty playlist — so the guide shows a
@@ -162,6 +226,13 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   /// True when the favorites filter removed every loaded channel, so the guide
   /// tab shows an explanatory empty state instead of a bare timeline.
   bool get _guideShowsFavoritesEmptyState => _channels.isNotEmpty && _filteredChannels.isEmpty;
+
+  /// True when the selected guide category removed every loaded channel,
+  /// so the guide tab shows a category empty state (not the favorites
+  /// one) instead of a bare timeline. A category can be empty when its
+  /// channels failed to load, or when the favorites filter removed them.
+  bool get _guideShowsCategoryEmptyState =>
+      _selectedGuideCategory != null && _sourceFilteredChannels.isEmpty && _channels.isNotEmpty;
 
   String _liveServerScopeKey(LiveTvServerInfo serverInfo) => '${serverInfo.serverId}\u0000${serverInfo.dvrKey}';
 
@@ -251,6 +322,10 @@ class _LiveTvScreenState extends State<LiveTvScreen>
       // to all sources instead of an empty list.
       if (_selectedLiveTvServerId != null && !currentIds.contains(_selectedLiveTvServerId)) {
         _selectedLiveTvServerId = null;
+      }
+      final selectedCategory = _selectedGuideCategory;
+      if (selectedCategory != null && !currentIds.contains(selectedCategory.serverId)) {
+        _selectedGuideCategory = null;
       }
       if (_channelsLoadFuture != null) {
         // A load is already running without the new server; run one more
@@ -585,6 +660,13 @@ class _LiveTvScreenState extends State<LiveTvScreen>
 
       _refreshVisibleTabs(multiServer);
 
+      // Guide category picker entries (build #17, §11): disk-first and
+      // cheap, so they load after the channels without delaying the grid.
+      // Reloads with the channels on catalog changes (a toggle in IPTV
+      // settings rebinds the client and re-runs _loadChannels), so a
+      // category turned off disappears from the picker with its rows.
+      unawaited(_loadGuideCategories());
+
       // Load favorites by backend store: Plex is cloud/account-scoped, Jellyfin per server.
       final favoritesLoad = _loadFavorites(multiServer);
       _favoritesLoadFuture = favoritesLoad;
@@ -595,6 +677,11 @@ class _LiveTvScreenState extends State<LiveTvScreen>
           }
         }),
       );
+
+      // Hidden channels (build #17, §9): the per-IPTV-connection hidden
+      // sets, loaded alongside favorites so the guide filters them from
+      // the first paint. Plex/Jellyfin channels have no hide store.
+      unawaited(_loadHiddenChannels(multiServer));
 
       if (allChannels.isNotEmpty && PlatformDetector.shouldUseSideNavigation(context)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -612,8 +699,38 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     }
   }
 
-  Future<void> _loadFavorites(MultiServerProvider multiServer) async {
-    final loadGeneration = ++_favoritesLoadGeneration;
+  /// Guide category picker entries (build #17, §11): the visible live
+  /// categories of every connected IPTV server. One failure never loses
+  /// the other servers' entries. A selection whose category went away
+  /// (turned off in IPTV settings) falls back to all categories.
+  Future<void> _loadGuideCategories() async {
+    final multiServer = _multiServer;
+    final byServer = <String, List<({String id, String name})>>{};
+    for (final serverInfo in multiServer.liveTvServers) {
+      final client = multiServer.getClientForServer(ServerId(serverInfo.serverId));
+      if (client is! IptvClient) continue;
+      try {
+        byServer[serverInfo.serverId] = await client.visibleLiveCategories();
+      } catch (e) {
+        appLogger.w('Live TV: guide categories unavailable for ${serverInfo.serverId}: $e');
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _guideCategoriesByServer
+        ..clear()
+        ..addAll(byServer);
+      final selected = _selectedGuideCategory;
+      if (selected != null) {
+        final stillThere = (byServer[selected.serverId] ?? const <({String id, String name})>[]).any(
+          (c) => c.id == selected.categoryId,
+        );
+        if (!stillThere) _selectedGuideCategory = null;
+      }
+    });
+  }
+
+  Future<void> _loadFavorites(MultiServerProvider multiServer) async {    final loadGeneration = ++_favoritesLoadGeneration;
     _favoritesWritable = false;
     final previousStoreBySource = Map<String, String>.of(_favoriteStoreBySource);
     final scopeByLiveServer = Map<String, _FavoriteScope>.of(_favoriteScopeByLiveServer);
@@ -719,6 +836,78 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     });
   }
 
+  /// Load the per-IPTV-connection hidden-channel sets (build #17, §9) and
+  /// union them into [_hiddenChannelKeys]. Runs alongside favorites on
+  /// every channel load, so a rebind/refresh re-reads the store and a
+  /// hidden channel stays hidden.
+  Future<void> _loadHiddenChannels(MultiServerProvider multiServer) async {
+    final hidden = <String>{};
+    var loaded = false;
+    for (final server in multiServer.liveTvServers) {
+      final client = multiServer.getClientForServer(ServerId(server.serverId));
+      if (client is! IptvClient) continue;
+      final support = client.liveTv;
+      if (support is! IptvLiveTvSupport) continue;
+      hidden.addAll(await support.loadHiddenChannels());
+      loaded = true;
+    }
+    if (!mounted) return;
+    setState(() {
+      _hiddenChannelKeys = hidden;
+      _hiddenChannelsLoaded = loaded;
+    });
+  }
+
+  IptvLiveTvSupport? _iptvSupportForChannel(LiveTvChannel channel) {
+    final serverId = serverIdOrNull(channel.serverId);
+    if (serverId == null) return null;
+    final client = context.read<MultiServerProvider>().getClientForServer(serverId);
+    if (client is! IptvClient) return null;
+    final support = client.liveTv;
+    return support is IptvLiveTvSupport ? support : null;
+  }
+
+  /// Hide a channel (build #17, §9): persist it, drop its row from the
+  /// guide immediately, and offer Undo. The favorite is kept, so
+  /// un-hiding restores it.
+  Future<void> _hideChannel(LiveTvChannel channel) async {
+    final support = _iptvSupportForChannel(channel);
+    if (support == null) return;
+    await support.hideChannel(channel);
+    if (!mounted) return;
+    setState(() => _hiddenChannelKeys.add(_favoriteKeyForChannel(channel)));
+    if (!mounted) return;
+    showSnackBar(
+      context,
+      t.iptv.channelHidden(name: channel.title ?? channel.key),
+      actionLabel: t.common.undo,
+      onAction: () => unawaited(_unhideChannel(channel)),
+    );
+  }
+
+  Future<void> _unhideChannel(LiveTvChannel channel) async {
+    final support = _iptvSupportForChannel(channel);
+    if (support == null) return;
+    await support.unhideChannel(channel);
+    if (!mounted) return;
+    setState(() => _hiddenChannelKeys.remove(_favoriteKeyForChannel(channel)));
+  }
+
+  /// Unhide every hidden channel on every loaded IPTV connection (the
+  /// all-hidden empty state's action, build #17, §9).
+  Future<void> _unhideAllChannels() async {
+    final multiServer = context.read<MultiServerProvider>();
+    for (final server in multiServer.liveTvServers) {
+      final client = multiServer.getClientForServer(ServerId(server.serverId));
+      if (client is! IptvClient) continue;
+      final support = client.liveTv;
+      if (support is! IptvLiveTvSupport) continue;
+      await support.unhideAllChannels();
+    }
+    if (!mounted) return;
+    setState(() => _hiddenChannelKeys = {});
+  }
+
   void _enqueueFavoriteMutation(VoidCallback mutation) {
     final pendingLoad = _favoritesLoadFuture;
     unawaited(
@@ -798,7 +987,12 @@ class _LiveTvScreenState extends State<LiveTvScreen>
           showErrorSnackBar(context, t.liveTv.searchJumpNotFound);
           return;
         }
-        setState(() => _selectedLiveTvServerId = serverId);
+        setState(() {
+          _selectedLiveTvServerId = serverId;
+          // The jump target lives on the new source; a category picked
+          // on the old source would hide it (build #17, §11).
+          _selectedGuideCategory = null;
+        });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           _jumpToGuideChannelOnce(channel, program: program, retried: true);
@@ -916,6 +1110,13 @@ class _LiveTvScreenState extends State<LiveTvScreen>
 
     final isRecordings = _currentTab == LiveTvTab.recordings;
     return Scaffold(
+      // Build #17: transparent, so the Live TV mini-player's video hole
+      // can reveal the native surface below the Flutter view. The
+      // MainScreen portrait Scaffold is transparent on this tab too —
+      // both layers must be clear. The background behind is the Android
+      // window, synced to the theme mode by PlezyActivity. The AppBar
+      // above and the guide cells below still paint their own colors.
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         title: useSideNav ? TabChipStrip(children: _buildTabChipItems()) : Text(t.liveTv.title),
         actions: DesktopAppBarHelper.buildAdjustedActions([
@@ -981,27 +1182,55 @@ class _LiveTvScreenState extends State<LiveTvScreen>
               onActionNavigateUp: focusTabBar,
               onActionBack: onTabBarBack,
             )
-          : guideChannels.isEmpty && _channels.isNotEmpty
+          : _guideShowsCategoryEmptyState
               ? EmptyStateWidget(
-                  icon: Symbols.star_outline_rounded,
-                  message: t.liveTv.noFavoriteChannels,
-                  subtitle: t.liveTv.noFavoriteChannelsHint,
-                  actionLabel: t.liveTv.showAllChannels,
+                  icon: Symbols.category_rounded,
+                  message: t.liveTv.noChannelsInCategory,
+                  subtitle: t.liveTv.noChannelsInCategoryHint,
+                  actionLabel: t.liveTv.showAllCategories,
                   actionIcon: Symbols.list_rounded,
                   actionFocusNode: _guideEmptyStateActionFocusNode,
-                  onAction: _showAllChannelsFromEmptyState,
+                  onAction: () => setState(() => _selectedGuideCategory = null),
                   onActionNavigateUp: focusTabBar,
                   onActionBack: onTabBarBack,
                 )
-              : GuideTab(
-                  key: _guideTabKey,
-                  channels: guideChannels,
-                  showCatchUpBadge: context.settingsRead(SettingsService.iptvShowCatchUpBadge),
-                  isFavoriteChannel: _isFavoriteChannel,
-                  onToggleFavorite: _toggleFavorite,
-                  onNavigateUp: focusTabBar,
-                  onBack: onTabBarBack,
-                ),
+              : _guideShowsHiddenEmptyState
+              ? EmptyStateWidget(
+                  icon: Symbols.visibility_off_rounded,
+                  message: t.liveTv.allChannelsHidden,
+                  subtitle: t.liveTv.allChannelsHiddenHint,
+                  actionLabel: t.liveTv.unhideAllChannels,
+                  actionIcon: Symbols.visibility_rounded,
+                  actionFocusNode: _guideEmptyStateActionFocusNode,
+                  onAction: () => unawaited(_unhideAllChannels()),
+                  onActionNavigateUp: focusTabBar,
+                  onActionBack: onTabBarBack,
+                )
+              : guideChannels.isEmpty && _channels.isNotEmpty
+                  ? EmptyStateWidget(
+                      icon: Symbols.star_outline_rounded,
+                      message: t.liveTv.noFavoriteChannels,
+                      subtitle: t.liveTv.noFavoriteChannelsHint,
+                      actionLabel: t.liveTv.showAllChannels,
+                      actionIcon: Symbols.list_rounded,
+                      actionFocusNode: _guideEmptyStateActionFocusNode,
+                      onAction: _showAllChannelsFromEmptyState,
+                      onActionNavigateUp: focusTabBar,
+                      onActionBack: onTabBarBack,
+                    )
+                  : GuideTab(
+                      key: _guideTabKey,
+                      channels: guideChannels,
+                      showCatchUpBadge: context.settingsRead(SettingsService.iptvShowCatchUpBadge),
+                      isFavoriteChannel: _isFavoriteChannel,
+                      onToggleFavorite: _toggleFavorite,
+                      onHideChannel: _hideChannel,
+                      onNavigateUp: focusTabBar,
+                      onBack: onTabBarBack,
+                      guideCategories: _guideCategoryEntries,
+                      selectedGuideCategory: _selectedGuideCategory,
+                      onSelectGuideCategory: (entry) => setState(() => _selectedGuideCategory = entry),
+                    ),
       LiveTvTab.whatsOn => WhatsOnTab(
         key: _whatsOnTabKey,
         channels: _channels,
@@ -1075,7 +1304,10 @@ class _LiveTvScreenState extends State<LiveTvScreen>
               label: Text(t.liveTv.allSources),
               selected: selected == null,
               showCheckmark: false,
-              onSelected: (_) => setState(() => _selectedLiveTvServerId = null),
+              onSelected: (_) => setState(() {
+                _selectedLiveTvServerId = null;
+                _selectedGuideCategory = null;
+              }),
             ),
             for (final server in servers) ...[
               const SizedBox(width: 8),
@@ -1083,7 +1315,10 @@ class _LiveTvScreenState extends State<LiveTvScreen>
                 label: Text(multiServer.liveTvServerName(server.serverId)),
                 selected: selected == server.serverId,
                 showCheckmark: false,
-                onSelected: (_) => setState(() => _selectedLiveTvServerId = server.serverId),
+                onSelected: (_) => setState(() {
+                  _selectedLiveTvServerId = server.serverId;
+                  _selectedGuideCategory = null;
+                }),
               ),
             ],
           ],

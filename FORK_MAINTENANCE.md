@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **390 files changed, 35678 insertions, 3259 deletions**
+- Scale of the fork vs base: **412 files changed, 41872 insertions, 3278 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-08 after the build #16 commit — was 379 files /
-  +33,323/−3,250 at build #14; build #15's commit did not update this line).
+  verified 2026-11-08 after the build #17 commit — was 390 files /
+  +35,678/−3,259 at build #16).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -584,6 +584,95 @@ not update this file.)
   (catch-up stamp shape + fail-reason assertions).
 - Progress notes: `IPTV_BUILD16_NOTES.md`. Research:
   `~/workspace/tmp_work/plezy-tv-research16/RESEARCH_BUILD16.md`.
+
+### 15. Build #17 — Catch-up missing-recording UX, mini-player black (Dart-side), series search race + filter surfacing, toggle client reuse, initials first-region-wins + denylist, collapsible categories, guide channel menu + hide store, EPG name fallback + coverage, guide category switcher, series season synthesis (v2.25.13)
+- Catch-up UX (`lib/screens/livetv/live_tv_mini_player.dart`,
+  `lib/screens/livetv/tabs/guide_tab.dart`): new
+  `LiveTvMiniPlayerFailureKind` (generic / missingRecording / lineBusy);
+  HTTP status latched from the player log stream per tune; 404 →
+  missingRecording ONLY on catch-up tunes, 458 → lineBusy always (458 is
+  transient — never "missing recording"); missing-recording card shows
+  "No recording available for \<programme\> on \<channel\>" + Watch live
+  (new `onWatchLive`, `controller.watchLive()`), no retry. No URL-shape
+  change.
+- Mini-player black, Dart side (`lib/screens/livetv/live_tv_mini_player.dart`,
+  `lib/mpv/video.dart`, `lib/screens/main_screen.dart`,
+  `lib/screens/livetv/live_tv_screen.dart`): opaque black `Container`
+  removed; MainScreen portrait Scaffold transparent on the Live TV tab
+  and LiveTvScreen Scaffold transparent (the Scaffold `Material` was the
+  second opaque layer — SDK `scaffold.dart`); rect sent BEFORE open via
+  a per-tune `_rectSentCompleter` (500 ms, generation-checked) for
+  `VideoRectSupport` players only; `Video.onVideoRectSent` now passes
+  the rect string, carried in `LiveTvMiniPlayerDiagnostic.videoRect` +
+  the settings tile. No Kotlin changes in this build.
+- Series search (`lib/media/iptv_client.dart`,
+  `lib/screens/search_screen.dart`): sweep batch 16 → 32
+  (`_searchSweepBatchSize`); `_append*Matches` count hidden-category
+  matches into `_SectionTrace.hiddenMatches` (surfaced via
+  `lastSearchHiddenMatchesForLibrary`); scoped empty state shows
+  `t.search.hiddenByCategoryFilter` + a button opening the connection's
+  Categories screen.
+- Toggle lag (`lib/media/iptv_client.dart`,
+  `lib/services/multi_server_manager.dart`): `IptvClient.connection`
+  mutable + `updateConnection` (throws on id/data-source change);
+  `addIptvConnection` reuses the client on filter-only changes (no
+  re-warm, no health probe).
+- Initials (`lib/utils/iptv_initials.dart`): first-region-wins +
+  content-word denylist (NEWS, KIDS, LIVE, HBO, TV, VIP, HD, VOD, PPV,
+  FHD, UHD, XXX), applied in `_deriveCategoryInitial` and
+  `initialsMeetingThreshold()`; stored hidden initials never re-migrated.
+- Collapsible categories (`lib/screens/settings/iptv_categories_screen.dart`):
+  per-section collapse (header `InkWell` + chevron, `itemCount = 1` when
+  collapsed), persisted per connection in
+  `iptv_categories_collapsed:<connectionId>`; initials section not
+  collapsible.
+- Guide channel menu + hide store (`lib/screens/livetv/tabs/guide_tab.dart`,
+  `lib/media/iptv_live_tv.dart`, `lib/screens/livetv/live_tv_screen.dart`,
+  `lib/screens/settings/iptv_settings_screen.dart`,
+  `lib/utils/snackbar_helper.dart`): extensible `List<ChannelMenuItem>`
+  (Hide channel — IPTV only — + Add/Remove favourites); all four
+  triggers (cell long-press, TV SELECT hold, context-menu key) open the
+  menu; NEW `iptv_hidden_channels:<connectionId>` store (same key
+  derivation as favourites), honored in guide rows, search sheet, Live TV
+  search (Xtream + M3U) and the all-hidden empty state; Settings → IPTV
+  `_HiddenChannelsTile` per IPTV connection (per-row Unhide + Unhide
+  all); hide snackbar with Undo (`showSnackBar` action params).
+- EPG (`lib/media/iptv_live_tv.dart`,
+  `lib/screens/livetv/tabs/guide_tab.dart`,
+  `lib/screens/settings/iptv_settings_screen.dart`): name-normalized
+  fallback match (`normalizeEpgChannelName`, `IptvEpgSource`,
+  `_CachedXmltvGuide.byNormalizedName`, `_CachedChannelEpg.source`);
+  `IptvGuideCoverage` + `guideCoverage()` + Settings tile; no-EPG rows
+  render one "No guide data for this channel" block spanning the window
+  instead of hourly "No information" blocks.
+- Guide category switcher (NEW `lib/screens/livetv/guide_category.dart`):
+  `LiveTvChannel.categoryId` (runtime-only), `IptvClient.visibleLiveCategories()`,
+  pure `filterGuideChannels`; picker chips in `GuideTab`, selection in
+  `LiveTvScreen` (reset on source change, composes with source/favorites/
+  search, category empty state).
+- Series detail (`lib/media/iptv_client.dart`): `fetchChildren(series)`
+  returns synthetic season items (`season:<seriesId>:<n>`,
+  `MediaKind.season`, `leafCount` = episode count);
+  `fetchChildren(season:…)` returns that season's episodes; memoized
+  `_seriesInfo`. Pre-existing `iptv_stage2_test.dart` updated for the
+  intentional contract change.
+- New tests: `iptv_build17_probes_test.dart` (14, kept from research),
+  `iptv_build17_series_detail_test.dart` (2),
+  `iptv_build17_search_filter_test.dart` (2),
+  `iptv_build17_toggle_test.dart` (2),
+  `iptv_build17_catchup_test.dart` (5),
+  `iptv_build17_mini_player_test.dart` (3, Fold cover/unfolded/16:9),
+  `iptv_build17_categories_collapse_test.dart` (4),
+  `guide_category_filter_test.dart` (7),
+  `iptv_build17_guide_category_test.dart` (7),
+  `iptv_build17_epg_coverage_test.dart` (6),
+  `iptv_build17_channel_menu_test.dart` (5),
+  `iptv_build17_hidden_channels_test.dart` (3); updated pre-existing
+  `guide_tab_iptv_test.dart`, `live_tv_mini_player_test.dart`,
+  `live_tv_screen_test.dart`, `guide_tab_test.dart`,
+  `video_android_rect_test.dart`, `iptv_stage2_test.dart`.
+- Progress notes: `IPTV_BUILD17_NOTES.md`. Research:
+  `~/workspace/tmp_work/plezy-tv-research17/RESEARCH_BUILD17.md`.
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

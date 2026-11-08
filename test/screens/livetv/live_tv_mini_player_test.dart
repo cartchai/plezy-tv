@@ -358,7 +358,9 @@ void main() {
     // The Plex reference: video on top, guide below, both visible at once.
     expect(find.byKey(const Key('live-tv-mini-player')), findsOneWidget);
     expect(find.byKey(const Key('mini-player-video-surface')), findsOneWidget);
-    expect(find.text('No information available'), findsWidgets);
+    // Build #17 §10: channels with no EPG render one "No guide data"
+    // block per row instead of hourly "No information available" blocks.
+    expect(find.text(t.liveTv.noGuideDataForChannel), findsWidgets);
     // Exactly one player, one open, live URL, scrubber blocked like the
     // full player (v2.25.5 block scrubber).
     expect(harness.players, hasLength(1));
@@ -406,9 +408,11 @@ void main() {
     expect(harness.players.single.openCount, 1);
 
     // Drag the programme rows (inside the scrollable grid) both ways.
-    await tester.drag(find.text('No information available').first, const Offset(0, -300));
+    // Build #17 §10: the rows are "No guide data" blocks now, not hourly
+    // "No information available" blocks.
+    await tester.drag(find.text(t.liveTv.noGuideDataForChannel).first, const Offset(0, -300));
     await tester.pumpAndSettle();
-    await tester.drag(find.text('No information available').first, const Offset(0, 300));
+    await tester.drag(find.text(t.liveTv.noGuideDataForChannel).first, const Offset(0, 300));
     await tester.pumpAndSettle();
 
     expect(harness.players.single.openCount, 1);

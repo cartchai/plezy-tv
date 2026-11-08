@@ -30,8 +30,10 @@ class Video extends StatefulWidget {
   /// Called once, the first time the native video rect is sent
   /// successfully (build #15 — feeds the mini-player diagnostic: a
   /// revealed cover with no rect sent means the plane was never
-  /// positioned).
-  final VoidCallback? onVideoRectSent;
+  /// positioned). [rect] is the exact "left,top,right,bottom@dpr" the
+  /// native plane received (build #17), so the diagnostic proves the
+  /// rect equals the laid-out hole.
+  final void Function(String rect)? onVideoRectSent;
 
   const Video({
     super.key,
@@ -226,7 +228,7 @@ class _VideoState extends State<Video> {
           // draw (build #15 — the mini-player diagnostic reads this).
           if (mounted && !_videoRectSent) {
             _videoRectSent = true;
-            widget.onVideoRectSent?.call();
+            widget.onVideoRectSent?.call('$left,$top,$right,$bottom@$dpr');
           }
         })
         .catchError((Object e) {

@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../connection/connection.dart';
 import '../exceptions/media_server_exceptions.dart';
 import '../focus/focusable_text_field.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
+import '../media/iptv_client.dart';
 import '../media/media_item.dart';
 import '../media/media_kind.dart';
 import '../media/media_library.dart';
@@ -24,6 +26,7 @@ import '../services/data_aggregation_service.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/platform_detector.dart';
+import '../utils/provider_extensions.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/media_server_http_client.dart';
 import '../utils/search_relevance.dart';
@@ -34,6 +37,7 @@ import '../widgets/search_input_field.dart';
 import '../widgets/focusable_media_card.dart';
 import '../widgets/focusable_tab_chip.dart';
 import '../widgets/person_search_row.dart';
+import 'settings/iptv_categories_screen.dart';
 import '../utils/focus_utils.dart';
 import 'libraries/state_messages.dart';
 import 'main_screen.dart';
@@ -716,6 +720,22 @@ class _SearchScreenState extends State<SearchScreen>
     final scopeTitle = effectiveScopeKey == null
         ? null
         : visibleLibraries.firstWhere((library) => library.globalKey == effectiveScopeKey).title;
+    // (build #17) When a scoped search returns [] but the hidden-category
+    // filter removed matches, the empty state says so and links to the
+    // categories screen — instead of a bare "No results" that looks like
+    // the show does not exist. The diagnostics are set by searchItems
+    // before the results arrive, so they are consistent here.
+    int hiddenMatches = 0;
+    Connection? scopedIptvConnection;
+    if (effectiveScopeKey != null) {
+      final scopedLibrary = visibleLibraries.firstWhere((library) => library.globalKey == effectiveScopeKey);
+      final serverId = serverIdOrNull(scopedLibrary.serverId);
+      final client = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
+      if (client is IptvClient) {
+        hiddenMatches = client.lastSearchHiddenMatchesForLibrary(scopedLibrary.id);
+        if (hiddenMatches > 0) scopedIptvConnection = client.connection;
+      }
+    }
     return Scaffold(
       body: SafeArea(
         child: CustomScrollView(
@@ -765,9 +785,23 @@ class _SearchScreenState extends State<SearchScreen>
                   message: scopeTitle == null
                       ? t.messages.noResultsFound
                       : t.search.noResultsInLibrary(library: scopeTitle),
-                  subtitle: t.search.tryDifferentTerm,
+                  subtitle: hiddenMatches > 0
+                      ? t.search.hiddenByCategoryFilter(n: hiddenMatches, count: hiddenMatches)
+                      : t.search.tryDifferentTerm,
                   icon: Symbols.search_off_rounded,
                   iconSize: 80,
+                  onAction: scopedIptvConnection == null
+                      ? null
+                      : () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => IptvCategoriesScreen(connection: scopedIptvConnection!),
+                            ),
+                          );
+                        },
+                  actionLabel: scopedIptvConnection == null
+                      ? null
+                      : t.iptvCategories.title(name: scopedIptvConnection.displayName),
                 ),
               )
             else ...[

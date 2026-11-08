@@ -954,6 +954,26 @@ class MultiServerManager {
     }
     try {
       final oldClient = _iptvByConnectionId[connection.id];
+      if (oldClient != null) {
+        bool filterOnlyChange = false;
+        try {
+          oldClient.updateConnection(connection);
+          filterOnlyChange = true;
+        } on ArgumentError {
+          // Data source changed — fall through to the full replace below.
+        }
+        if (filterOnlyChange) {
+          // Filter-only (or display-only) change (build #17): the warm
+          // catalogs stay — no re-warm, no health probe. The toggle
+          // changed a filter, not the network; the connection was healthy
+          // a second ago. The rebind notification still fires so the
+          // tabs and the guide re-filter promptly, bypassing the pacer
+          // cooldown. The last known health stands in for the probe.
+          oldClient.notifyCatalogRefreshed(userInitiated: true);
+          appLogger.i('Updated IPTV server filters: ${oldClient.serverName ?? connection.id}');
+          return _iptvHealthByConnectionId[connection.id] == HealthStatus.online;
+        }
+      }
       if (oldClient != null) unawaited(_closeClientGracefully(oldClient));
       final client = IptvClient.forConnection(connection);
       _iptvByConnectionId[connection.id] = client;

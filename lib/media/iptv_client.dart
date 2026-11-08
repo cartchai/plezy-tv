@@ -67,7 +67,13 @@ class IptvCategory {
 /// [LiveTvSupport.startPlayback] hand out URLs and the player opens exactly
 /// one of them. No prefetching, no preview probing.
 class IptvClient implements MediaServerClient {
-  final Connection connection;
+  /// The connection this client serves. Replaced only via
+  /// [updateConnection] (build #17): a filter toggle re-binds the same
+  /// connection with new filter state, and the client keeps its warm
+  /// catalogs instead of being replaced with a cold one. The catalogs
+  /// belong to the data source (server + credentials), not to the
+  /// filter — filtering happens at read time — so they stay valid.
+  Connection connection;
 
   IptvClient.m3u({required M3uConnection m3uConnection}) : connection = m3uConnection;
   IptvClient.xtream({required XtreamConnection xtreamConnection}) : connection = xtreamConnection;
@@ -85,6 +91,39 @@ class IptvClient implements MediaServerClient {
       XtreamConnection() => IptvClient.xtream(xtreamConnection: connection),
       _ => throw UnsupportedError('IptvClient cannot wrap ${connection.runtimeType}'),
     };
+  }
+
+  /// Swap the served connection for [next] (build #17): a filter toggle
+  /// (or a display-only edit) re-binds the same connection, and the
+  /// client keeps its warm in-memory catalogs, its in-flight loads, and
+  /// its disk-cache handles instead of re-paying all three warm-ups
+  /// (parse alone is ~1.3–1.5 s at Trex scale, before network, health
+  /// probe and tab/guide reloads — that cascade is the toggle lag).
+  ///
+  /// Only the filter/display fields may differ. Throws [ArgumentError]
+  /// when the id or the data source differs (Xtream: server URL /
+  /// username / password; M3U: playlist URL / EPG URL) — the caller must
+  /// replace the client instead, because the warm catalogs belong to the
+  /// old data source. The lazily-built [_xtreamApi] stays valid because
+  /// the data source is unchanged.
+  void updateConnection(Connection next) {
+    if (next.id != connection.id) {
+      throw ArgumentError('IptvClient.updateConnection: id changed (${connection.id} -> ${next.id})');
+    }
+    if (!_sameDataSource(connection, next)) {
+      throw ArgumentError('IptvClient.updateConnection: data source changed for ${connection.id}');
+    }
+    connection = next;
+  }
+
+  static bool _sameDataSource(Connection a, Connection b) {
+    if (a is XtreamConnection && b is XtreamConnection) {
+      return a.serverUrl == b.serverUrl && a.username == b.username && a.password == b.password;
+    }
+    if (a is M3uConnection && b is M3uConnection) {
+      return a.playlistUrl == b.playlistUrl && a.epgUrl == b.epgUrl;
+    }
+    return false;
   }
 
   @visibleForTesting
@@ -130,6 +169,14 @@ class IptvClient implements MediaServerClient {
   /// stream id as the XMLTV channel id, so the guide path also tries the
   /// key itself). Null when the channel is not a known Xtream channel.
   String? epgChannelIdForChannelKey(String channelKey) => _xtreamChannelByKey[channelKey]?.epgChannelId;
+
+  /// The display name of a live channel by its key (build #17, §10) —
+  /// the EPG name-fallback match. Xtream: the stream name; M3U: the
+  /// entry name. Null when the key is unknown.
+  String? channelNameForChannelKey(String channelKey) {
+    if (_isXtream) return _xtreamChannelByKey[channelKey]?.name;
+    return _m3uChannelByKey[channelKey]?.name;
+  }
 
   /// Test-only override for the Xtream API, so unit tests can stub the
   /// catalog instead of hitting the network. Production code never sets this.
@@ -194,6 +241,19 @@ class IptvClient implements MediaServerClient {
 
   /// The last search's readout, for the on-device diagnostics row.
   IptvSearchDiagnostics? get lastSearchDiagnostics => _lastSearchDiagnostics;
+
+  /// Matches the last search found but the hidden-category filter
+  /// removed, for one library (build #17): the search screen's empty
+  /// state tells the user the filter hid them instead of showing a bare
+  /// "No results". 0 when there was no search yet, or when the library
+  /// is not one of this connection's movies/series libraries.
+  int lastSearchHiddenMatchesForLibrary(String libraryId) {
+    final diagnostics = _lastSearchDiagnostics;
+    if (diagnostics == null) return 0;
+    if (libraryId == _seriesLibraryId) return diagnostics.series.hiddenMatches;
+    if (libraryId == _moviesLibraryId) return diagnostics.movies.hiddenMatches;
+    return 0;
+  }
   Future<List<XtreamCategory>>? _vodCategoriesFuture;
   Future<List<XtreamCategory>>? _seriesCategoriesFuture;
   Future<List<XtreamCategory>>? _liveCategoriesFuture;
@@ -239,6 +299,14 @@ class IptvClient implements MediaServerClient {
   /// real scale (~270 series categories) it brings a full sweep inside
   /// ~9s at 500ms per call, well within the 45s sweep deadline.
   static const int _catalogFallbackBatchSize = 16;
+
+  /// Concurrent category calls per batch in the user-initiated search
+  /// sweep (build #17): 32 covers the whole 237-category list inside
+  /// the sweep deadline, so a late category is reached before the
+  /// budget expires. The background crawl fallback stays at 16 — the
+  /// search is one user action, not a loop, and it stops early as soon
+  /// as it has enough matches or the catalog load lands.
+  static const int _searchSweepBatchSize = 32;
 
   /// Per-section time budget for [searchItems] (build #8 Task 1): a section
   /// that misses its budget returns [] for that search while its catalog
@@ -364,6 +432,7 @@ class IptvClient implements MediaServerClient {
     _seriesCategoryNamesFuture = null;
     _liveCategoryNamesFuture = null;
     _favoriteItemsFuture = null;
+    _seriesInfoFutures.clear();
     _xtreamChannelByKey.clear();
     _m3uChannelByKey.clear();
     unawaited(_catalogCache.clear(connection.id));
@@ -880,6 +949,28 @@ class IptvClient implements MediaServerClient {
   Future<List<XtreamCategory>> liveCategories() => _liveCategories();
   Future<List<XtreamCategory>> vodCategories() => _vodCategories();
   Future<List<XtreamCategory>> seriesCategories() => _seriesCategories();
+
+  /// The live TV categories the user has NOT turned off (build #17): the
+  /// guide category picker's entries. Filtered by the SAME
+  /// [_isHiddenCategory] rule as the guide rows ([iptvChannels] drops
+  /// hidden categories), so the picker and the guide can never drift
+  /// apart — a hidden category never appears in the picker, and every
+  /// picker entry has visible channels. M3U groups are (id, name) pairs
+  /// with the group title as both.
+  Future<List<({String id, String name})>> visibleLiveCategories() async {
+    if (_isXtream) {
+      final categories = await liveCategories();
+      return categories
+          .where((c) => !_isHiddenCategory(c.id, c.name))
+          .map((c) => (id: c.id, name: c.name))
+          .toList(growable: false);
+    }
+    final groups = await m3uGroups();
+    return groups
+        .where((g) => !_isHiddenGroup(g))
+        .map((g) => (id: g, name: g))
+        .toList(growable: false);
+  }
 
   /// The M3U group titles (the playlist's categories), distinct and
   /// sorted, for the Categories screen. Reads the cached playlist entries,
@@ -1697,35 +1788,110 @@ class IptvClient implements MediaServerClient {
   Future<List<MediaItem>> fetchChildren(String parentId) async {
     if (!_isXtream) return const [];
     final parts = parentId.split(':');
-    if (parts.length < 2 || parts[0] != 'series') return const [];
+    if (parts.length < 2) return const [];
+    // A season id ('season:<seriesId>:<n>') returns that season's
+    // episodes (build #17): the detail screen fetches the selected
+    // season's episodes through this id, and fetchChildrenPage slices
+    // them for the season pager.
+    if (parts[0] == 'season') {
+      final seriesId = int.tryParse(parts[1]);
+      final seasonNum = parts.length >= 3 ? int.tryParse(parts[2]) : null;
+      if (seriesId == null || seasonNum == null) return const [];
+      final series = (await _seriesList()).where((s) => s.seriesId == seriesId).firstOrNull;
+      if (series == null) return const [];
+      final info = await _seriesInfo(seriesId);
+      final seasonEpisodes = info.episodesBySeason[seasonNum];
+      if (seasonEpisodes == null) return const [];
+      final favorites = await _favoriteItems();
+      final categoryNames = await _seriesCategoryNames();
+      final seriesCategoryName = categoryNames[series.categoryId];
+      // Sort a copy: the info object's lists are shared state (and may
+      // be unmodifiable), so sorting them in place mutates the cache.
+      final sorted = seasonEpisodes.toList()..sort((a, b) => a.episodeNum.compareTo(b.episodeNum));
+      return sorted
+          .map(
+            (episode) => _episodeItem(
+              series,
+              episode,
+              seasonNum,
+              isFavorite: favorites.containsKey('episode:${series.seriesId}:${episode.id}'),
+              seriesCategoryName: seriesCategoryName,
+            ),
+          )
+          .toList(growable: false);
+    }
+    if (parts[0] != 'series') return const [];
     final seriesId = int.tryParse(parts[1]);
     if (seriesId == null) return const [];
     final series = (await _seriesList()).where((s) => s.seriesId == seriesId).firstOrNull;
     if (series == null) return const [];
-    final info = await _xtreamApi.getSeriesInfo(seriesId);
-    final episodes = <MediaItem>[];
+    final info = await _seriesInfo(seriesId);
     final seasons = info.episodesBySeason.keys.toList()..sort();
-    final favorites = await _favoriteItems();
+    // One synthetic season item per season (build #17): the detail
+    // screen — and the download / sync / title-copy callers — treat
+    // fetchChildren(series) as seasons. The old flat episode list made
+    // every episode render as a season tab (labelled with the episode's
+    // panel title, e.g. "… - S01E01") and fetching that "season"'s
+    // children return [] ("No episodes found").
     final categoryNames = await _seriesCategoryNames();
     final seriesCategoryName = categoryNames[series.categoryId];
-    for (final season in seasons) {
-      // Sort a copy: the info object's lists are shared state (and may be
-      // unmodifiable), so sorting them in place mutates the cache.
-      final seasonEpisodes = info.episodesBySeason[season]!.toList()
-        ..sort((a, b) => a.episodeNum.compareTo(b.episodeNum));
-      for (final episode in seasonEpisodes) {
-        episodes.add(
-          _episodeItem(
+    return seasons
+        .map(
+          (season) => _seasonItem(
             series,
-            episode,
             season,
-            isFavorite: favorites.containsKey('episode:${series.seriesId}:${episode.id}'),
+            info.episodesBySeason[season]!.length,
             seriesCategoryName: seriesCategoryName,
           ),
-        );
-      }
-    }
-    return episodes;
+        )
+        .toList(growable: false);
+  }
+
+  /// One synthetic season item for an Xtream series (build #17 — the
+  /// panel has no season items, only per-season episode lists, so the
+  /// client synthesizes them). Server/library fields are copied from the
+  /// series item so the detail screen's fallbacks treat the season like
+  /// a Plex season.
+  MediaItem _seasonItem(
+    XtreamSeries series,
+    int season,
+    int episodeCount, {
+    String? seriesCategoryName,
+  }) {
+    return MediaItem.xtream(
+      id: 'season:${series.seriesId}:$season',
+      kind: MediaKind.season,
+      title: 'Season $season',
+      parentId: 'series:${series.seriesId}',
+      parentTitle: stripCategoryPrefix(series.name, seriesCategoryName),
+      index: season,
+      leafCount: episodeCount,
+      thumbPath: series.cover,
+      categoryId: series.categoryId,
+      libraryId: _seriesLibraryId,
+      libraryTitle: '$_name — Series',
+      serverId: connection.id,
+      serverName: _name,
+    );
+  }
+
+  /// Memoized series-info fetch (build #17): `fetchChildren` needs the
+  /// info for the season list AND for each season's episodes, and
+  /// `fetchPlayableDescendants` walks both — without memoization one
+  /// series detail would pay one get_series_info per season plus one
+  /// for the list. A failed fetch is evicted so a retry re-fetches.
+  /// Cleared with the catalog cache.
+  final Map<int, Future<XtreamSeriesInfo>> _seriesInfoFutures = {};
+
+  Future<XtreamSeriesInfo> _seriesInfo(int seriesId) {
+    final cached = _seriesInfoFutures[seriesId];
+    if (cached != null) return cached;
+    final future = _xtreamApi.getSeriesInfo(seriesId).catchError((Object e) {
+      _seriesInfoFutures.remove(seriesId);
+      throw e;
+    });
+    _seriesInfoFutures[seriesId] = future;
+    return future;
   }
 
   @override
@@ -1767,11 +1933,26 @@ class IptvClient implements MediaServerClient {
   }
 
   @override
-  Future<List<MediaItem>> fetchPlayableDescendants(String parentId) => fetchChildren(parentId);
+  Future<List<MediaItem>> fetchPlayableDescendants(String parentId) async {
+    final children = await fetchChildren(parentId);
+    if (children.isEmpty) return const [];
+    // A series now returns season items (build #17); the leaves callers
+    // (downloads, sync, deep links, the offline queue) need the
+    // episodes, so expand each season into its episodes. A season id
+    // already returns episodes and passes through unchanged.
+    if (children.first.kind == MediaKind.season) {
+      final episodes = <MediaItem>[];
+      for (final season in children) {
+        episodes.addAll(await fetchChildren(season.id));
+      }
+      return episodes;
+    }
+    return children;
+  }
 
   @override
   Future<List<MediaItem>?> fetchClientSideEpisodeQueue(String seriesId) async {
-    final episodes = await fetchChildren(seriesId);
+    final episodes = await fetchPlayableDescendants(seriesId);
     return episodes.isEmpty ? null : episodes;
   }
 
@@ -1891,6 +2072,9 @@ class IptvClient implements MediaServerClient {
   /// hidden-category filter and the query, de-duplicated by stream id (a
   /// panel may return the same row under two categories).
   /// Shared by the warm path and the cold sweep so the two cannot drift.
+  /// A row that matches the query but sits in a hidden category is
+  /// counted on [trace] (build #17) instead of being silently dropped —
+  /// the search screen tells the user the filter hid it.
   void _appendMovieMatches(
     List<XtreamVodStream> rows,
     String needle,
@@ -1899,6 +2083,7 @@ class IptvClient implements MediaServerClient {
     Map<String, String> categoryNames,
     List<MediaItem> out,
     Set<int> seen,
+    _SectionTrace trace,
   ) {
     // One case-insensitive pattern for the whole scan (build #13): the
     // old `name.toLowerCase().contains(needle)` allocated a lowercased
@@ -1908,8 +2093,11 @@ class IptvClient implements MediaServerClient {
     for (final stream in rows) {
       if (out.length >= limit) break;
       if (!seen.add(stream.streamId)) continue;
-      if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) continue;
       if (!match.hasMatch(stream.name)) continue;
+      if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) {
+        trace.hiddenMatches++;
+        continue;
+      }
       out.add(
         _movieItem(
           stream,
@@ -1929,6 +2117,7 @@ class IptvClient implements MediaServerClient {
     Map<String, String> categoryNames,
     List<MediaItem> out,
     Set<int> seen,
+    _SectionTrace trace,
   ) {
     // One case-insensitive pattern for the whole scan — see
     // [_appendMovieMatches].
@@ -1936,8 +2125,11 @@ class IptvClient implements MediaServerClient {
     for (final s in rows) {
       if (out.length >= limit) break;
       if (!seen.add(s.seriesId)) continue;
-      if (_isHiddenCategory(s.categoryId, categoryNames[s.categoryId])) continue;
       if (!match.hasMatch(s.name)) continue;
+      if (_isHiddenCategory(s.categoryId, categoryNames[s.categoryId])) {
+        trace.hiddenMatches++;
+        continue;
+      }
       out.add(
         _seriesItem(
           s,
@@ -1954,19 +2146,28 @@ class IptvClient implements MediaServerClient {
   /// that). Stops at [deadline] or when [shouldStop] says enough matches
   /// were found; rows landing after the sweep stopped are dropped, never
   /// appended to a list that was already returned.
+  ///
+  /// [batchSize] is how many category calls run concurrently per batch.
+  /// The background crawl fallback uses [_catalogFallbackBatchSize]
+  /// (16); the user-initiated search sweep uses
+  /// [_searchSweepBatchSize] (32, build #17) so the whole 237-category
+  /// list is covered inside the sweep deadline — at 16 a late category
+  /// (e.g. "|EN| TOP SERIES", last in the list) is never reached before
+  /// the deadline and its shows are lost even though per-category works.
   Future<void> _sweepCatalogCategories<T>(
     List<XtreamCategory> categories,
     Future<List<T>> Function(String categoryId) loadCategory,
     void Function(List<T> rows) onRows,
     bool Function() shouldStop,
-    DateTime deadline,
-  ) async {
+    DateTime deadline, {
+    int batchSize = _catalogFallbackBatchSize,
+  }) async {
     var stopped = false;
-    for (var i = 0; i < categories.length && !stopped; i += _catalogFallbackBatchSize) {
+    for (var i = 0; i < categories.length && !stopped; i += batchSize) {
       if (shouldStop()) break;
       final timeLeft = deadline.difference(DateTime.now());
       if (timeLeft <= Duration.zero) break;
-      final end = (i + _catalogFallbackBatchSize).clamp(0, categories.length);
+      final end = (i + batchSize).clamp(0, categories.length);
       final batch = categories.sublist(i, end);
       final futures = <Future<void>>[];
       for (final category in batch) {
@@ -2010,7 +2211,7 @@ class IptvClient implements MediaServerClient {
         final rows = await _vodStreams();
         final out = <MediaItem>[];
         trace.partialOut = out;
-        _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, <int>{});
+        _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
         trace.loadRows = rows.length;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
@@ -2050,7 +2251,7 @@ class IptvClient implements MediaServerClient {
           trace.loadRows = rows.length;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
-          _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
           trace.loadMatches += out.length - before;
         }),
       );
@@ -2070,11 +2271,12 @@ class IptvClient implements MediaServerClient {
         (id) => _xtreamApi.getVodStreams(categoryId: id),
         (rows) {
           final before = out.length;
-          _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
           trace.sweepMatches += out.length - before;
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
+        batchSize: _searchSweepBatchSize,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found NOTHING — instant [] per-category calls, or
@@ -2096,6 +2298,7 @@ class IptvClient implements MediaServerClient {
           categoryNames,
           out,
           seen,
+          trace,
         );
         trace.partialMatches += out.length - partialBefore;
         if (out.isEmpty) {
@@ -2107,7 +2310,7 @@ class IptvClient implements MediaServerClient {
               trace.loadRows = rows.length;
               trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
               final before = out.length;
-              _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+              _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
               trace.loadMatches += out.length - before;
             } else if (rows.isEmpty) {
               // The load landed empty; the crawl may have published more
@@ -2121,6 +2324,7 @@ class IptvClient implements MediaServerClient {
                 categoryNames,
                 out,
                 seen,
+                trace,
               );
               trace.partialMatches += out.length - lastBefore;
             }
@@ -2146,7 +2350,7 @@ class IptvClient implements MediaServerClient {
         final rows = await _seriesList();
         final out = <MediaItem>[];
         trace.partialOut = out;
-        _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, <int>{});
+        _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
         trace.loadRows = rows.length;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
@@ -2180,7 +2384,7 @@ class IptvClient implements MediaServerClient {
           trace.loadRows = rows.length;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
-          _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
           trace.loadMatches += out.length - before;
         }),
       );
@@ -2200,11 +2404,12 @@ class IptvClient implements MediaServerClient {
         (id) => _xtreamApi.getSeries(categoryId: id),
         (rows) {
           final before = out.length;
-          _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+          _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
           trace.sweepMatches += out.length - before;
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
+        batchSize: _searchSweepBatchSize,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found nothing before the load landed — filter the
@@ -2219,6 +2424,7 @@ class IptvClient implements MediaServerClient {
           categoryNames,
           out,
           seen,
+          trace,
         );
         trace.partialMatches += out.length - partialBefore;
         if (out.isEmpty) {
@@ -2230,7 +2436,7 @@ class IptvClient implements MediaServerClient {
               trace.loadRows = rows.length;
               trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
               final before = out.length;
-              _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen);
+              _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
               trace.loadMatches += out.length - before;
             } else if (rows.isEmpty) {
               // The load landed empty; the crawl may have published more
@@ -2244,6 +2450,7 @@ class IptvClient implements MediaServerClient {
                 categoryNames,
                 out,
                 seen,
+                trace,
               );
               trace.partialMatches += out.length - lastBefore;
             }
@@ -2270,12 +2477,16 @@ class IptvClient implements MediaServerClient {
     try {
       final sectionStarted = DateTime.now();
       final categoryNames = await _liveCategoryNames();
+      // Hidden channels (build #17, §9) never match in Live TV search:
+      // load the set once, then [_appendLiveMatches] skips them in both
+      // the warm and the cold path.
+      await _liveTv.loadHiddenChannels();
       if (_liveStreamsLoaded) {
         // Warm catalog: filter the cached list.
         final rows = await _liveStreams();
         final out = <MediaItem>[];
         trace.partialOut = out;
-        _appendLiveMatches(rows, needle, limit, categoryNames, out, <int>{});
+        _appendLiveMatches(rows, needle, limit, categoryNames, out, <int>{}, trace);
         trace.loadRows = rows.length;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
@@ -2298,7 +2509,7 @@ class IptvClient implements MediaServerClient {
           trace.loadRows = rows.length;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
-          _appendLiveMatches(rows, needle, limit, categoryNames, out, seen);
+          _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
           trace.loadMatches += out.length - before;
         }),
       );
@@ -2312,11 +2523,12 @@ class IptvClient implements MediaServerClient {
         (id) => _xtreamApi.getLiveStreams(categoryId: id),
         (rows) {
           final before = out.length;
-          _appendLiveMatches(rows, needle, limit, categoryNames, out, seen);
+          _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
           trace.sweepMatches += out.length - before;
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
+        batchSize: _searchSweepBatchSize,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found nothing before the load landed — wait out the
@@ -2329,7 +2541,7 @@ class IptvClient implements MediaServerClient {
             trace.loadRows = rows.length;
             trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
             final before = out.length;
-            _appendLiveMatches(rows, needle, limit, categoryNames, out, seen);
+            _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
             trace.loadMatches += out.length - before;
           }
         }
@@ -2351,6 +2563,7 @@ class IptvClient implements MediaServerClient {
     Map<String, String> categoryNames,
     List<MediaItem> out,
     Set<int> seen,
+    _SectionTrace trace,
   ) {
     // One case-insensitive pattern for the whole scan — see
     // [_appendMovieMatches].
@@ -2358,8 +2571,13 @@ class IptvClient implements MediaServerClient {
     for (final stream in rows) {
       if (out.length >= limit) break;
       if (!seen.add(stream.streamId)) continue;
-      if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) continue;
       if (!match.hasMatch(stream.name)) continue;
+      if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) {
+        trace.hiddenMatches++;
+        continue;
+      }
+      // A hidden channel (build #17, §9) never matches in Live TV search.
+      if (_liveTv.isHiddenChannelKey('${stream.streamId}')) continue;
       out.add(_liveChannelItem(stream, categoryName: categoryNames[stream.categoryId]));
     }
   }
@@ -2393,6 +2611,8 @@ class IptvClient implements MediaServerClient {
     if (excludedLibraryIds.contains(_liveLibraryId)) return const [];
     try {
       final entries = await _m3uEntries();
+      // Hidden channels (build #17, §9) never match in Live TV search.
+      await _liveTv.loadHiddenChannels();
       final out = <MediaItem>[];
       // One case-insensitive pattern for the whole scan — see
       // [_appendMovieMatches].
@@ -2402,6 +2622,7 @@ class IptvClient implements MediaServerClient {
         // A hidden group (its own switch, or its category initial) hides
         // its entries from search too. Item names are never filtered.
         if (_isHiddenGroup(entry.groupTitle)) continue;
+        if (_liveTv.isHiddenChannelKey(entry.tvgId ?? entry.url)) continue;
         if (!match.hasMatch(entry.name)) continue;
         out.add(
           MediaItem.m3u(
@@ -2997,6 +3218,8 @@ class IptvClient implements MediaServerClient {
             serverName: _name,
             // Visible catch-up badge in the guide (tv_archive = 1).
             hasCatchUp: stream.tvArchive,
+            // Guide category picker (build #17): the Xtream category id.
+            categoryId: stream.categoryId,
           ),
         );
       }
@@ -3018,6 +3241,9 @@ class IptvClient implements MediaServerClient {
           thumb: entry.tvgLogo,
           serverId: connection.id,
           serverName: _name,
+          // Guide category picker (build #17): an M3U channel's
+          // category is its group title.
+          categoryId: entry.groupTitle,
         ),
       );
     }
@@ -3094,6 +3320,11 @@ class _SectionTrace {
   int loadMatches = 0;
   int sweepMatches = 0;
   int partialMatches = 0;
+
+  /// Rows that matched the query but sat in a hidden category (build
+  /// #17): counted, not returned, so the search screen can tell the user
+  /// the filter hid them instead of showing a bare "No results".
+  int hiddenMatches = 0;
   int ms = 0;
   bool skipped = false;
 
@@ -3113,6 +3344,7 @@ class _SectionTrace {
     loadMatches: loadMatches,
     sweepMatches: sweepMatches,
     partialMatches: partialMatches,
+    hiddenMatches: hiddenMatches,
     ms: ms,
     skipped: skipped,
   );
@@ -3127,6 +3359,7 @@ class IptvSearchSectionDiagnostics {
     required this.loadMatches,
     required this.sweepMatches,
     required this.partialMatches,
+    required this.hiddenMatches,
     required this.ms,
     required this.skipped,
   });
@@ -3146,6 +3379,11 @@ class IptvSearchSectionDiagnostics {
 
   /// Matches that came from the crawl's published partial rows.
   final int partialMatches;
+
+  /// Rows that matched the query but were removed by the hidden-category
+  /// filter (build #17) — the search screen's "matches are in categories
+  /// you turned off" message reads this.
+  final int hiddenMatches;
 
   /// Wall time of the whole section, in milliseconds.
   final int ms;

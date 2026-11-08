@@ -241,6 +241,9 @@ class Translations$common$en {
 	/// en: 'Retry'
 	String get retry => 'Retry';
 
+	/// en: 'Undo'
+	String get undo => 'Undo';
+
 	/// en: 'Log out'
 	String get logout => 'Log out';
 
@@ -1675,6 +1678,12 @@ class Translations$search$en {
 
 	/// en: 'No results in ${library}'
 	String noResultsInLibrary({required Object library}) => 'No results in ${library}';
+
+	/// en: '(one) {1 matching title is in a category you turned off} (other) {${count} matching titles are in categories you turned off}'
+	String hiddenByCategoryFilter({required num n, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '1 matching title is in a category you turned off',
+		other: '${count} matching titles are in categories you turned off',
+	);
 }
 
 // Path: hotkeys
@@ -3653,6 +3662,17 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2263 => [
+		'Live TV, Movies and Series sections on the Trex categories screen now collapse, so you can jump to a section faster',
+		'Category initials now turn off every category with those initials, and turning categories off no longer reloads everything',
+		'Series search: “game of thrones” in Trex — Series now finds the show on a cold start, and if matches are hidden by turned-off categories the empty state says so',
+		'Series detail now shows real Season rows with their episodes instead of treating episodes as seasons',
+		'Catch-up: when the provider has no recording for a programme, the mini-player says so plainly and offers Watch live instead of a generic failure',
+		'Mini-player: the black layers covering the video are gone and the video position is sent before playback starts (still unproven on a real phone — Settings → IPTV shows the video position and whether a frame arrived)',
+		'Long-press a channel in the guide for a menu: Hide channel or Add to favourites; hidden channels can be un-hidden in Settings → IPTV',
+		'The guide has a category picker (Live TV categories only, only the ones you left turned on) — it filters the loaded rows, no re-fetch',
+		'Guide programmes now also match by channel name when the provider\'s channel ids don\'t line up, and Settings → IPTV shows how much of the guide has programmes',
+	];
 	List<String> get changelog2262 => [
 		'Categories now scroll smoothly — the list only builds the rows on screen instead of all 1,200 at once',
 		'Live TV mini-player should show video now: the app finally tells Android where the video goes, so the picture sits in the mini-player instead of hidden behind the guide',
@@ -4110,6 +4130,9 @@ class Translations$liveTv$en {
 	/// en: 'No information available'
 	String get noInformationAvailable => 'No information available';
 
+	/// en: 'No guide data for this channel'
+	String get noGuideDataForChannel => 'No guide data for this channel';
+
 	/// en: 'Live stream failed'
 	String get liveStreamFailed => 'Live stream failed';
 
@@ -4208,6 +4231,33 @@ class Translations$liveTv$en {
 
 	/// en: 'Show All Channels'
 	String get showAllChannels => 'Show All Channels';
+
+	/// en: 'All categories'
+	String get allCategories => 'All categories';
+
+	/// en: 'No channels in this category'
+	String get noChannelsInCategory => 'No channels in this category';
+
+	/// en: 'This category has no channels in the guide right now. Pick another category, or turn more categories on in IPTV settings.'
+	String get noChannelsInCategoryHint => 'This category has no channels in the guide right now. Pick another category, or turn more categories on in IPTV settings.';
+
+	/// en: 'Show all categories'
+	String get showAllCategories => 'Show all categories';
+
+	/// en: 'Hide channel'
+	String get hideChannel => 'Hide channel';
+
+	/// en: 'Unhide'
+	String get unhide => 'Unhide';
+
+	/// en: 'All channels hidden'
+	String get allChannelsHidden => 'All channels hidden';
+
+	/// en: 'You hid every channel in this guide. Unhide them to see the guide again.'
+	String get allChannelsHiddenHint => 'You hid every channel in this guide. Unhide them to see the guide again.';
+
+	/// en: 'Unhide all'
+	String get unhideAllChannels => 'Unhide all';
 
 	/// en: 'Could not load favorites. Check your connection and try again.'
 	String get favoritesLoadFailed => 'Could not load favorites. Check your connection and try again.';
@@ -6629,6 +6679,24 @@ class Translations$iptv$en {
 	/// en: 'Categories turned off: ${count}'
 	String catalogDiagnosticsDisabledCategories({required Object count}) => 'Categories turned off: ${count}';
 
+	/// en: 'Guide coverage'
+	String get guideCoverageTitle => 'Guide coverage';
+
+	/// en: 'No guide data loaded yet — open Live TV and the guide fills this in.'
+	String get guideCoverageNone => 'No guide data loaded yet — open Live TV and the guide fills this in.';
+
+	/// en: '${percent}% of guide channels have programmes (${withPrograms} of ${total})'
+	String guideCoverageLine({required Object percent, required Object withPrograms, required Object total}) => '${percent}% of guide channels have programmes (${withPrograms} of ${total})';
+
+	/// en: 'From feed by channel id: ${byId} · by name: ${byName} · short guide: ${shortEpg} · no data: ${none}'
+	String guideCoverageSplit({required Object byId, required Object byName, required Object shortEpg, required Object none}) => 'From feed by channel id: ${byId} · by name: ${byName} · short guide: ${shortEpg} · no data: ${none}';
+
+	/// en: '${count} from an older cache (source unknown)'
+	String guideCoverageUnknown({required Object count}) => '${count} from an older cache (source unknown)';
+
+	/// en: 'Feed lists ${count} channel ids'
+	String guideCoverageFeedIds({required Object count}) => 'Feed lists ${count} channel ids';
+
 	/// en: 'Last search'
 	String get lastSearchTitle => 'Last search';
 
@@ -6643,6 +6711,21 @@ class Translations$iptv$en {
 
 	/// en: '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms'
 	String lastSearchSection({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms';
+
+	/// en: '${name} hidden'
+	String channelHidden({required Object name}) => '${name} hidden';
+
+	/// en: 'Hidden channels'
+	String get hiddenChannelsTitle => 'Hidden channels';
+
+	/// en: 'No hidden channels on this connection. Long-press a channel in the guide to hide it.'
+	String get hiddenChannelsNone => 'No hidden channels on this connection. Long-press a channel in the guide to hide it.';
+
+	/// en: '${count} hidden'
+	String hiddenChannelsCount({required Object count}) => '${count} hidden';
+
+	/// en: 'Unhide all'
+	String get unhideAll => 'Unhide all';
 
 	/// en: '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms'
 	String lastSearchSectionLoadNeverLanded({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms';
@@ -6683,8 +6766,23 @@ class Translations$iptv$en {
 	/// en: 'Video rect sent: no'
 	String get miniPlayerRectNo => 'Video rect sent: no';
 
+	/// en: 'Rect: ${rect}'
+	String miniPlayerRectValues({required Object rect}) => 'Rect: ${rect}';
+
 	/// en: 'Could not start: ${reason}'
 	String miniPlayerFailReason({required Object reason}) => 'Could not start: ${reason}';
+
+	/// en: 'No recording available for ${programme} on ${channel}'
+	String miniPlayerMissingRecording({required Object programme, required Object channel}) => 'No recording available for ${programme} on ${channel}';
+
+	/// en: 'No recording available for this programme on ${channel}'
+	String miniPlayerMissingRecordingNoProgramme({required Object channel}) => 'No recording available for this programme on ${channel}';
+
+	/// en: 'Line busy — another stream is using your connection'
+	String get miniPlayerLineBusy => 'Line busy — another stream is using your connection';
+
+	/// en: 'Watch live'
+	String get miniPlayerWatchLive => 'Watch live';
 
 	/// en: '${count} groups off'
 	String groupsOff({required Object count}) => '${count} groups off';
@@ -8790,6 +8888,7 @@ extension on Translations {
 			'common.submit' => 'Submit',
 			'common.confirm' => 'Confirm',
 			'common.retry' => 'Retry',
+			'common.undo' => 'Undo',
 			'common.logout' => 'Log out',
 			'common.unknown' => 'Unknown',
 			'common.refresh' => 'Refresh',
@@ -9243,9 +9342,9 @@ extension on Translations {
 			'settings.scopeSyncOffsets' => 'Audio & Subtitle Sync',
 			'settings.playerScopeOff' => 'Don\'t save',
 			'settings.playerScopeGlobal' => 'Everywhere',
-			'settings.playerScopeLibrary' => 'Per library',
 			_ => null,
 		} ?? switch (path) {
+			'settings.playerScopeLibrary' => 'Per library',
 			'settings.playerScopeTitle' => 'Per show or movie',
 			'settings.exportDialogTitle' => 'Export PlezTV settings',
 			'themeEditor.builtIn' => 'Built-in',
@@ -9293,6 +9392,7 @@ extension on Translations {
 			'search.people' => 'People',
 			'search.allLibraries' => 'All libraries',
 			'search.noResultsInLibrary' => ({required Object library}) => 'No results in ${library}',
+			'search.hiddenByCategoryFilter' => ({required num n, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '1 matching title is in a category you turned off', other: '${count} matching titles are in categories you turned off', ), 
 			'hotkeys.setShortcutFor' => ({required Object actionName}) => 'Set Shortcut for ${actionName}',
 			'hotkeys.clearShortcut' => 'Clear shortcut',
 			'hotkeys.noShortcutSet' => 'No shortcut set',
@@ -9756,10 +9856,10 @@ extension on Translations {
 			'profiles.plexHomeAccount' => 'Plex Home account',
 			'profiles.plexAccountChip' => ({required Object account}) => 'Plex account: ${account}',
 			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
-			'profiles.connectionDefault' => 'Default',
-			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.connectionDefault' => 'Default',
+			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
 			'profiles.makeDefault' => 'Make default',
 			'profiles.removeConnection' => 'Remove',
 			'profiles.profileRenamed' => 'Profile renamed.',
@@ -10023,6 +10123,15 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2263.0' => 'Live TV, Movies and Series sections on the Trex categories screen now collapse, so you can jump to a section faster',
+			'about.changelog2263.1' => 'Category initials now turn off every category with those initials, and turning categories off no longer reloads everything',
+			'about.changelog2263.2' => 'Series search: “game of thrones” in Trex — Series now finds the show on a cold start, and if matches are hidden by turned-off categories the empty state says so',
+			'about.changelog2263.3' => 'Series detail now shows real Season rows with their episodes instead of treating episodes as seasons',
+			'about.changelog2263.4' => 'Catch-up: when the provider has no recording for a programme, the mini-player says so plainly and offers Watch live instead of a generic failure',
+			'about.changelog2263.5' => 'Mini-player: the black layers covering the video are gone and the video position is sent before playback starts (still unproven on a real phone — Settings → IPTV shows the video position and whether a frame arrived)',
+			'about.changelog2263.6' => 'Long-press a channel in the guide for a menu: Hide channel or Add to favourites; hidden channels can be un-hidden in Settings → IPTV',
+			'about.changelog2263.7' => 'The guide has a category picker (Live TV categories only, only the ones you left turned on) — it filters the loaded rows, no re-fetch',
+			'about.changelog2263.8' => 'Guide programmes now also match by channel name when the provider\'s channel ids don\'t line up, and Settings → IPTV shows how much of the guide has programmes',
 			'about.changelog2262.0' => 'Categories now scroll smoothly — the list only builds the rows on screen instead of all 1,200 at once',
 			'about.changelog2262.1' => 'Live TV mini-player should show video now: the app finally tells Android where the video goes, so the picture sits in the mini-player instead of hidden behind the guide',
 			'about.changelog2262.2' => 'Catch-up now plays from the start of a past programme — the app was asking the provider for the time in a format it does not accept',
@@ -10261,6 +10370,8 @@ extension on Translations {
 			'explore.relation.summary' => 'Summary',
 			'explore.relation.parentStory' => 'Parent story',
 			'explore.relation.adaptation' => 'Adaptation',
+			_ => null,
+		} ?? switch (path) {
 			'explore.relation.other' => 'Related',
 			'explore.broadcast' => ({required Object day, required Object time}) => 'Airs ${day} at ${time}',
 			'explore.broadcastWithZone' => ({required Object day, required Object time, required Object timezone}) => 'Airs ${day} at ${time} ${timezone}',
@@ -10272,8 +10383,6 @@ extension on Translations {
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.addedOn' => ({required Object date}) => 'Added ${date}',
 			'explore.detail.yourRating' => 'Your rating',
 			'explore.detail.budget' => 'Budget',
@@ -10309,6 +10418,7 @@ extension on Translations {
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
 			'liveTv.noInformationAvailable' => 'No information available',
+			'liveTv.noGuideDataForChannel' => 'No guide data for this channel',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
 			'liveTv.unknownProgram' => 'Unknown Program',
 			'liveTv.unknownHub' => 'Unknown',
@@ -10342,6 +10452,15 @@ extension on Translations {
 			'liveTv.noFavoriteChannels' => 'No favorite channels',
 			'liveTv.noFavoriteChannelsHint' => 'Show all channels, then long-press a channel to add it to your favorites.',
 			'liveTv.showAllChannels' => 'Show All Channels',
+			'liveTv.allCategories' => 'All categories',
+			'liveTv.noChannelsInCategory' => 'No channels in this category',
+			'liveTv.noChannelsInCategoryHint' => 'This category has no channels in the guide right now. Pick another category, or turn more categories on in IPTV settings.',
+			'liveTv.showAllCategories' => 'Show all categories',
+			'liveTv.hideChannel' => 'Hide channel',
+			'liveTv.unhide' => 'Unhide',
+			'liveTv.allChannelsHidden' => 'All channels hidden',
+			'liveTv.allChannelsHiddenHint' => 'You hid every channel in this guide. Unhide them to see the guide again.',
+			'liveTv.unhideAllChannels' => 'Unhide all',
 			'liveTv.favoritesLoadFailed' => 'Could not load favorites. Check your connection and try again.',
 			'liveTv.favoritesUpdateFailed' => 'Could not update favorites. Check your connection and try again.',
 			'liveTv.joinSession' => 'Join Session in Progress',
@@ -10765,6 +10884,8 @@ extension on Translations {
 			'shaders.customShaderDescription' => 'Custom GLSL shader',
 			'shaders.shaderImported' => 'Shader imported',
 			'shaders.shaderImportFailed' => 'Failed to import shader',
+			_ => null,
+		} ?? switch (path) {
 			'shaders.deleteShader' => 'Delete Shader',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
@@ -10786,8 +10907,6 @@ extension on Translations {
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Connecting...',
 			'companionRemote.pairing.searchingForDevices' => 'Looking for devices...',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.pairing.noDevicesFound' => 'No devices found on your network',
 			'companionRemote.pairing.noDevicesHint' => 'Open PlezTV on desktop and use the same Wi-Fi',
 			'companionRemote.pairing.availableDevices' => 'Available Devices',
@@ -11262,12 +11381,25 @@ extension on Translations {
 			'iptv.catalogDiagnosticsPerCategory' => ({required Object category, required Object count}) => 'In ${category}: ${count}',
 			'iptv.catalogDiagnosticsDisabledInitials' => ({required Object count}) => 'Category initials turned off: ${count}',
 			'iptv.catalogDiagnosticsDisabledCategories' => ({required Object count}) => 'Categories turned off: ${count}',
+			'iptv.guideCoverageTitle' => 'Guide coverage',
+			'iptv.guideCoverageNone' => 'No guide data loaded yet — open Live TV and the guide fills this in.',
+			'iptv.guideCoverageLine' => ({required Object percent, required Object withPrograms, required Object total}) => '${percent}% of guide channels have programmes (${withPrograms} of ${total})',
+			'iptv.guideCoverageSplit' => ({required Object byId, required Object byName, required Object shortEpg, required Object none}) => 'From feed by channel id: ${byId} · by name: ${byName} · short guide: ${shortEpg} · no data: ${none}',
+			'iptv.guideCoverageUnknown' => ({required Object count}) => '${count} from an older cache (source unknown)',
+			'iptv.guideCoverageFeedIds' => ({required Object count}) => 'Feed lists ${count} channel ids',
 			'iptv.lastSearchTitle' => 'Last search',
 			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
 			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',
 			'iptv.lastSearchScopedSuffix' => ' · scoped',
 			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms',
+			'iptv.channelHidden' => ({required Object name}) => '${name} hidden',
+			'iptv.hiddenChannelsTitle' => 'Hidden channels',
+			'iptv.hiddenChannelsNone' => 'No hidden channels on this connection. Long-press a channel in the guide to hide it.',
+			'iptv.hiddenChannelsCount' => ({required Object count}) => '${count} hidden',
+			'iptv.unhideAll' => 'Unhide all',
 			'iptv.lastSearchSectionLoadNeverLanded' => ({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.lastSearchSectionSkipped' => ({required Object section}) => '${section}: skipped',
 			'iptv.miniPlayerTitle' => 'Mini-player',
 			'iptv.miniPlayerNone' => 'No tune yet — play a channel in Live TV, then check back here.',
@@ -11280,7 +11412,12 @@ extension on Translations {
 			'iptv.miniPlayerRestartNo' => 'Restart seen: no',
 			'iptv.miniPlayerRectYes' => 'Video rect sent: yes',
 			'iptv.miniPlayerRectNo' => 'Video rect sent: no',
+			'iptv.miniPlayerRectValues' => ({required Object rect}) => 'Rect: ${rect}',
 			'iptv.miniPlayerFailReason' => ({required Object reason}) => 'Could not start: ${reason}',
+			'iptv.miniPlayerMissingRecording' => ({required Object programme, required Object channel}) => 'No recording available for ${programme} on ${channel}',
+			'iptv.miniPlayerMissingRecordingNoProgramme' => ({required Object channel}) => 'No recording available for this programme on ${channel}',
+			'iptv.miniPlayerLineBusy' => 'Line busy — another stream is using your connection',
+			'iptv.miniPlayerWatchLive' => 'Watch live',
 			'iptv.groupsOff' => ({required Object count}) => '${count} groups off',
 			'iptvCategories.title' => ({required Object name}) => '${name} categories',
 			'iptvCategories.intro' => 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.',
@@ -11300,8 +11437,6 @@ extension on Translations {
 			'iptvCategories.loadFailed' => 'Could not load the categories. Check the connection and try again.',
 			'iptvCategories.sectionLoadFailed' => 'Could not load this section.',
 			'iptvCategories.empty' => 'No categories found for this connection.',
-			_ => null,
-		} ?? switch (path) {
 			'iptvCategories.retry' => 'Retry',
 			'iptvCategories.persistFailed' => 'Could not save that change. Try again.',
 			_ => null,

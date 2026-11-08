@@ -201,7 +201,12 @@ void main() {
     harness.liveTv.favorites.complete(const []);
     await tester.pumpAndSettle();
 
+    // Build #17 §9: long-press opens the channel menu — the favorite
+    // toggles only when "Add to favourites" is tapped in it, not on the
+    // long-press itself.
     await tester.longPress(find.text('Unique Channel A'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add to favourites'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
@@ -213,6 +218,8 @@ void main() {
     ]);
 
     await tester.longPress(find.text('Unique Channel A'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from favourites'));
     await tester.pumpAndSettle();
 
     guide = tester.widget<GuideTab>(find.byType(GuideTab));
