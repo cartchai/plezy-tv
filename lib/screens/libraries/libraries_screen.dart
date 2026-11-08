@@ -34,12 +34,13 @@ import 'library_server_label.dart';
 import 'state_messages.dart';
 import 'tabs/library_browse_tab.dart';
 import 'tabs/library_categories_tab.dart';
+import 'tabs/library_favorites_tab.dart';
 import 'tabs/library_recommended_tab.dart';
 import 'tabs/library_collections_tab.dart';
 import 'tabs/library_playlists_tab.dart';
 import 'tabs/base_library_tab.dart';
 
-enum LibraryTabType { recommended, browse, collections, playlists, categories }
+enum LibraryTabType { recommended, browse, collections, playlists, categories, favorites }
 
 List<LibraryTabType> visibleLibraryTabs(MediaLibrary library) {
   if (library.isShared) return [LibraryTabType.browse, LibraryTabType.playlists];
@@ -48,9 +49,20 @@ List<LibraryTabType> visibleLibraryTabs(MediaLibrary library) {
   // take that slot instead: VOD categories in Movies, series categories
   // in TV/Series. Every other backend keeps Collections.
   if (library.backend == MediaBackend.m3u || library.backend == MediaBackend.xtream) {
-    return [LibraryTabType.recommended, LibraryTabType.browse, LibraryTabType.categories, LibraryTabType.playlists];
+    return [
+      LibraryTabType.recommended,
+      LibraryTabType.browse,
+      LibraryTabType.categories,
+      // Favourites (build #15, item 7) sits right after Categories — the
+      // area Matt named — and is IPTV-only: Plex favourites are
+      // server-side, not a local tab.
+      LibraryTabType.favorites,
+      LibraryTabType.playlists,
+    ];
   }
-  return LibraryTabType.values.where((t) => t != LibraryTabType.categories).toList();
+  return LibraryTabType.values
+      .where((t) => t != LibraryTabType.categories && t != LibraryTabType.favorites)
+      .toList();
 }
 
 class LibrariesScreen extends StatefulWidget {
@@ -78,6 +90,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
   final _collectionsTabKey = GlobalKey();
   final _playlistsTabKey = GlobalKey();
   final _categoriesTabKey = GlobalKey();
+  final _favoritesTabKey = GlobalKey();
 
   String? _selectedLibraryGlobalKey;
 
@@ -95,8 +108,9 @@ class _LibrariesScreenState extends State<LibrariesScreen>
 
   final _libraryDropdownKey = GlobalKey<AppMenuButtonState<String>>();
 
-  List<LibraryTabType> _visibleTabs =
-      LibraryTabType.values.where((t) => t != LibraryTabType.categories).toList();
+  List<LibraryTabType> _visibleTabs = LibraryTabType.values
+      .where((t) => t != LibraryTabType.categories && t != LibraryTabType.favorites)
+      .toList();
   // One focus node per VISIBLE tab (not per enum value): the TabController
   // length comes from this list, so generating from `values.length` would
   // leave the controller one longer than the TabBarView once a tab type
@@ -337,6 +351,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       LibraryTabType.collections => _collectionsTabKey.currentState,
       LibraryTabType.playlists => _playlistsTabKey.currentState,
       LibraryTabType.categories => _categoriesTabKey.currentState,
+      LibraryTabType.favorites => _favoritesTabKey.currentState,
     };
   }
 
@@ -428,6 +443,7 @@ class _LibrariesScreenState extends State<LibrariesScreen>
     LibraryTabType.collections => t.libraries.tabs.collections,
     LibraryTabType.playlists => t.libraries.tabs.playlists,
     LibraryTabType.categories => t.libraries.tabs.categories,
+    LibraryTabType.favorites => t.libraries.tabs.favorites,
   };
 
   Widget _buildTabContent(
@@ -476,6 +492,14 @@ class _LibrariesScreenState extends State<LibrariesScreen>
       ),
       LibraryTabType.categories => LibraryCategoriesTab(
         key: _categoriesTabKey,
+        library: library,
+        isActive: isActive,
+        suppressAutoFocus: suppressAutoFocus,
+        onDataLoaded: () => _handleTabDataLoaded(tabIndex),
+        onBack: focusTabBar,
+      ),
+      LibraryTabType.favorites => LibraryFavoritesTab(
+        key: _favoritesTabKey,
         library: library,
         isActive: isActive,
         suppressAutoFocus: suppressAutoFocus,

@@ -66,15 +66,15 @@ void main() {
   // Matt's filter state, in shape: every initial hidden except EN.
   const hiddenInitials = ['AR', 'FR', 'DE', 'PL', 'ES', 'IN', 'NL', 'SE'];
 
-  XtreamConnection trexConnection({List<String> disabledCategoryIds = const []}) {
+  XtreamConnection trexConnection({List<String> hiddenCategoryIds = const []}) {
     return XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: hiddenInitials,
-      disabledCategoryIds: disabledCategoryIds,
+      hiddenCategoryInitials: hiddenInitials,
+      hiddenCategoryIds: hiddenCategoryIds,
       createdAt: DateTime.utc(2026, 11, 5),
     );
   }
@@ -141,7 +141,7 @@ void main() {
       addTearDown(harness.dispose);
 
       expect(
-        await harness.manager.addIptvConnection(trexConnection(disabledCategoryIds: allIds)),
+        await harness.manager.addIptvConnection(trexConnection(hiddenCategoryIds: allIds)),
         isTrue,
       );
       await harness.pump(tester);

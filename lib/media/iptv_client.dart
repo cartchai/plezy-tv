@@ -102,9 +102,9 @@ class IptvClient implements MediaServerClient {
   };
 
   /// Country/region filter list (only the IPTV connection types carry it).
-  List<String> get _disabledCategoryIdList => switch (connection) {
-    M3uConnection(:final disabledCategoryIds) => disabledCategoryIds,
-    XtreamConnection(:final disabledCategoryIds) => disabledCategoryIds,
+  List<String> get _hiddenCategoryIdList => switch (connection) {
+    M3uConnection(:final hiddenCategoryIds) => hiddenCategoryIds,
+    XtreamConnection(:final hiddenCategoryIds) => hiddenCategoryIds,
     _ => const [],
   };
 
@@ -266,18 +266,21 @@ class IptvClient implements MediaServerClient {
   String get _moviesLibraryId => _libraryId(moviesLibrarySuffix);
   String get _seriesLibraryId => _libraryId(seriesLibrarySuffix);
 
-  Set<String> get _disabledCategories => _disabledCategoryIdList.toSet();
+  Set<String> get _hiddenCategories => _hiddenCategoryIdList.toSet();
 
   /// Category-initial filter list (only the IPTV connection types carry
-  /// it). The stored strings are reused as-is from build #8; their
-  /// meaning changed in build #10 (see [_isHiddenCategory]).
-  List<String> get _disabledInitialsList => switch (connection) {
-    M3uConnection(:final disabledInitials) => disabledInitials,
-    XtreamConnection(:final disabledInitials) => disabledInitials,
+  /// it). Build #15, item 5 renamed the storage to `hiddenCategoryIds` /
+  /// `hiddenCategoryInitials` with a one-time migration from the build
+  /// #6–#14 keys — the values are the same category initials, the keys
+  /// are new so the tainted history (build #10 reused the old key with a
+  /// new meaning, no migration) cannot repeat.
+  List<String> get _hiddenCategoryInitialsList => switch (connection) {
+    M3uConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials,
+    XtreamConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials,
     _ => const [],
   };
 
-  Set<String> get _disabledInitials => _disabledInitialsList.toSet();
+  Set<String> get _hiddenCategoryInitials => _hiddenCategoryInitialsList.toSet();
 
   /// True when the category with [categoryId] and display [categoryName]
   /// is hidden — by its own switch, or because its category initial is
@@ -288,9 +291,9 @@ class IptvClient implements MediaServerClient {
   /// every item (Matt hid 161 of 171 initials) while the categories
   /// stayed listed, which emptied every series category and broke search.
   bool _isHiddenCategory(String? categoryId, String? categoryName) {
-    if (categoryId != null && _disabledCategories.contains(categoryId)) return true;
+    if (categoryId != null && _hiddenCategories.contains(categoryId)) return true;
     final initial = categoryInitial(categoryName);
-    return initial != null && _disabledInitials.contains(initial);
+    return initial != null && _hiddenCategoryInitials.contains(initial);
   }
 
   /// M3U groups ARE the categories (the group title is both id and name),
@@ -867,6 +870,29 @@ class IptvClient implements MediaServerClient {
         appLogger.w('IPTV: background M3U playlist refresh failed', error: e);
       }),
     );
+  }
+
+  /// The category lists for the Categories screen (build #15, item 5) —
+  /// disk-first, shared with the guide and browse, so opening the screen
+  /// never calls the provider API again when the catalog is already warm.
+  /// A failed list throws; the screen treats each section independently
+  /// instead of losing the whole screen to one bad list.
+  Future<List<XtreamCategory>> liveCategories() => _liveCategories();
+  Future<List<XtreamCategory>> vodCategories() => _vodCategories();
+  Future<List<XtreamCategory>> seriesCategories() => _seriesCategories();
+
+  /// The M3U group titles (the playlist's categories), distinct and
+  /// sorted, for the Categories screen. Reads the cached playlist entries,
+  /// so no second download.
+  Future<List<String>> m3uGroups() async {
+    final groups = <String>{};
+    for (final entry in await _m3uEntries()) {
+      final group = entry.groupTitle?.trim();
+      if (group != null && group.isNotEmpty) groups.add(group);
+    }
+    final sorted = groups.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return sorted;
   }
 
   Future<List<XtreamCategory>> _liveCategories() async {
@@ -1506,8 +1532,8 @@ class IptvClient implements MediaServerClient {
       unfilteredSeriesRows: unfiltered.length,
       seriesCategoryCount: categories.length,
       perCategorySeriesRows: perCategory,
-      disabledInitialsCount: _disabledInitials.length,
-      disabledCategoriesCount: _disabledCategories.length,
+      hiddenCategoryInitialsCount: _hiddenCategoryInitials.length,
+      hiddenCategoriesCount: _hiddenCategories.length,
     );
   }
 
@@ -3035,8 +3061,8 @@ class IptvCatalogDiagnostics {
     required this.unfilteredSeriesRows,
     required this.seriesCategoryCount,
     required this.perCategorySeriesRows,
-    required this.disabledInitialsCount,
-    required this.disabledCategoriesCount,
+    required this.hiddenCategoryInitialsCount,
+    required this.hiddenCategoriesCount,
   });
 
   /// Rows the unfiltered get_series call returned (what Recommended reads).
@@ -3050,10 +3076,10 @@ class IptvCatalogDiagnostics {
   final Map<String, int> perCategorySeriesRows;
 
   /// How many category initials are turned off on this connection.
-  final int disabledInitialsCount;
+  final int hiddenCategoryInitialsCount;
 
   /// How many categories are turned off by their own switch.
-  final int disabledCategoriesCount;
+  final int hiddenCategoriesCount;
 }
 
 /// Per-section readout accumulated by one search (build #13): which

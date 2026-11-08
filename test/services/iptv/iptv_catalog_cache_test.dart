@@ -45,16 +45,16 @@ const _seriesLibraryId = 'iptv:conn-xt-1:series';
 
 XtreamConnection _trexConnection({
   String id = 'conn-xt-1',
-  List<String> disabledCategoryIds = const [],
-  List<String> disabledInitials = const [],
+  List<String> hiddenCategoryIds = const [],
+  List<String> hiddenCategoryInitials = const [],
 }) => XtreamConnection(
   id: id,
   name: 'Trex',
   serverUrl: 'https://panel.example.com:8080',
   username: 'user',
   password: _testPassword,
-  disabledCategoryIds: disabledCategoryIds,
-  disabledInitials: disabledInitials,
+  hiddenCategoryIds: hiddenCategoryIds,
+  hiddenCategoryInitials: hiddenCategoryInitials,
   createdAt: DateTime.utc(2026, 11, 5),
 );
 
@@ -472,7 +472,7 @@ void main() {
   group('filters still apply to disk data', () {
     test('a disabled category and a disabled initial hide disk-loaded items', () async {
       final first = xtreamClient(
-        connection: _trexConnection(disabledCategoryIds: const ['11'], disabledInitials: const ['UK']),
+        connection: _trexConnection(hiddenCategoryIds: const ['11'], hiddenCategoryInitials: const ['UK']),
       );
       // Beta Movie sits in "FR - Films" (id 11, disabled by switch);
       // Alpha Movie sits in "UK - Films" (initial UK, disabled).
@@ -485,7 +485,7 @@ void main() {
       // the same rows — nothing about them was baked into storage.
       api.failAll = true;
       final relaunched = xtreamClient(
-        connection: _trexConnection(disabledCategoryIds: const ['11'], disabledInitials: const ['UK']),
+        connection: _trexConnection(hiddenCategoryIds: const ['11'], hiddenCategoryInitials: const ['UK']),
       );
       final again = await relaunched.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
       expect(again.items, isEmpty);
@@ -494,14 +494,14 @@ void main() {
     });
 
     test('series in a hidden category stay hidden in search from disk', () async {
-      final first = xtreamClient(connection: _trexConnection(disabledInitials: const ['FR']));
+      final first = xtreamClient(connection: _trexConnection(hiddenCategoryInitials: const ['FR']));
       // Beta Show sits in "FR - Drama" — hidden; Alpha Show is visible.
       final page = await first.fetchLibraryPagedContent(_seriesLibraryId, query: const LibraryQuery());
       expect(page.items.map((i) => i.title), ['Alpha Show']);
       await waitForDataset(IptvCatalogDiskCache.seriesDataset);
 
       api.failAll = true;
-      final relaunched = xtreamClient(connection: _trexConnection(disabledInitials: const ['FR']));
+      final relaunched = xtreamClient(connection: _trexConnection(hiddenCategoryInitials: const ['FR']));
       final found = await relaunched.searchItems('show');
       expect(found.map((i) => i.title), ['Alpha Show']);
     });

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -61,10 +62,32 @@ class _EpgFakeApi extends XtreamApi {
   bool failXmltv = false;
   bool failShortEpg = false;
 
+  /// Concurrency gate for the build #15 short-EPG cap test: when set,
+  /// each call records its concurrency and waits on [shortEpgGate]
+  /// before answering.
+  Completer<void>? shortEpgGate;
+  var shortEpgInFlight = 0;
+  var shortEpgMaxInFlight = 0;
+
+  /// Artificial delay for the build #15 first-paint timeout test.
+  Duration? shortEpgDelay;
+
   @override
   Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
     calls[streamId] = (calls[streamId] ?? 0) + 1;
     if (failShortEpg) throw Exception('get_short_epg unavailable');
+    final gate = shortEpgGate;
+    if (gate != null) {
+      shortEpgInFlight++;
+      if (shortEpgInFlight > shortEpgMaxInFlight) shortEpgMaxInFlight = shortEpgInFlight;
+      try {
+        await gate.future;
+      } finally {
+        shortEpgInFlight--;
+      }
+    }
+    final delay = shortEpgDelay;
+    if (delay != null) await Future<void>.delayed(delay);
     return scripted[streamId] ?? const [];
   }
 
@@ -150,6 +173,43 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     fail('persisted EPG file was not written');
+  }
+
+  /// Wait for the persisted XMLTV feed file to land (build #15, item 6 —
+  /// fire-and-forget write, like the per-channel files).
+  Future<File> waitForFeedFile() async {
+    for (var i = 0; i < 100; i++) {
+      final files = tempDir.listSync(recursive: true).whereType<File>().where((f) => f.path.endsWith('.xml')).toList();
+      if (files.length == 1) return files.single;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    fail('persisted XMLTV feed file was not written');
+  }
+
+  /// Wait until the fake's `xmltv.php` download count reaches [n]. The
+  /// feed loads in the background behind short-EPG, and build #15 checks
+  /// the persisted file first, so the download starts a tick later than
+  /// the fetch returns — poll instead of asserting immediately.
+  Future<void> waitForXmltvCalls(int n) async {
+    for (var i = 0; i < 200; i++) {
+      if (api.xmltvCalls >= n) return;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    fail('xmltv.php was not fetched $n times (got ${api.xmltvCalls})');
+  }
+
+  /// Delete the persisted per-channel file for [channelKey] so the next
+  /// fetch must come from the feed, not the per-channel cache.
+  Future<void> deleteChannelFile(String channelKey) async {
+    final safe = base64Url.encode(utf8.encode(channelKey)).replaceAll('=', '');
+    final files = tempDir
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('/$safe.json'))
+        .toList();
+    for (final file in files) {
+      await file.delete();
+    }
   }
 
   /// Rewrite the persisted entry's JSON in place (fetchedAt / window).
@@ -263,6 +323,9 @@ void main() {
     expect(api.calls['100'], 1);
     await waitForEpgFile();
     expect(epgFile().existsSync(), isTrue);
+    // The feed file is written fire-and-forget too — wait for it to land
+    // before clearing, or it can land after the delete.
+    await waitForFeedFile();
 
     await support.clearEpgCache();
     // The delete is fire-and-forget (like the write): poll until the
@@ -425,7 +488,7 @@ void main() {
 
     final programs = await fetchEpg(support, now);
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
-    expect(api.xmltvCalls, 1);
+    await waitForXmltvCalls(1);
     expect(api.calls['100'], 1);
   });
 
@@ -438,7 +501,7 @@ void main() {
 
     final programs = await fetchEpg(support, now);
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
-    expect(api.xmltvCalls, 1);
+    await waitForXmltvCalls(1);
     expect(api.calls['100'], 1);
   });
 
@@ -475,5 +538,194 @@ void main() {
     expect(api.xmltvCalls, 1, reason: 'the second channel must reuse the parsed feed, not re-fetch it');
     expect(api.calls['100'], 1, reason: 'get_short_epg runs first per channel, even when the feed serves it');
     expect(api.calls['200'], 1, reason: 'get_short_epg runs first per channel, even when the feed serves it');
+  });
+
+  test('cachedEpgForChannels serves persisted entries without a network fetch (build #15, item 2)', () async {
+    // The guide search sheet's cache-only path: after a relaunch (fresh
+    // support, empty in-memory cache) the persisted per-channel files are
+    // found by ONE directory listing and served with zero API calls.
+    final now = DateTime.now();
+    scriptEpg(now);
+    final first = supportFor();
+    final programs = await fetchEpg(first, now);
+    expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
+    await waitForEpgFile();
+    final shortEpgCalls = api.calls['100'] ?? 0;
+    final xmltvCalls = api.xmltvCalls;
+
+    final second = supportFor();
+    final out = await second.cachedEpgForChannels(
+      {'100'},
+      from: now.subtract(const Duration(hours: 1)),
+      to: now.add(const Duration(hours: 6)),
+    );
+    expect(out.keys, ['100']);
+    expect(out['100']!.map((p) => p.title), ['Morning News', 'Midday']);
+    expect(api.calls['100'] ?? 0, shortEpgCalls, reason: 'no per-channel fetch from the sheet path');
+    expect(api.xmltvCalls, xmltvCalls, reason: 'no feed fetch from the sheet path');
+  });
+
+  test('cachedEpgForChannels skips channels with no cache entry and a stale one', () async {
+    final now = DateTime.now();
+    scriptEpg(now);
+    final first = supportFor();
+    await fetchEpg(first, now);
+    await waitForEpgFile();
+
+    // Age the persisted entry past the window it covers by rewriting its
+    // window narrow, and ask for a channel that was never cached.
+    await rewritePersisted((json) {
+      json['windowTo'] = now.toIso8601String();
+      return json;
+    });
+
+    final second = supportFor();
+    final out = await second.cachedEpgForChannels(
+      {'100', '999'},
+      from: now.add(const Duration(hours: 1)),
+      to: now.add(const Duration(hours: 6)),
+    );
+    expect(out, isEmpty, reason: 'stale window and uncached channel contribute nothing');
+  });
+
+  // -- Build #15, item 6: the xmltv.php feed is persisted ----------------
+  //
+  // Before this build the feed was downloaded on every cold start and
+  // every rebind, a failed feed was retried channel by channel, and the
+  // per-channel short-EPG storm was unbounded. These prove the feed file
+  // is written and re-read with zero downloads, a stale file serves
+  // immediately while the refresh runs behind it, a failed feed is not
+  // re-downloaded inside the negative-cache window, short-EPG concurrency
+  // is capped, and a slow short-EPG falls back to the feed fast.
+
+  test('feed file persists and a relaunch serves from it with zero downloads', () async {
+    final now = DateTime.now();
+    api.xmltvBody = xmltvDoc(now);
+    final client = await listedClient();
+    final support = client.liveTv as IptvLiveTvSupport;
+
+    final programs = await fetchEpg(support, now);
+    expect(programs.map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
+    expect(api.xmltvCalls, 1);
+    final feedFile = await waitForFeedFile();
+    expect(feedFile.existsSync(), isTrue);
+    expect(await feedFile.readAsString(), api.xmltvBody);
+
+    // The per-channel file would answer instead — remove it, so the
+    // relaunch must come from the feed file.
+    await deleteChannelFile('100');
+    final relaunched = (await listedClient()).liveTv as IptvLiveTvSupport;
+    final again = await fetchEpg(relaunched, now);
+    expect(again.map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
+    expect(api.xmltvCalls, 1, reason: 'the persisted feed file must be parsed, not re-downloaded');
+  });
+
+  test('stale feed file serves immediately and refreshes in the background', () async {
+    final now = DateTime.now();
+    api.xmltvBody = xmltvDoc(now);
+    final client = await listedClient();
+    final support = client.liveTv as IptvLiveTvSupport;
+    expect((await fetchEpg(support, now)).map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
+    final feedFile = await waitForFeedFile();
+
+    // Age the file past the 24h default interval and publish a new feed.
+    await feedFile.setLastModified(now.subtract(const Duration(hours: 25)));
+    String refreshedDoc() {
+      // Same shape as xmltvDoc but with new titles, so the refresh is
+      // distinguishable from the stale file.
+      return xmltvDoc(now).replaceAll('XMLTV Morning', 'XMLTV Refreshed').replaceAll('XMLTV Midday', 'XMLTV Later');
+    }
+
+    api.xmltvBody = refreshedDoc();
+    await deleteChannelFile('100');
+    final relaunched = (await listedClient()).liveTv as IptvLiveTvSupport;
+    final stale = await fetchEpg(relaunched, now);
+    expect(stale.map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday'],
+        reason: 'the stale feed file answers immediately; the guide never waits on the download');
+    // The refresh runs in the background — poll until the NEW body lands
+    // in the feed file, which happens after the parse, so the in-memory
+    // guide is fresh by then too.
+    var refreshed = false;
+    for (var i = 0; i < 200 && !refreshed; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      if (await feedFile.readAsString().then((body) => body.contains('XMLTV Refreshed'))) {
+        refreshed = true;
+      }
+    }
+    expect(refreshed, isTrue, reason: 'the stale file must trigger a background refresh');
+    expect(api.xmltvCalls, 2);
+    // The refreshed guide is now on disk — a fresh instance (empty
+    // in-memory caches, per-channel file removed again) serves the new
+    // titles from the refreshed feed file, with no third download.
+    await deleteChannelFile('100');
+    final freshSupport = (await listedClient()).liveTv as IptvLiveTvSupport;
+    final fresh = await fetchEpg(freshSupport, now);
+    expect(fresh.map((p) => p.title), ['XMLTV Refreshed', 'XMLTV Later']);
+    expect(api.xmltvCalls, 2, reason: 'the refreshed feed file must be parsed, not re-downloaded');
+  });
+
+  test('failed feed is not re-downloaded inside the negative-cache window', () async {
+    final now = DateTime.now();
+    api.failXmltv = true;
+    api.failShortEpg = true;
+    final client = await listedClient();
+    final support = client.liveTv as IptvLiveTvSupport;
+
+    await expectLater(fetchEpg(support, now), throwsA(anything));
+    expect(api.xmltvCalls, 1);
+    await expectLater(fetchEpg(support, now), throwsA(anything));
+    expect(api.xmltvCalls, 1, reason: 'a feed that just failed must not be re-downloaded per channel');
+
+    // Once the window passes, the next fetch retries the download.
+    IptvLiveTvSupport.xmltvNegativeCacheTtl = Duration.zero;
+    try {
+      await expectLater(fetchEpg(support, now), throwsA(anything));
+      expect(api.xmltvCalls, 2);
+    } finally {
+      IptvLiveTvSupport.xmltvNegativeCacheTtl = const Duration(minutes: 5);
+    }
+  });
+
+  test('short-EPG concurrency is capped at four', () async {
+    final now = DateTime.now();
+    api.shortEpgGate = Completer<void>();
+    final support = supportFor();
+    final futures = <Future<List<LiveTvProgram>>>[];
+    for (var i = 0; i < 6; i++) {
+      futures.add(
+        support.fetchEpgForChannel(
+          'ch$i',
+          from: now.subtract(const Duration(hours: 1)),
+          to: now.add(const Duration(hours: 6)),
+        ),
+      );
+    }
+    // Let the six fetches pile up against the cap.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(api.shortEpgMaxInFlight, 4, reason: 'at most four get_short_epg calls run at once');
+    expect(api.calls.length, 4, reason: 'the other two channels wait for a slot');
+    api.shortEpgGate!.complete();
+    final results = await Future.wait(futures);
+    expect(results, everyElement(isEmpty));
+    expect(api.calls.length, 6, reason: 'the waiting channels run once a slot frees');
+  });
+
+  test('slow short-EPG falls back to the feed within the first-paint budget', () async {
+    final now = DateTime.now();
+    api.xmltvBody = xmltvDoc(now);
+    api.shortEpgDelay = const Duration(seconds: 5);
+    IptvLiveTvSupport.shortEpgFirstPaintTimeout = const Duration(milliseconds: 100);
+    try {
+      final client = await listedClient();
+      final support = client.liveTv as IptvLiveTvSupport;
+      final stopwatch = Stopwatch()..start();
+      final programs = await fetchEpg(support, now);
+      stopwatch.stop();
+      expect(programs.map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
+      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 3)),
+          reason: 'the channel must fall back to the feed fast, not wait out the slow short-EPG');
+    } finally {
+      IptvLiveTvSupport.shortEpgFirstPaintTimeout = const Duration(seconds: 15);
+    }
   });
 }

@@ -1,0 +1,457 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
+import 'package:provider/provider.dart';
+
+import '../../connection/connection.dart';
+import '../../connection/connection_registry.dart';
+import '../../i18n/strings.g.dart';
+import '../../media/ids.dart';
+import '../../media/iptv_client.dart';
+import '../../providers/multi_server_provider.dart';
+import '../../services/iptv/xtream_api.dart';
+import '../../utils/iptv_initials.dart';
+import '../../utils/snackbar_helper.dart';
+import '../../widgets/app_icon.dart';
+import '../../widgets/focusable_list_tile.dart';
+import '../../widgets/focused_scroll_scaffold.dart';
+import '../../widgets/loading_indicator_box.dart';
+import '../../widgets/settings_section.dart';
+
+/// ONE Categories screen per IPTV connection (build #15, item 5 — the
+/// from-scratch rework of the category / initials selector).
+///
+/// It replaces BOTH old selectors (the connection edit screen's five
+/// collapsible sections with their deferred Save, and the IPTV settings
+/// screen's per-connection initials list): every category is visible,
+/// grouped under plain headings that are just headings, and every toggle
+/// applies IMMEDIATELY — no Save button, no deferred state. A toggle
+/// persists the connection (new `hiddenCategoryIds` /
+/// `hiddenCategoryInitials` keys) and swaps only this IPTV client in
+/// place, so Plex is never re-bound by a category change.
+///
+/// Headings are labels, not separate controls — Matt corrected the
+/// per-content-type split: the requirement is SEE them + CONTROL them.
+/// The initials group is one clearly-labelled group at the bottom:
+/// turning an initial off hides every category starting with it, in
+/// Live TV, Movies and TV Series.
+class IptvCategoriesScreen extends StatefulWidget {
+  final Connection connection;
+
+  const IptvCategoriesScreen({super.key, required this.connection});
+
+  @override
+  State<IptvCategoriesScreen> createState() => _IptvCategoriesScreenState();
+}
+
+typedef _CategoryRow = ({String id, String name});
+
+class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
+  late Connection _connection = widget.connection;
+
+  IptvClient? _client;
+  bool _ownsClient = false;
+
+  bool _loading = true;
+  bool _failed = false;
+
+  List<_CategoryRow>? _live;
+  bool _liveFailed = false;
+  List<_CategoryRow>? _movies;
+  bool _moviesFailed = false;
+  List<_CategoryRow>? _series;
+  bool _seriesFailed = false;
+  List<_CategoryRow>? _groups;
+  bool _groupsFailed = false;
+  List<IptvInitial>? _initials;
+  bool _initialsFailed = false;
+
+  bool get _isXtream => _connection is XtreamConnection;
+
+  Set<String> get _hiddenIds => switch (_connection) {
+        M3uConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+        XtreamConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+        _ => <String>{},
+      };
+
+  Set<String> get _hiddenInitials => switch (_connection) {
+        M3uConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials.toSet(),
+        XtreamConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials.toSet(),
+        _ => <String>{},
+      };
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    if (_ownsClient) _client?.close();
+    super.dispose();
+  }
+
+  /// The BOUND client when the connection is active (warm catalogs, no
+  /// second network call), else a throwaway client like the old checklist
+  /// used — the screen works from the edit entry even for a connection
+  /// that isn't bound right now.
+  IptvClient _resolveClient() {
+    try {
+      final bound = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (bound is IptvClient) {
+        _ownsClient = false;
+        return bound;
+      }
+    } catch (_) {
+      // No provider above us, or the connection isn't bound.
+    }
+    _ownsClient = true;
+    return IptvClient.forConnection(widget.connection);
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    final client = _resolveClient();
+    _client = client;
+    List<_CategoryRow> rows(List<XtreamCategory> categories) {
+      final seen = <String>{};
+      final result = <_CategoryRow>[];
+      for (final category in categories) {
+        if (category.id.isEmpty || category.name.isEmpty) continue;
+        if (!seen.add(category.id)) continue;
+        result.add((id: category.id, name: category.name));
+      }
+      result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return result;
+    }
+
+    if (_isXtream) {
+      List<_CategoryRow>? live;
+      var liveFailed = false;
+      try {
+        live = rows(await client.liveCategories());
+      } catch (_) {
+        liveFailed = true;
+      }
+      List<_CategoryRow>? movies;
+      var moviesFailed = false;
+      try {
+        movies = rows(await client.vodCategories());
+      } catch (_) {
+        moviesFailed = true;
+      }
+      List<_CategoryRow>? series;
+      var seriesFailed = false;
+      try {
+        series = rows(await client.seriesCategories());
+      } catch (_) {
+        seriesFailed = true;
+      }
+      // Each list loads independently: one bad list must not kill the
+      // screen (the old initials list died entirely when the VOD/series
+      // fetch threw). The whole screen fails only when NOTHING loaded.
+      if (!mounted) return;
+      setState(() {
+        _live = live;
+        _liveFailed = liveFailed;
+        _movies = movies;
+        _moviesFailed = moviesFailed;
+        _series = series;
+        _seriesFailed = seriesFailed;
+        _failed = live == null && movies == null && series == null;
+        _loading = false;
+      });
+    } else {
+      List<_CategoryRow>? groups;
+      var groupsFailed = false;
+      try {
+        groups = (await client.m3uGroups()).map((g) => (id: g, name: g)).toList(growable: false);
+      } catch (_) {
+        groupsFailed = true;
+      }
+      if (!mounted) return;
+      setState(() {
+        _groups = groups;
+        _groupsFailed = groupsFailed;
+        _failed = groups == null;
+        _loading = false;
+      });
+    }
+
+    // Initials load separately from the category lists, so a slow initials
+    // fetch never holds the categories back.
+    try {
+      final initials = await client.iptvInitials()
+        ..sort((a, b) => a.initial.toUpperCase().compareTo(b.initial.toUpperCase()));
+      if (!mounted) return;
+      setState(() => _initials = initials);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _initialsFailed = true);
+    }
+  }
+
+  bool _isHidden(_CategoryRow row) {
+    if (_hiddenIds.contains(row.id)) return true;
+    final initial = categoryInitial(row.name);
+    return initial != null && _hiddenInitials.contains(initial);
+  }
+
+  int _hiddenCount(List<_CategoryRow>? rows) => rows == null ? 0 : rows.where(_isHidden).length;
+
+  /// Every category row on the screen, for the live "N categories hidden"
+  /// confirmation line.
+  Iterable<_CategoryRow> get _allRows sync* {
+    for (final rows in [_live, _movies, _series, _groups]) {
+      if (rows != null) yield* rows;
+    }
+  }
+
+  Future<void> _persist(Connection updated) async {
+    final previous = _connection;
+    // Optimistic: the row and the counts update in the same frame as the
+    // tap. The persist below is local storage; if it fails, revert.
+    setState(() => _connection = updated);
+    try {
+      await context.read<ConnectionRegistry>().upsert(updated);
+      if (!mounted) return;
+      // Swap only this IPTV client in place (build #15, P-1): no full
+      // profile rebind, no Plex involvement. The new client carries the
+      // new filter, and the catalog-refreshed event re-renders the guide,
+      // libraries and Discover past the RefreshPacer cooldown.
+      unawaited(context.read<MultiServerProvider>().refreshIptvConnection(updated));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _connection = previous);
+      showErrorSnackBar(context, t.iptvCategories.persistFailed);
+    }
+  }
+
+  Connection _withHiddenIds(Set<String> next) => switch (_connection) {
+        final M3uConnection c => c.copyWith(hiddenCategoryIds: next.toList()),
+        final XtreamConnection c => c.copyWith(hiddenCategoryIds: next.toList()),
+        _ => _connection,
+      };
+
+  Connection _withHiddenInitials(Set<String> next) => switch (_connection) {
+        final M3uConnection c => c.copyWith(hiddenCategoryInitials: next.toList()),
+        final XtreamConnection c => c.copyWith(hiddenCategoryInitials: next.toList()),
+        _ => _connection,
+      };
+
+  void _toggleCategory(String id, bool shown) {
+    final next = Set<String>.of(_hiddenIds);
+    if (shown) {
+      next.remove(id);
+    } else {
+      next.add(id);
+    }
+    unawaited(_persist(_withHiddenIds(next)));
+  }
+
+  void _toggleInitial(String initial, bool shown) {
+    final next = Set<String>.of(_hiddenInitials);
+    if (shown) {
+      next.remove(initial);
+    } else {
+      next.add(initial);
+    }
+    unawaited(_persist(_withHiddenInitials(next)));
+  }
+
+  void _setAllInitials(bool shown) {
+    final initials = _initials;
+    if (initials == null) return;
+    final next = Set<String>.of(_hiddenInitials);
+    for (final initial in initials) {
+      if (shown) {
+        next.remove(initial.initial);
+      } else {
+        next.add(initial.initial);
+      }
+    }
+    unawaited(_persist(_withHiddenInitials(next)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hiddenTotal = _allRows.where(_isHidden).length;
+    return FocusedScrollScaffold(
+      title: Text(t.iptvCategories.title(name: _connection.displayName)),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.iptvCategories.intro, style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                Text(
+                  t.iptvCategories.hiddenTotal(count: hiddenTotal),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_loading)
+          const SliverPadding(
+            padding: EdgeInsets.all(16),
+            sliver: SliverToBoxAdapter(child: LoadingIndicatorBox()),
+          )
+        else if (_failed)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverToBoxAdapter(
+              child: SettingsGroup(
+                children: [
+                  ListTile(
+                    leading: const AppIcon(Symbols.error_rounded, fill: 1),
+                    title: Text(t.iptvCategories.loadFailed),
+                  ),
+                  TextButton(
+                    onPressed: () => unawaited(_load()),
+                    child: Text(t.iptvCategories.retry),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else ...[
+          if (_isXtream) ...[
+            _section(
+              heading: t.iptvCategories.liveTvHeading,
+              rows: _live,
+              failed: _liveFailed,
+            ),
+            _section(
+              heading: t.iptvCategories.moviesHeading,
+              rows: _movies,
+              failed: _moviesFailed,
+            ),
+            _section(
+              heading: t.iptvCategories.seriesHeading,
+              rows: _series,
+              failed: _seriesFailed,
+            ),
+          ] else
+            _section(
+              heading: t.iptvCategories.groupsHeading,
+              rows: _groups,
+              failed: _groupsFailed,
+            ),
+          _initialsSection(),
+          const SliverPadding(padding: EdgeInsets.only(top: 24)),
+        ],
+      ],
+    );
+  }
+
+  Widget _section({required String heading, required List<_CategoryRow>? rows, required bool failed}) {
+    if (rows == null) {
+      if (!failed) return const SliverToBoxAdapter(child: SizedBox.shrink());
+      return SliverPadding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        sliver: SliverToBoxAdapter(
+          child: SettingsGroup(
+            title: heading,
+            children: [
+              ListTile(
+                leading: const AppIcon(Symbols.error_rounded, fill: 1),
+                title: Text(t.iptvCategories.sectionLoadFailed),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final hidden = _hiddenCount(rows);
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      sliver: SliverToBoxAdapter(
+        child: SettingsGroup(
+          title: '$heading · ${t.iptvCategories.sectionCount(total: rows.length, hidden: hidden)}',
+          children: [
+            for (final row in rows)
+              FocusableSwitchListTile(
+                title: Text(row.name),
+                value: !_isHidden(row),
+                onChanged: (shown) => _toggleCategory(row.id, shown),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _initialsSection() {
+    final initials = _initials;
+    if (initials == null) {
+      if (_initialsFailed) {
+        return SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          sliver: SliverToBoxAdapter(
+            child: SettingsGroup(
+              title: t.iptvCategories.initialsHeading,
+              children: [
+                ListTile(
+                  leading: const AppIcon(Symbols.error_rounded, fill: 1),
+                  title: Text(t.iptvCategories.sectionLoadFailed),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      return const SliverPadding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 24),
+        sliver: SliverToBoxAdapter(child: LoadingIndicatorBox()),
+      );
+    }
+    final hidden = _hiddenInitials.length;
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      sliver: SliverToBoxAdapter(
+        child: SettingsGroup(
+          title:
+              '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.sectionCount(total: initials.length, hidden: hidden)}',
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Text(
+                _isXtream ? t.iptvCategories.initialsSubheading : t.iptvCategories.initialsSubheadingM3u,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: () => _setAllInitials(true),
+                  child: Text(t.iptvCategories.showAll),
+                ),
+                TextButton(
+                  onPressed: () => _setAllInitials(false),
+                  child: Text(t.iptvCategories.hideAll),
+                ),
+              ],
+            ),
+            for (final initial in initials)
+              FocusableSwitchListTile(
+                title: Text(
+                  t.iptvCategories.initialRow(initial: initial.initial, count: initial.count),
+                ),
+                value: !_hiddenInitials.contains(initial.initial),
+                onChanged: (shown) => _toggleInitial(initial.initial, shown),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -53,6 +53,32 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// when the fetch settles, so a later stale-cache call re-fetches.
   final Map<String, Future<_CachedXmltvGuide>> _xmltvGuideFutures = {};
 
+  /// Failed XMLTV feed downloads, keyed like [_xmltvCache] (build #15,
+  /// item 6): a failed feed is remembered briefly so a slow/failing feed
+  /// is not re-downloaded channel by channel — rows show the existing
+  /// tap-to-retry state instead until the window passes.
+  final Map<String, DateTime> _xmltvFailedAt = {};
+
+  /// Cap on concurrent per-channel `get_short_epg` calls (build #15,
+  /// item 6): the guide opens many rows at once and each used to fire its
+  /// own 60s call. Four in flight is enough for the first visible rows
+  /// while the rest wait their turn instead of stacking timeouts.
+  static const int _maxShortEpgConcurrency = 4;
+  int _shortEpgInFlight = 0;
+  final List<Completer<void>> _shortEpgWaiters = [];
+
+  /// First-paint budget for one channel's `get_short_epg` (build #15,
+  /// item 6): a channel whose short-EPG doesn't answer quickly falls back
+  /// to the cached feed slice instead of holding its row for the full
+  /// 60s. Test-overridable so the timeout path stays fast to prove.
+  @visibleForTesting
+  static Duration shortEpgFirstPaintTimeout = const Duration(seconds: 15);
+
+  /// How long a failed XMLTV feed download is remembered (build #15,
+  /// item 6). Test-overridable.
+  @visibleForTesting
+  static Duration xmltvNegativeCacheTtl = const Duration(minutes: 5);
+
   /// True after "Clear guide" until something refreshes the guide
   /// ([refreshEpgCache] or the one start-up refresh). While set, the guide
   /// shows "No information available" hour blocks instead of refetching —
@@ -71,6 +97,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// code never sets this; reset it in tearDown when a test does.
   @visibleForTesting
   static Future<Directory> Function()? debugEpgCacheDirectoryProvider;
+
+  /// Test-only: when true, the persisted EPG side is skipped entirely
+  /// (mirrors `IptvCatalogDiskCache.debugDisableDisk` — real disk I/O hangs
+  /// inside testWidgets' fake async zone). Production code never sets this.
+  @visibleForTesting
+  static bool debugDisablePersistedEpg = false;
 
   /// Whether the update-on-start refresh has run for this support instance
   /// (one instance per client per app launch), per channel. Build #6 used
@@ -172,12 +204,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       rethrow;
     }
 
-    final entry = _CachedChannelEpg(
-      programs: programs,
-      fetchedAt: now,
-      windowFrom: fetchFrom,
-      windowTo: fetchTo,
-    );
+    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo);
     _epgCache[channelKey] = entry;
     // Best-effort and fire-and-forget: a failed write never breaks the
     // guide — the in-memory entry above still serves this launch — and
@@ -187,6 +214,83 @@ class IptvLiveTvSupport implements LiveTvSupport {
     _lastEpgUpdatedAt = now;
     _noteEpgUpdated(now);
     return _slice(programs, from, to);
+  }
+
+  /// Programmes from the EPG cache ONLY, for [channelKeys] — in-memory
+  /// entries plus persisted per-channel files. Never a network fetch
+  /// (build #15, item 2): the guide search sheet must not fire a
+  /// `get_short_epg` per channel across the catalog. Channels with no
+  /// cache entry contribute nothing here; they still match by channel
+  /// name in the sheet. A stale entry is served as-is (the guide is the
+  /// source of truth for freshness) as long as it covers the window.
+  ///
+  /// The persisted side is ONE directory listing, not one read per channel:
+  /// only channels with a file are read, and only ones not already served
+  /// from memory. A cache read failure never breaks search — programme
+  /// results are best-effort.
+  Future<Map<String, List<LiveTvProgram>>> cachedEpgForChannels(
+    Set<String> channelKeys, {
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final out = <String, List<LiveTvProgram>>{};
+    for (final key in channelKeys) {
+      final entry = _epgCache[key];
+      if (entry == null || !entry.covers(from, to)) continue;
+      final slice = _slice(entry.programs, from, to);
+      if (slice.isNotEmpty) out[key] = slice;
+    }
+    // Every requested channel already served from memory — the common case
+    // after the guide warmed the cache — so no directory listing at all.
+    if (out.length == channelKeys.length || debugDisablePersistedEpg) return out;
+    try {
+      final dir = await _epgCacheDir();
+      if (await dir.exists()) {
+        await for (final entity in dir.list()) {
+          if (entity is! File) continue;
+          final key = _channelKeyFromFileName(entity.path.split('/').last);
+          if (key == null || !channelKeys.contains(key) || out.containsKey(key)) continue;
+          final entry = await _readPersistedEpg(key);
+          if (entry == null || !entry.covers(from, to)) continue;
+          _epgCache[key] = entry;
+          final slice = _slice(entry.programs, from, to);
+          if (slice.isNotEmpty) out[key] = slice;
+        }
+      }
+    } catch (_) {
+      // Best-effort: in-memory results above still stand.
+    }
+    return out;
+  }
+
+  /// The channel key for a persisted EPG filename (`<base64url(key)>.json`
+  /// — see [_fileSafe]); null when the name does not decode.
+  static String? _channelKeyFromFileName(String name) {
+    final base = name.endsWith('.json') ? name.substring(0, name.length - 5) : name;
+    try {
+      final padded = base + ('=' * ((4 - base.length % 4) % 4));
+      return utf8.decode(base64Url.decode(padded));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Test-only seam: seed the in-memory EPG cache for [channelKey] without
+  /// touching disk or the network, so the search sheet's cache-only path
+  /// can be driven directly. Production code never calls this.
+  @visibleForTesting
+  void debugSeedCachedEpg(
+    String channelKey,
+    List<LiveTvProgram> programs, {
+    required DateTime from,
+    required DateTime to,
+  }) {
+    _epgCache[channelKey] = _CachedChannelEpg(
+      programs: programs,
+      fetchedAt: DateTime.now(),
+      windowFrom: from,
+      windowTo: to,
+    );
   }
 
   /// Persisted EPG cache: one JSON file per browsed channel, under the app
@@ -245,9 +349,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   static List<LiveTvProgram> _slice(List<LiveTvProgram> programs, DateTime from, DateTime to) {
     final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
     final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
-    return programs
-        .where((p) => (p.endsAt ?? 0) > fromEpoch && (p.beginsAt ?? 0) < toEpoch)
-        .toList(growable: false);
+    return programs.where((p) => (p.endsAt ?? 0) > fromEpoch && (p.beginsAt ?? 0) < toEpoch).toList(growable: false);
   }
 
   /// Xtream EPG, TiviMate-style (build #8 Task 3): per-channel
@@ -331,46 +433,75 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// `xmltv.php` feed has nothing for the channel (or cannot be fetched).
   /// Limit 500 covers ~10 days of half-hour slots; anything past the limit
   /// simply does not appear (placeholders fill the gap) instead of failing.
+  ///
+  /// Build #15, item 6: at most [_maxShortEpgConcurrency] calls run at
+  /// once, and a call that doesn't answer within
+  /// [shortEpgFirstPaintTimeout] gives up fast — the caller falls back to
+  /// the cached feed slice instead of holding the row for the full 60s.
   Future<List<LiveTvProgram>> _fetchXtreamShortEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
     DateTime to,
   ) async {
-    final listings = await _client.xtreamApi.getShortEpg(
-      channelKey,
-      limit: 500,
-      timeout: const Duration(seconds: 60),
-    );
-    final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
-    final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
-    final offsetSeconds = settings.timeOffsetMinutes * 60;
-    final programs = <LiveTvProgram>[];
-    for (final listing in listings) {
-      try {
-        final beginsAt = listing.startTimestamp + offsetSeconds;
-        final endsAt = listing.stopTimestamp + offsetSeconds;
-        if (endsAt <= beginsAt || endsAt <= fromEpoch || beginsAt >= toEpoch) continue;
-        programs.add(
-          LiveTvProgram(
-            // The API's own channel id is not trusted for matching: the
-            // guide indexes programs by the channel key it asked for.
-            key: 'epg:$channelKey:${listing.id}',
-            title: listing.title.isEmpty ? t.liveTv.unknownProgram : listing.title,
-            summary: listing.description.isEmpty ? null : listing.description,
-            beginsAt: beginsAt,
-            endsAt: endsAt,
-            channelIdentifier: channelKey,
-            serverId: _client.connection.id,
-            serverName: _client.serverName,
-          ),
-        );
-      } catch (_) {
-        // One bad listing does not invalidate the channel's guide.
+    await _acquireShortEpgSlot();
+    try {
+      final listings = await _client.xtreamApi
+          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60))
+          .timeout(
+            shortEpgFirstPaintTimeout,
+            onTimeout: () => throw TimeoutException('get_short_epg first-paint timeout for $channelKey'),
+          );
+      final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
+      final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
+      final offsetSeconds = settings.timeOffsetMinutes * 60;
+      final programs = <LiveTvProgram>[];
+      for (final listing in listings) {
+        try {
+          final beginsAt = listing.startTimestamp + offsetSeconds;
+          final endsAt = listing.stopTimestamp + offsetSeconds;
+          if (endsAt <= beginsAt || endsAt <= fromEpoch || beginsAt >= toEpoch) continue;
+          programs.add(
+            LiveTvProgram(
+              // The API's own channel id is not trusted for matching: the
+              // guide indexes programs by the channel key it asked for.
+              key: 'epg:$channelKey:${listing.id}',
+              title: listing.title.isEmpty ? t.liveTv.unknownProgram : listing.title,
+              summary: listing.description.isEmpty ? null : listing.description,
+              beginsAt: beginsAt,
+              endsAt: endsAt,
+              channelIdentifier: channelKey,
+              serverId: _client.connection.id,
+              serverName: _client.serverName,
+            ),
+          );
+        } catch (_) {
+          // One bad listing does not invalidate the channel's guide.
+        }
       }
+      programs.sort((a, b) => (a.beginsAt ?? 0).compareTo(b.beginsAt ?? 0));
+      return programs;
+    } finally {
+      _releaseShortEpgSlot();
     }
-    programs.sort((a, b) => (a.beginsAt ?? 0).compareTo(b.beginsAt ?? 0));
-    return programs;
+  }
+
+  /// Take one of the [_maxShortEpgConcurrency] `get_short_epg` slots,
+  /// waiting for a free one when the storm is at the cap. The wait is
+  /// bounded in practice: every holder gives up after
+  /// [shortEpgFirstPaintTimeout], so a slot frees within that budget.
+  Future<void> _acquireShortEpgSlot() async {
+    while (_shortEpgInFlight >= _maxShortEpgConcurrency) {
+      final waiter = Completer<void>();
+      _shortEpgWaiters.add(waiter);
+      await waiter.future;
+    }
+    _shortEpgInFlight++;
+  }
+
+  void _releaseShortEpgSlot() {
+    _shortEpgInFlight--;
+    if (_shortEpgWaiters.isNotEmpty) _shortEpgWaiters.removeAt(0).complete();
   }
 
   Future<List<LiveTvProgram>> _fetchM3uEpg(
@@ -432,17 +563,70 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// (null = manual only: fetched once, refreshed only by Update now /
   /// Clear). Parsing runs in an isolate — provider files run to megabytes.
   /// Concurrent channel fetches share one in-flight download per key.
+  ///
+  /// Build #15, item 6 — the feed is persisted, not just held in memory:
+  /// a warm start parses the feed FILE instead of re-downloading it, a
+  /// stale guide is served immediately while the refresh runs in the
+  /// background (stale-while-revalidate), and a failed download is
+  /// remembered briefly instead of retried channel by channel.
   Future<_CachedXmltvGuide> _xmltvGuideForKey(
     String cacheKey,
     Future<String> Function() fetchBody,
     Duration? ttl,
   ) async {
+    bool fresh(_CachedXmltvGuide guide) => ttl == null || DateTime.now().difference(guide.fetchedAt) < ttl;
+
     final cached = _xmltvCache[cacheKey];
-    if (cached != null && (ttl == null || DateTime.now().difference(cached.fetchedAt) < ttl)) {
-      return cached;
+    if (cached != null && fresh(cached)) return cached;
+
+    // A failed download is remembered briefly: don't start another 120s
+    // download for a channel whose feed just failed — the caller falls
+    // back to get_short_epg / tap-to-retry instead. A stale guide still
+    // beats nothing.
+    final failedAt = _xmltvFailedAt[cacheKey];
+    if (failedAt != null) {
+      if (DateTime.now().difference(failedAt) < xmltvNegativeCacheTtl) {
+        if (cached != null) return cached;
+        throw StateError('XMLTV feed for $cacheKey failed recently; retry shortly');
+      }
+      _xmltvFailedAt.remove(cacheKey);
     }
+
     final inFlight = _xmltvGuideFutures[cacheKey];
     if (inFlight != null) return inFlight;
+
+    // Stale-while-revalidate: a stale in-memory guide still answers while
+    // the refresh runs in the background — the guide never waits on a
+    // download for programmes it already has.
+    if (cached != null) {
+      final future = _loadXmltvGuide(cacheKey, fetchBody);
+      _xmltvGuideFutures[cacheKey] = future;
+      unawaited(
+        future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
+          _xmltvGuideFutures.removeWhere((key, value) => key == cacheKey && identical(value, future));
+        }),
+      );
+      return cached;
+    }
+
+    // No in-memory guide: the persisted feed file is the warm start —
+    // parse it now (no download) and refresh in the background when stale.
+    final persisted = await _readPersistedXmltv(cacheKey);
+    if (persisted != null) {
+      _xmltvCache[cacheKey] = persisted;
+      if (!fresh(persisted)) {
+        final future = _loadXmltvGuide(cacheKey, fetchBody);
+        _xmltvGuideFutures[cacheKey] = future;
+        unawaited(
+          future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
+            _xmltvGuideFutures.removeWhere((key, value) => key == cacheKey && identical(value, future));
+          }),
+        );
+      }
+      return persisted;
+    }
+
+    // Fully cold: one shared download, as before.
     final future = _loadXmltvGuide(cacheKey, fetchBody);
     _xmltvGuideFutures[cacheKey] = future;
     try {
@@ -456,11 +640,64 @@ class IptvLiveTvSupport implements LiveTvSupport {
   }
 
   Future<_CachedXmltvGuide> _loadXmltvGuide(String cacheKey, Future<String> Function() fetchBody) async {
-    final body = await fetchBody();
+    String body;
+    try {
+      body = await fetchBody();
+    } catch (e) {
+      _xmltvFailedAt[cacheKey] = DateTime.now();
+      rethrow;
+    }
     final programs = await compute(parseXmltv, body);
+    // Only a parseable feed is persisted — a corrupt body is never written
+    // to disk, so a bad download can't poison every later cold start.
+    unawaited(_writePersistedXmltv(cacheKey, body));
     final guide = _CachedXmltvGuide(programs: programs, fetchedAt: DateTime.now());
     _xmltvCache[cacheKey] = guide;
+    _xmltvFailedAt.remove(cacheKey);
     return guide;
+  }
+
+  /// The persisted XMLTV feed file for [cacheKey]
+  /// (`feed_<base64url(key)>.xml` next to the per-channel files). The raw
+  /// body is stored, not the parsed guide — parsing runs in an isolate on
+  /// read, same as on download.
+  Future<File> _xmltvFeedFile(String cacheKey) async {
+    final dir = await _epgCacheDir();
+    return File('${dir.path}/feed_${_fileSafe(cacheKey)}.xml');
+  }
+
+  Future<void> _writePersistedXmltv(String cacheKey, String body) async {
+    if (debugDisablePersistedEpg) return;
+    try {
+      final file = await _xmltvFeedFile(cacheKey);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(body);
+    } catch (e) {
+      appLogger.w('IPTV EPG feed cache write failed for $cacheKey', error: e);
+    }
+  }
+
+  /// Read + parse the persisted feed file, or null when there is none (or
+  /// it is unreadable / unparseable — a corrupt file reads as a miss, and
+  /// is deleted so it is not re-parsed on every cold start). The guide's
+  /// fetch time is the file's last-modified time.
+  Future<_CachedXmltvGuide?> _readPersistedXmltv(String cacheKey) async {
+    if (debugDisablePersistedEpg) return null;
+    File? file;
+    try {
+      file = await _xmltvFeedFile(cacheKey);
+      if (!await file.exists()) return null;
+      final body = await file.readAsString();
+      final programs = await compute(parseXmltv, body);
+      return _CachedXmltvGuide(programs: programs, fetchedAt: await file.lastModified());
+    } catch (_) {
+      try {
+        await file?.delete();
+      } catch (_) {
+        // Best-effort: the file is gone or unreadable anyway.
+      }
+      return null;
+    }
   }
 
   /// The M3U connection's user-supplied EPG URL, as a parsed guide.
@@ -501,6 +738,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
   Future<void> clearEpgCache() async {
     _epgCache.clear();
     _xmltvCache.clear();
+    // A clear is an explicit retry: forget a failed feed too, so the next
+    // guide visit downloads instead of hitting the negative cache.
+    _xmltvFailedAt.clear();
     // Best-effort and fire-and-forget: the in-memory caches are already
     // empty and the guide is cleared, so don't gate the settings action
     // (or the guide) on the disk delete — it completes in the background.
@@ -555,8 +795,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   }
 
   @override
-  Future<String> buildFavoriteChannelSource({String? lineup}) async =>
-      'server://${_client.connection.id}/iptv';
+  Future<String> buildFavoriteChannelSource({String? lineup}) async => 'server://${_client.connection.id}/iptv';
 
   @override
   String get favoriteStoreKey => 'iptv:${_client.connection.id}';
@@ -729,12 +968,7 @@ class _CachedChannelEpg {
         }
       }
     }
-    return _CachedChannelEpg(
-      programs: programs,
-      fetchedAt: fetchedAt,
-      windowFrom: windowFrom,
-      windowTo: windowTo,
-    );
+    return _CachedChannelEpg(programs: programs, fetchedAt: fetchedAt, windowFrom: windowFrom, windowTo: windowTo);
   }
 
   bool covers(DateTime from, DateTime to) => !windowFrom.isAfter(from) && !windowTo.isBefore(to);

@@ -12,6 +12,7 @@ import 'package:plezy/media/iptv_live_tv.dart';
 import 'package:plezy/models/livetv_channel.dart';
 import 'package:plezy/mpv/models.dart' as mpv_models;
 import 'package:plezy/mpv/player/player.dart';
+import 'package:plezy/mpv/player/player_state.dart';
 import 'package:plezy/mpv/player/player_streams.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/livetv/tabs/guide_tab.dart';
@@ -115,6 +116,14 @@ final class _FakePlayer implements Player {
 
   @override
   late final PlayerStreams streams;
+
+  /// Build #15: the controller reads the latched frame state and the
+  /// backend name for the first-frame reveal and diagnostic.
+  @override
+  PlayerState state = const PlayerState();
+
+  @override
+  String get playerType => 'mpv';
 
   final List<String> openedUris = [];
   final List<String> setProperties = [];
@@ -274,6 +283,15 @@ final class _MiniPlayerHarness {
       await tester.pump();
     }
     expect(api.epgCalls, count);
+    // Build #15: the xmltv feed read is real disk I/O kicked in the
+    // background alongside get_short_epg. Real I/O only completes
+    // inside runAsync in the fake async zone, and pumpAndSettle alone
+    // never delivers it — give the background read one more real-async
+    // window so the fetch chain can settle.
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
   }
 
   Future<void> tapChannel(WidgetTester tester, String name) async {

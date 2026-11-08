@@ -26,10 +26,6 @@ import 'package:plezy/media/server_capabilities.dart';
 import 'package:plezy/models/livetv_channel.dart';
 import 'package:plezy/models/livetv_program.dart';
 import 'package:plezy/models/transcode_quality_preset.dart';
-import 'package:plezy/profiles/active_profile_provider.dart';
-import 'package:plezy/profiles/plex_home_service.dart';
-import 'package:plezy/profiles/profile_connection_registry.dart';
-import 'package:plezy/profiles/profile_registry.dart';
 import 'package:plezy/providers/download_provider.dart';
 import 'package:plezy/providers/hidden_libraries_provider.dart';
 import 'package:plezy/providers/libraries_provider.dart';
@@ -50,7 +46,6 @@ import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/services/storage_service.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
 import 'package:plezy/theme/mono_theme.dart';
-import 'package:plezy/widgets/focusable_list_tile.dart';
 import 'package:plezy/widgets/overlay_sheet.dart';
 import 'package:provider/provider.dart';
 
@@ -160,67 +155,6 @@ class _FakeXtreamApi extends XtreamApi {
 
   @override
   Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async => const [];
-}
-
-/// Fake whose CATEGORIES carry repeating initials — EN ×11 (6 live + 5
-/// VOD categories), NF ×9 (1 VOD + 8 series categories), ES ×1 (never
-/// offered). For the initials filter tests (build #8 Task 4, redesigned
-/// build #10: category initials).
-class _InitialsFakeXtreamApi extends XtreamApi {
-  _InitialsFakeXtreamApi()
-    : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
-
-  @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
-    for (var i = 1; i <= 5; i++) XtreamLiveStream(streamId: 100 + i, name: 'EN - Channel $i', categoryId: '1'),
-    const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '1'),
-  ];
-
-  @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
-    XtreamCategory(id: '1', name: 'EN - Live 1'),
-    XtreamCategory(id: 'L2', name: 'EN - Live 2'),
-    XtreamCategory(id: 'L3', name: 'EN - Live 3'),
-    XtreamCategory(id: 'L4', name: 'EN - Live 4'),
-    XtreamCategory(id: 'L5', name: 'EN - Live 5'),
-    XtreamCategory(id: 'L6', name: 'EN - Live 6'),
-  ];
-
-  @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
-    for (var i = 1; i <= 5; i++)
-      XtreamVodStream(streamId: 300 + i, name: 'EN - Movie $i', containerExtension: 'mp4', categoryId: '1'),
-    const XtreamVodStream(streamId: 400, name: 'NF - Movie', containerExtension: 'mp4', categoryId: '2'),
-  ];
-
-  @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
-    XtreamCategory(id: '1', name: 'EN - Films 1'),
-    XtreamCategory(id: 'E2', name: 'EN - Films 2'),
-    XtreamCategory(id: 'E3', name: 'EN - Films 3'),
-    XtreamCategory(id: 'E4', name: 'EN - Films 4'),
-    XtreamCategory(id: 'E5', name: 'EN - Films 5'),
-    XtreamCategory(id: '2', name: 'NF'),
-    XtreamCategory(id: 'ES1', name: 'ES - Films'),
-  ];
-
-  @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => [
-    for (var i = 1; i <= 6; i++) XtreamSeries(seriesId: 500 + i, name: 'NF - Show $i', categoryId: '2'),
-  ];
-
-  @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
-    XtreamCategory(id: '1', name: 'Action'),
-    XtreamCategory(id: '2', name: 'NF - Series 1'),
-    XtreamCategory(id: 'S2', name: 'NF - Series 2'),
-    XtreamCategory(id: 'S3', name: 'NF - Series 3'),
-    XtreamCategory(id: 'S4', name: 'NF - Series 4'),
-    XtreamCategory(id: 'S5', name: 'NF - Series 5'),
-    XtreamCategory(id: 'S6', name: 'NF - Series 6'),
-    XtreamCategory(id: 'S7', name: 'NF - Series 7'),
-    XtreamCategory(id: 'S8', name: 'NF - Series 8'),
-  ];
 }
 
 /// In-memory favourites store for widget tests. The production store
@@ -792,101 +726,6 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
     expect(find.text(t.iptv.epgCleared), findsOneWidget);
-  });
-
-  testWidgets('IPTV settings screen: category initials toggle persists (build #8 Task 4, redesigned build #10)', (tester) async {
-    // The initials section lives grouped with the categories on the IPTV
-    // settings screen, under the Trex connection tile; a toggle persists
-    // immediately (registry upsert) so the filter applies everywhere.
-    // No active profile here, so the rebind step is skipped — the rebind
-    // itself is covered by the binder tests and the filter honouring by
-    // the client unit tests.
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
-    addTearDown(() async => db.close());
-    final registry = ConnectionRegistry(db);
-    await registry.upsert(_trexConnection());
-
-    final storage = await StorageService.getInstance();
-    final profileConnections = ProfileConnectionRegistry(db);
-    final profiles = ProfileRegistry(db);
-    final plexHome = PlexHomeService(
-      connections: registry,
-      profileConnections: profileConnections,
-      storage: storage,
-      plexHomeUserFetcher: (_) async => const [],
-    );
-    final activeProfile = ActiveProfileProvider(
-      registry: profiles,
-      plexHome: plexHome,
-      connections: registry,
-      profileConnections: profileConnections,
-      storage: storage,
-    );
-    addTearDown(() async {
-      await activeProfile.resetForTesting();
-      activeProfile.dispose();
-      await plexHome.dispose();
-    });
-
-    final manager = MultiServerManager();
-    manager.debugRegisterClientForTesting(_trexClient());
-    final provider = testMultiServerProvider(manager);
-    addTearDown(() {
-      provider.dispose();
-      manager.dispose();
-    });
-
-    // The initials checklist creates its own client via forConnection —
-    // the factory seam points it at a fake-backed client (EN ×11, NF ×9).
-    IptvClient.debugClientFactory = (connection) {
-      final client = IptvClient.xtream(xtreamConnection: connection as XtreamConnection);
-      client.testXtreamApi = _InitialsFakeXtreamApi();
-      return client;
-    };
-    addTearDown(() => IptvClient.debugClientFactory = null);
-
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
-          Provider<ConnectionRegistry>.value(value: registry),
-          ChangeNotifierProvider<ActiveProfileProvider>.value(value: activeProfile),
-        ],
-        child: InputModeTracker(
-          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.scrollUntilVisible(find.text(t.connections.iptvFilterInitials), 200);
-    expect(find.text(t.connections.iptvFilterInitials), findsOneWidget);
-    await tester.tap(find.text(t.connections.iptvFilterInitials));
-    await tester.pumpAndSettle();
-
-    expect(find.text('EN (11)'), findsOneWidget);
-    expect(find.text('NF (9)'), findsOneWidget);
-
-    final nfTile = find.ancestor(
-      of: find.text('NF (9)'),
-      matching: find.byType(FocusableSwitchListTile),
-    );
-    await tester.tap(nfTile);
-    await tester.pumpAndSettle();
-
-    expect(tester.widget<FocusableSwitchListTile>(nfTile).value, isFalse);
-    // The toggle persisted to the registry immediately.
-    final stored = await registry.watchConnections().first;
-    final storedTrex = stored.singleWhere((c) => c.id == 'trex') as XtreamConnection;
-    expect(storedTrex.disabledInitials, ['NF']);
-
-    // Unmount the screen inside the test body (not at teardown):
-    // disposing the StreamBuilder unsubscribes from the registry's drift
-    // watch stream, and drift schedules a zero-duration timer on close —
-    // pumping once more lets it fire, so the binding finds no pending
-    // timers at the end of the test.
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
   });
 
   group('First-run IPTV onboarding', () {

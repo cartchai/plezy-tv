@@ -366,11 +366,22 @@ class JellyfinConnection extends Connection {
   }
 }
 
+/// Read a string list from [json] under [newKey], falling back to [oldKey].
+/// Build #15, item 5: the one-time migration from the build #6–#14 keys
+/// (`disabledCategoryIds` / `disabledInitials`) to the new keys
+/// (`hiddenCategoryIds` / `hiddenCategoryInitials`). The old keys are never
+/// written again — the next save stores only the new keys — so after one
+/// load + save the migration is done and the old keys are dead.
+List<String> _migratedStringList(Map<String, Object?> json, String newKey, String oldKey) {
+  final raw = json[newKey] ?? json[oldKey];
+  return raw is List ? raw.whereType<String>().toList(growable: false) : const <String>[];
+}
+
 /// An M3U playlist connection — a user-supplied playlist URL.
 ///
 /// Live TV channels and on-demand items come from the playlist itself.
 /// The user gives the library a [name] at import time; that name becomes
-/// the library title. [disabledCategoryIds] is the country/region filter:
+/// the library title. [hiddenCategoryIds] is the country/region filter:
 /// category ids the user turned off are hidden from Live TV and Library.
 class M3uConnection extends Connection {
   @override
@@ -393,22 +404,22 @@ class M3uConnection extends Connection {
 
   /// Category ids the user turned off (country/region filter). Hidden from
   /// Live TV and Library.
-  final List<String> disabledCategoryIds;
+  final List<String> hiddenCategoryIds;
 
   /// Category initials the user turned off (build #8 Task 4, redesigned
   /// build #10 — the repeating "EN", "24/7", "NF" style prefixes of
   /// CATEGORY names). Categories carrying a disabled initial — and
   /// everything in them — are hidden from Live TV and Library, like a
   /// disabled category. Item names are never filtered.
-  final List<String> disabledInitials;
+  final List<String> hiddenCategoryInitials;
 
   M3uConnection({
     required this.id,
     required this.name,
     required this.playlistUrl,
     this.epgUrl,
-    this.disabledCategoryIds = const [],
-    this.disabledInitials = const [],
+    this.hiddenCategoryIds = const [],
+    this.hiddenCategoryInitials = const [],
     required this.createdAt,
     this.lastAuthenticatedAt,
   });
@@ -436,8 +447,8 @@ class M3uConnection extends Connection {
     String? playlistUrl,
     String? epgUrl,
     bool clearEpgUrl = false,
-    List<String>? disabledCategoryIds,
-    List<String>? disabledInitials,
+    List<String>? hiddenCategoryIds,
+    List<String>? hiddenCategoryInitials,
     DateTime? createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
@@ -446,8 +457,8 @@ class M3uConnection extends Connection {
       name: name ?? this.name,
       playlistUrl: playlistUrl ?? this.playlistUrl,
       epgUrl: clearEpgUrl ? null : (epgUrl ?? this.epgUrl),
-      disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
-      disabledInitials: disabledInitials ?? this.disabledInitials,
+      hiddenCategoryIds: hiddenCategoryIds ?? this.hiddenCategoryIds,
+      hiddenCategoryInitials: hiddenCategoryInitials ?? this.hiddenCategoryInitials,
       createdAt: createdAt ?? this.createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
     );
@@ -459,8 +470,8 @@ class M3uConnection extends Connection {
       'name': name,
       'playlistUrl': playlistUrl,
       'epgUrl': epgUrl,
-      'disabledCategoryIds': disabledCategoryIds,
-      'disabledInitials': disabledInitials,
+      'hiddenCategoryIds': hiddenCategoryIds,
+      'hiddenCategoryInitials': hiddenCategoryInitials,
     };
   }
 
@@ -470,17 +481,16 @@ class M3uConnection extends Connection {
     required DateTime createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
-    final rawDisabled = json['disabledCategoryIds'];
-    final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
-    final rawInitials = json['disabledInitials'];
-    final initials = rawInitials is List ? rawInitials.whereType<String>().toList(growable: false) : const <String>[];
+    // Build #15, item 5: new keys, one-time migration from the old ones.
+    final hidden = _migratedStringList(json, 'hiddenCategoryIds', 'disabledCategoryIds');
+    final initials = _migratedStringList(json, 'hiddenCategoryInitials', 'disabledInitials');
     return M3uConnection(
       id: id,
       name: json['name'] as String? ?? 'M3U',
       playlistUrl: json['playlistUrl'] as String? ?? '',
       epgUrl: json['epgUrl'] as String?,
-      disabledCategoryIds: disabled,
-      disabledInitials: initials,
+      hiddenCategoryIds: hidden,
+      hiddenCategoryInitials: initials,
       createdAt: createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt,
     );
@@ -491,7 +501,7 @@ class M3uConnection extends Connection {
 ///
 /// Live TV, VOD and series come from the Xtream `player_api.php` API.
 /// The user gives the library a [name] at import time; that name becomes
-/// the library title. [disabledCategoryIds] is the country/region filter:
+/// the library title. [hiddenCategoryIds] is the country/region filter:
 /// category ids the user turned off are hidden from Live TV and Library.
 /// The password is persisted via the registry's encrypted config JSON, the
 /// same protection Jellyfin access tokens get.
@@ -519,14 +529,14 @@ class XtreamConnection extends Connection {
 
   /// Category ids the user turned off (country/region filter). Hidden from
   /// Live TV and Library.
-  final List<String> disabledCategoryIds;
+  final List<String> hiddenCategoryIds;
 
   /// Category initials the user turned off (build #8 Task 4, redesigned
   /// build #10 — the repeating "EN", "24/7", "NF" style prefixes of
   /// CATEGORY names). Categories carrying a disabled initial — and
   /// everything in them — are hidden from Live TV and Library, like a
   /// disabled category. Item names are never filtered.
-  final List<String> disabledInitials;
+  final List<String> hiddenCategoryInitials;
 
   XtreamConnection({
     required this.id,
@@ -534,8 +544,8 @@ class XtreamConnection extends Connection {
     required String serverUrl,
     required this.username,
     required this.password,
-    this.disabledCategoryIds = const [],
-    this.disabledInitials = const [],
+    this.hiddenCategoryIds = const [],
+    this.hiddenCategoryInitials = const [],
     required this.createdAt,
     this.lastAuthenticatedAt,
   }) : serverUrl = canonicalizeBaseUrl(serverUrl);
@@ -563,8 +573,8 @@ class XtreamConnection extends Connection {
     String? serverUrl,
     String? username,
     String? password,
-    List<String>? disabledCategoryIds,
-    List<String>? disabledInitials,
+    List<String>? hiddenCategoryIds,
+    List<String>? hiddenCategoryInitials,
     DateTime? createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
@@ -574,8 +584,8 @@ class XtreamConnection extends Connection {
       serverUrl: serverUrl ?? this.serverUrl,
       username: username ?? this.username,
       password: password ?? this.password,
-      disabledCategoryIds: disabledCategoryIds ?? this.disabledCategoryIds,
-      disabledInitials: disabledInitials ?? this.disabledInitials,
+      hiddenCategoryIds: hiddenCategoryIds ?? this.hiddenCategoryIds,
+      hiddenCategoryInitials: hiddenCategoryInitials ?? this.hiddenCategoryInitials,
       createdAt: createdAt ?? this.createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt ?? this.lastAuthenticatedAt,
     );
@@ -588,8 +598,8 @@ class XtreamConnection extends Connection {
       'serverUrl': serverUrl,
       'username': username,
       'password': password,
-      'disabledCategoryIds': disabledCategoryIds,
-      'disabledInitials': disabledInitials,
+      'hiddenCategoryIds': hiddenCategoryIds,
+      'hiddenCategoryInitials': hiddenCategoryInitials,
     };
   }
 
@@ -599,18 +609,17 @@ class XtreamConnection extends Connection {
     required DateTime createdAt,
     DateTime? lastAuthenticatedAt,
   }) {
-    final rawDisabled = json['disabledCategoryIds'];
-    final disabled = rawDisabled is List ? rawDisabled.whereType<String>().toList(growable: false) : const <String>[];
-    final rawInitials = json['disabledInitials'];
-    final initials = rawInitials is List ? rawInitials.whereType<String>().toList(growable: false) : const <String>[];
+    // Build #15, item 5: new keys, one-time migration from the old ones.
+    final hidden = _migratedStringList(json, 'hiddenCategoryIds', 'disabledCategoryIds');
+    final initials = _migratedStringList(json, 'hiddenCategoryInitials', 'disabledInitials');
     return XtreamConnection(
       id: id,
       name: json['name'] as String? ?? 'Xtream',
       serverUrl: json['serverUrl'] as String? ?? '',
       username: json['username'] as String? ?? '',
       password: json['password'] as String? ?? '',
-      disabledCategoryIds: disabled,
-      disabledInitials: initials,
+      hiddenCategoryIds: hidden,
+      hiddenCategoryInitials: initials,
       createdAt: createdAt,
       lastAuthenticatedAt: lastAuthenticatedAt,
     );

@@ -57,6 +57,7 @@ import 'account_preferences_screen.dart';
 import 'appearance_settings_screen.dart';
 import 'general_settings_screen.dart';
 import 'iptv_settings_screen.dart';
+import 'live_tv_settings_screen.dart';
 import 'last_crash_row.dart';
 import 'keyboard_shortcuts_screen.dart';
 import 'logs_screen.dart';
@@ -103,6 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
   static const _kGeneral = 'general';
   static const _kAppearance = 'appearance';
   static const _kPlayback = 'playback';
+  static const _kLiveTv = 'live_tv';
   static const _kManageLibraries = 'manage_libraries';
   static const _kServices = 'services';
   static const _kIptv = 'iptv';
@@ -225,6 +227,7 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
                       _buildGeneralTile(),
                       _buildAppearanceTile(),
                       _buildPlaybackTile(),
+                      _buildLiveTvTile(),
                       if (hasLibraries) _buildManageLibrariesTile(sheetContext),
                       _buildServicesTile(),
                     ],
@@ -319,6 +322,16 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
       title: t.settings.videoPlayback,
       subtitle: t.settings.videoPlaybackDescription,
       destinationBuilder: (context) => const PlaybackSettingsScreen(),
+    );
+  }
+
+  Widget _buildLiveTvTile() {
+    return SettingNavigationTile(
+      focusNode: _focusTracker.get(_kLiveTv),
+      icon: Symbols.live_tv_rounded,
+      title: t.liveTv.title,
+      subtitle: t.liveTv.settingsDescription,
+      destinationBuilder: (context) => const LiveTvSettingsScreen(),
     );
   }
 

@@ -6,6 +6,7 @@ import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/models/livetv_channel.dart';
 import 'package:plezy/mpv/models.dart' as mpv_models;
 import 'package:plezy/mpv/player/player.dart';
+import 'package:plezy/mpv/player/player_state.dart';
 import 'package:plezy/mpv/player/player_streams.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/livetv/live_tv_mini_player.dart';
@@ -65,6 +66,14 @@ final class _FakePlayer implements Player {
 
   @override
   late final PlayerStreams streams;
+
+  /// Build #15: the controller reads the latched frame state and the
+  /// backend name for the first-frame reveal and diagnostic.
+  @override
+  PlayerState state = const PlayerState();
+
+  @override
+  String get playerType => 'mpv';
 
   final List<String> openedUris = [];
   final List<double> volumes = [];

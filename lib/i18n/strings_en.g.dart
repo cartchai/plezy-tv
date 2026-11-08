@@ -96,6 +96,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
 	late final Translations$addServer$en addServer = Translations$addServer$en.internal(_root);
 	late final Translations$deepLinks$en deepLinks = Translations$deepLinks$en.internal(_root);
 	late final Translations$iptv$en iptv = Translations$iptv$en.internal(_root);
+	late final Translations$iptvCategories$en iptvCategories = Translations$iptvCategories$en.internal(_root);
 }
 
 // Path: app
@@ -2174,6 +2175,12 @@ class Translations$mediaMenu$en {
 
 	/// en: 'Play Version...'
 	String get playVersion => 'Play Version...';
+
+	/// en: 'Add to favourites'
+	String get addToFavorites => 'Add to favourites';
+
+	/// en: 'Remove from favourites'
+	String get removeFromFavorites => 'Remove from favourites';
 }
 
 // Path: rateSheet
@@ -3208,57 +3215,6 @@ class Translations$connections$en {
 
 	/// en: 'Add or remove URLs for ${serverName}. PlezTV will use the reachable URL with the lowest latency.'
 	String editMediaBrowserIntro({required Object serverName}) => 'Add or remove URLs for ${serverName}. PlezTV will use the reachable URL with the lowest latency.';
-
-	/// en: 'Countries & regions'
-	String get iptvFilterTitle => 'Countries & regions';
-
-	/// en: 'Turn off a country or region to hide its channels and on-demand titles.'
-	String get iptvFilterIntro => 'Turn off a country or region to hide its channels and on-demand titles.';
-
-	/// en: 'No categories found for this connection.'
-	String get iptvFilterEmpty => 'No categories found for this connection.';
-
-	/// en: 'Loading categories…'
-	String get iptvFilterLoading => 'Loading categories…';
-
-	/// en: 'Could not load the categories. Check the connection and try again.'
-	String get iptvFilterLoadFailed => 'Could not load the categories. Check the connection and try again.';
-
-	/// en: 'Show all'
-	String get iptvFilterShowAll => 'Show all';
-
-	/// en: 'Hide all'
-	String get iptvFilterHideAll => 'Hide all';
-
-	/// en: 'Live TV'
-	String get iptvFilterLiveTv => 'Live TV';
-
-	/// en: 'Movies'
-	String get iptvFilterMovies => 'Movies';
-
-	/// en: 'TV Series'
-	String get iptvFilterSeries => 'TV Series';
-
-	/// en: 'Groups'
-	String get iptvFilterGroups => 'Groups';
-
-	/// en: 'Category initials'
-	String get iptvFilterInitials => 'Category initials';
-
-	/// en: '(one) {${n} initial} (other) {${n} initials}'
-	String iptvFilterInitialsCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
-		one: '${n} initial',
-		other: '${n} initials',
-	);
-
-	/// en: '(one) {${n} category} (other) {${n} categories}'
-	String iptvFilterSectionCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
-		one: '${n} category',
-		other: '${n} categories',
-	);
-
-	/// en: '${off} of ${total} hidden'
-	String iptvFilterSectionOff({required Object off, required Object total}) => '${off} of ${total} hidden';
 }
 
 // Path: accountPreferences
@@ -3666,6 +3622,9 @@ class Translations$libraries$en {
 		one: '${n} item',
 		other: '${n} items',
 	);
+
+	/// en: 'No favourites yet — long-press a movie or show to add it here.'
+	String get noFavorites => 'No favourites yet — long-press a movie or show to add it here.';
 }
 
 // Path: about
@@ -3694,6 +3653,16 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2261 => [
+		'Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame',
+		'Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left',
+		'Turning categories off no longer touches Plex — Plex libraries stay loaded while Trex filters change',
+		'Searching the guide under one source (Trex or HOME PC) now searches that source, and jumping to a result switches source if needed',
+		'Settings → Live TV has a switch per server, so Plex live TV can be turned off while Trex stays on',
+		'Categories are now one screen per connection — every category listed with its count, every switch takes effect straight away',
+		'The Live TV guide now loads from a saved copy of the programme guide, so it opens fast instead of loading forever',
+		'Every IPTV library (Movies, TV/Series) has a Favourites tab — long-press a movie or show to add it',
+	];
 	List<String> get changelog2260 => [
 		'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
 		'Refreshing playlists or switching a library now updates the lists straight away too',
@@ -4099,6 +4068,21 @@ class Translations$liveTv$en {
 	/// en: 'Live TV'
 	String get title => 'Live TV';
 
+	/// en: 'Choose which servers show Live TV'
+	String get settingsDescription => 'Choose which servers show Live TV';
+
+	/// en: 'Turn a server off to hide its channels from the guide. Its libraries are not affected.'
+	String get settingsHint => 'Turn a server off to hide its channels from the guide. Its libraries are not affected.';
+
+	/// en: 'No Live TV servers connected'
+	String get settingsEmpty => 'No Live TV servers connected';
+
+	/// en: 'Connect a server with Live TV to see it here.'
+	String get settingsEmptyHint => 'Connect a server with Live TV to see it here.';
+
+	/// en: 'Live TV from ${server}'
+	String fromServer({required Object server}) => 'Live TV from ${server}';
+
 	/// en: 'Guide'
 	String get guide => 'Guide';
 
@@ -4161,6 +4145,9 @@ class Translations$liveTv$en {
 
 	/// en: 'No matches for "${query}"'
 	String searchNoResults({required Object query}) => 'No matches for "${query}"';
+
+	/// en: 'That channel isn't in the guide any more — try refreshing it.'
+	String get searchJumpNotFound => 'That channel isn\'t in the guide any more — try refreshing it.';
 
 	/// en: 'Channels'
 	String get channelsSection => 'Channels';
@@ -6656,6 +6643,111 @@ class Translations$iptv$en {
 
 	/// en: '${section}: skipped'
 	String lastSearchSectionSkipped({required Object section}) => '${section}: skipped';
+
+	/// en: 'Mini-player'
+	String get miniPlayerTitle => 'Mini-player';
+
+	/// en: 'No tune yet — play a channel in Live TV, then check back here.'
+	String get miniPlayerNone => 'No tune yet — play a channel in Live TV, then check back here.';
+
+	/// en: '${channel} · ${backend}'
+	String miniPlayerChannel({required Object channel, required Object backend}) => '${channel} · ${backend}';
+
+	/// en: 'First frame: restart event · ${ms} ms'
+	String miniPlayerRevealEvent({required Object ms}) => 'First frame: restart event · ${ms} ms';
+
+	/// en: 'First frame: already rendered · ${ms} ms'
+	String miniPlayerRevealLatch({required Object ms}) => 'First frame: already rendered · ${ms} ms';
+
+	/// en: 'First frame: watchdog reveal after ${ms} ms — no frame was reported'
+	String miniPlayerRevealWatchdog({required Object ms}) => 'First frame: watchdog reveal after ${ms} ms — no frame was reported';
+
+	/// en: 'First frame: not revealed yet'
+	String get miniPlayerRevealNone => 'First frame: not revealed yet';
+
+	/// en: 'Restart seen: yes'
+	String get miniPlayerRestartYes => 'Restart seen: yes';
+
+	/// en: 'Restart seen: no'
+	String get miniPlayerRestartNo => 'Restart seen: no';
+
+	/// en: 'Video rect sent: yes'
+	String get miniPlayerRectYes => 'Video rect sent: yes';
+
+	/// en: 'Video rect sent: no'
+	String get miniPlayerRectNo => 'Video rect sent: no';
+
+	/// en: '${count} groups off'
+	String groupsOff({required Object count}) => '${count} groups off';
+}
+
+// Path: iptvCategories
+class Translations$iptvCategories$en {
+	Translations$iptvCategories$en.internal(this._root);
+
+	final Translations _root; // ignore: unused_field
+
+	// Translations
+
+	/// en: '${name} categories'
+	String title({required Object name}) => '${name} categories';
+
+	/// en: 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.'
+	String get intro => 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.';
+
+	/// en: '${count} categories hidden'
+	String hiddenTotal({required Object count}) => '${count} categories hidden';
+
+	/// en: 'Live TV categories'
+	String get liveTvHeading => 'Live TV categories';
+
+	/// en: 'Movies categories'
+	String get moviesHeading => 'Movies categories';
+
+	/// en: 'TV Series categories'
+	String get seriesHeading => 'TV Series categories';
+
+	/// en: 'Groups'
+	String get groupsHeading => 'Groups';
+
+	/// en: '${total} categories, ${hidden} hidden'
+	String sectionCount({required Object total, required Object hidden}) => '${total} categories, ${hidden} hidden';
+
+	/// en: 'Turn off whole groups at once'
+	String get initialsHeading => 'Turn off whole groups at once';
+
+	/// en: 'These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.'
+	String get initialsSubheading => 'These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.';
+
+	/// en: 'These letters start a lot of group names — turning one off hides every group that starts with it.'
+	String get initialsSubheadingM3u => 'These letters start a lot of group names — turning one off hides every group that starts with it.';
+
+	/// en: '${initial} — ${count} categories'
+	String initialRow({required Object initial, required Object count}) => '${initial} — ${count} categories';
+
+	/// en: 'Show all'
+	String get showAll => 'Show all';
+
+	/// en: 'Hide all'
+	String get hideAll => 'Hide all';
+
+	/// en: 'Loading categories…'
+	String get loading => 'Loading categories…';
+
+	/// en: 'Could not load the categories. Check the connection and try again.'
+	String get loadFailed => 'Could not load the categories. Check the connection and try again.';
+
+	/// en: 'Could not load this section.'
+	String get sectionLoadFailed => 'Could not load this section.';
+
+	/// en: 'No categories found for this connection.'
+	String get empty => 'No categories found for this connection.';
+
+	/// en: 'Retry'
+	String get retry => 'Retry';
+
+	/// en: 'Could not save that change. Try again.'
+	String get persistFailed => 'Could not save that change. Try again.';
 }
 
 // Path: appIcon.names
@@ -7217,6 +7309,9 @@ class Translations$libraries$tabs$en {
 
 	/// en: 'Categories'
 	String get categories => 'Categories';
+
+	/// en: 'Favourites'
+	String get favorites => 'Favourites';
 }
 
 // Path: libraries.groupings
@@ -9368,6 +9463,8 @@ extension on Translations {
 			'mediaMenu.rate' => 'Rate',
 			'mediaMenu.playFromBeginning' => 'Play from Beginning',
 			'mediaMenu.playVersion' => 'Play Version...',
+			'mediaMenu.addToFavorites' => 'Add to favourites',
+			'mediaMenu.removeFromFavorites' => 'Remove from favourites',
 			'rateSheet.title' => 'Rate',
 			'rateSheet.server' => 'Server',
 			'rateSheet.favorite' => 'Favorite',
@@ -9652,10 +9749,10 @@ extension on Translations {
 			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
 			'profiles.connectionDefault' => 'Default',
 			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
-			'profiles.makeDefault' => 'Make default',
-			'profiles.removeConnection' => 'Remove',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.makeDefault' => 'Make default',
+			'profiles.removeConnection' => 'Remove',
 			'profiles.profileRenamed' => 'Profile renamed.',
 			'profiles.borrowAddTo' => ({required Object displayName}) => 'Add to ${displayName}',
 			'profiles.borrowExplain' => 'Borrow another profile\'s connection. PIN-protected profiles require a PIN.',
@@ -9688,21 +9785,6 @@ extension on Translations {
 			'connections.signInAgain' => 'Sign in again',
 			'connections.editMediaBrowserTitle' => ({required Object product}) => 'Edit ${product} connection',
 			'connections.editMediaBrowserIntro' => ({required Object serverName}) => 'Add or remove URLs for ${serverName}. PlezTV will use the reachable URL with the lowest latency.',
-			'connections.iptvFilterTitle' => 'Countries & regions',
-			'connections.iptvFilterIntro' => 'Turn off a country or region to hide its channels and on-demand titles.',
-			'connections.iptvFilterEmpty' => 'No categories found for this connection.',
-			'connections.iptvFilterLoading' => 'Loading categories…',
-			'connections.iptvFilterLoadFailed' => 'Could not load the categories. Check the connection and try again.',
-			'connections.iptvFilterShowAll' => 'Show all',
-			'connections.iptvFilterHideAll' => 'Hide all',
-			'connections.iptvFilterLiveTv' => 'Live TV',
-			'connections.iptvFilterMovies' => 'Movies',
-			'connections.iptvFilterSeries' => 'TV Series',
-			'connections.iptvFilterGroups' => 'Groups',
-			'connections.iptvFilterInitials' => 'Category initials',
-			'connections.iptvFilterInitialsCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} initial', other: '${n} initials', ), 
-			'connections.iptvFilterSectionCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} category', other: '${n} categories', ), 
-			'connections.iptvFilterSectionOff' => ({required Object off, required Object total}) => '${off} of ${total} hidden',
 			'accountPreferences.sectionTitle' => 'Account preferences',
 			'accountPreferences.hubSubtitleSingle' => ({required Object account}) => 'Audio, subtitle and library options saved on ${account}',
 			'accountPreferences.hubSubtitleMultiple' => ({required Object count}) => 'Audio, subtitle and library options saved on ${count} accounts',
@@ -9855,6 +9937,7 @@ extension on Translations {
 			'libraries.tabs.collections' => 'Collections',
 			'libraries.tabs.playlists' => 'Playlists',
 			'libraries.tabs.categories' => 'Categories',
+			'libraries.tabs.favorites' => 'Favourites',
 			'libraries.groupings.title' => 'Grouping',
 			'libraries.groupings.all' => 'All',
 			'libraries.groupings.movies' => 'Movies',
@@ -9924,12 +10007,21 @@ extension on Translations {
 			'libraries.advancedFilters.dateOlderThanYear' => 'Older than a year',
 			'libraries.noCategories' => 'No categories in this library',
 			'libraries.categoryItemCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} item', other: '${n} items', ), 
+			'libraries.noFavorites' => 'No favourites yet — long-press a movie or show to add it here.',
 			'about.title' => 'About',
 			'about.openSourceLicenses' => 'Open Source Licenses',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2261.0' => 'Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame',
+			'about.changelog2261.1' => 'Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left',
+			'about.changelog2261.2' => 'Turning categories off no longer touches Plex — Plex libraries stay loaded while Trex filters change',
+			'about.changelog2261.3' => 'Searching the guide under one source (Trex or HOME PC) now searches that source, and jumping to a result switches source if needed',
+			'about.changelog2261.4' => 'Settings → Live TV has a switch per server, so Plex live TV can be turned off while Trex stays on',
+			'about.changelog2261.5' => 'Categories are now one screen per connection — every category listed with its count, every switch takes effect straight away',
+			'about.changelog2261.6' => 'The Live TV guide now loads from a saved copy of the programme guide, so it opens fast instead of loading forever',
+			'about.changelog2261.7' => 'Every IPTV library (Movies, TV/Series) has a Favourites tab — long-press a movie or show to add it',
 			'about.changelog2260.0' => 'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
 			'about.changelog2260.1' => 'Refreshing playlists or switching a library now updates the lists straight away too',
 			'about.changelog2260.2' => 'Settings now shows the last crash the app recorded, so a crash can be figured out from the phone',
@@ -10168,11 +10260,11 @@ extension on Translations {
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
 			'explore.detail.addedOn' => ({required Object date}) => 'Added ${date}',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.yourRating' => 'Your rating',
 			'explore.detail.budget' => 'Budget',
 			'explore.detail.revenue' => 'Box office',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.contentAdvisory' => 'Age guidance',
 			'explore.detail.tags' => 'Tags',
 			'explore.detail.revealSpoilerTags' => 'Show spoiler tags',
@@ -10192,6 +10284,11 @@ extension on Translations {
 			'explore.detail.background' => 'Background',
 			'explore.totalResults' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} result', other: '${n} results', ), 
 			'liveTv.title' => 'Live TV',
+			'liveTv.settingsDescription' => 'Choose which servers show Live TV',
+			'liveTv.settingsHint' => 'Turn a server off to hide its channels from the guide. Its libraries are not affected.',
+			'liveTv.settingsEmpty' => 'No Live TV servers connected',
+			'liveTv.settingsEmptyHint' => 'Connect a server with Live TV to see it here.',
+			'liveTv.fromServer' => ({required Object server}) => 'Live TV from ${server}',
 			'liveTv.guide' => 'Guide',
 			'liveTv.noChannels' => 'No channels available',
 			'liveTv.noDvr' => 'No DVR configured on any server',
@@ -10213,6 +10310,7 @@ extension on Translations {
 			'liveTv.searchGuide' => 'Search Guide',
 			'liveTv.searchHint' => 'Search channels & programs',
 			'liveTv.searchNoResults' => ({required Object query}) => 'No matches for "${query}"',
+			'liveTv.searchJumpNotFound' => 'That channel isn\'t in the guide any more — try refreshing it.',
 			'liveTv.channelsSection' => 'Channels',
 			'liveTv.programsSection' => 'Programs',
 			'liveTv.now' => 'Now',
@@ -10679,11 +10777,11 @@ extension on Translations {
 			'companionRemote.pairing.noDevicesHint' => 'Open PlezTV on desktop and use the same Wi-Fi',
 			'companionRemote.pairing.availableDevices' => 'Available Devices',
 			'companionRemote.pairing.manualConnection' => 'Manual Connection',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.pairing.cryptoInitFailed' => 'Couldn\'t start secure connection. Sign in to Plex first.',
 			'companionRemote.pairing.validationHostRequired' => 'Please enter host address',
 			'companionRemote.pairing.validationHostFormat' => 'Format must be IP:port (e.g., 192.168.1.100:48632)',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure PlezTV is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
@@ -11158,6 +11256,38 @@ extension on Translations {
 			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms',
 			'iptv.lastSearchSectionLoadNeverLanded' => ({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms',
 			'iptv.lastSearchSectionSkipped' => ({required Object section}) => '${section}: skipped',
+			'iptv.miniPlayerTitle' => 'Mini-player',
+			'iptv.miniPlayerNone' => 'No tune yet — play a channel in Live TV, then check back here.',
+			'iptv.miniPlayerChannel' => ({required Object channel, required Object backend}) => '${channel} · ${backend}',
+			'iptv.miniPlayerRevealEvent' => ({required Object ms}) => 'First frame: restart event · ${ms} ms',
+			'iptv.miniPlayerRevealLatch' => ({required Object ms}) => 'First frame: already rendered · ${ms} ms',
+			'iptv.miniPlayerRevealWatchdog' => ({required Object ms}) => 'First frame: watchdog reveal after ${ms} ms — no frame was reported',
+			'iptv.miniPlayerRevealNone' => 'First frame: not revealed yet',
+			'iptv.miniPlayerRestartYes' => 'Restart seen: yes',
+			'iptv.miniPlayerRestartNo' => 'Restart seen: no',
+			'iptv.miniPlayerRectYes' => 'Video rect sent: yes',
+			'iptv.miniPlayerRectNo' => 'Video rect sent: no',
+			'iptv.groupsOff' => ({required Object count}) => '${count} groups off',
+			'iptvCategories.title' => ({required Object name}) => '${name} categories',
+			'iptvCategories.intro' => 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.',
+			'iptvCategories.hiddenTotal' => ({required Object count}) => '${count} categories hidden',
+			'iptvCategories.liveTvHeading' => 'Live TV categories',
+			'iptvCategories.moviesHeading' => 'Movies categories',
+			'iptvCategories.seriesHeading' => 'TV Series categories',
+			'iptvCategories.groupsHeading' => 'Groups',
+			'iptvCategories.sectionCount' => ({required Object total, required Object hidden}) => '${total} categories, ${hidden} hidden',
+			'iptvCategories.initialsHeading' => 'Turn off whole groups at once',
+			'iptvCategories.initialsSubheading' => 'These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.',
+			'iptvCategories.initialsSubheadingM3u' => 'These letters start a lot of group names — turning one off hides every group that starts with it.',
+			'iptvCategories.initialRow' => ({required Object initial, required Object count}) => '${initial} — ${count} categories',
+			'iptvCategories.showAll' => 'Show all',
+			'iptvCategories.hideAll' => 'Hide all',
+			'iptvCategories.loading' => 'Loading categories…',
+			'iptvCategories.loadFailed' => 'Could not load the categories. Check the connection and try again.',
+			'iptvCategories.sectionLoadFailed' => 'Could not load this section.',
+			'iptvCategories.empty' => 'No categories found for this connection.',
+			'iptvCategories.retry' => 'Retry',
+			'iptvCategories.persistFailed' => 'Could not save that change. Try again.',
 			_ => null,
 		};
 	}

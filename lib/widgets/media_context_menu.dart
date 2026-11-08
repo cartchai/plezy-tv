@@ -11,6 +11,7 @@ import '../media/media_item_labels.dart';
 import '../media/media_item_types.dart';
 import '../media/media_kind.dart';
 import '../media/media_playlist.dart';
+import '../media/iptv_client.dart';
 import '../media/media_server_client.dart';
 import '../metadata_edit/metadata_edit_adapters.dart';
 import '../metadata_edit/metadata_edit_models.dart';
@@ -654,6 +655,18 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       if (widget.isInContinueWatching && isVideoKind)
         _MenuAction(value: 'details', icon: Symbols.info_rounded, label: t.mediaMenu.viewDetails),
       if (isVideoKind) _MenuAction(value: 'rate', icon: Symbols.star_rounded, label: t.mediaMenu.rate),
+      // Favourites (build #15, item 7): IPTV movies, shows and episodes
+      // only — the same long-press gesture as the guide's channel
+      // favourite. Plex libraries never see this entry: Plex favourites
+      // are server-side via its own setFavorite, and this menu is the
+      // local IPTV store. The label follows the card's current state.
+      if (menu.mediaClient is IptvClient &&
+          (mediaKind == MediaKind.movie || mediaKind == MediaKind.show || mediaKind == MediaKind.episode))
+        _MenuAction(
+          value: mediaItem.isFavorite == true ? 'remove_favorite' : 'add_favorite',
+          icon: mediaItem.isFavorite == true ? Symbols.heart_broken_rounded : Symbols.favorite_rounded,
+          label: mediaItem.isFavorite == true ? t.mediaMenu.removeFromFavorites : t.mediaMenu.addToFavorites,
+        ),
       // Edit Metadata — admin-only and backend-capability gated.
       if (menu.canEditMetadata)
         _MenuAction(value: 'edit_metadata', icon: Symbols.edit_rounded, label: t.metadataEdit.editMetadata),
@@ -911,6 +924,9 @@ class MediaContextMenuState extends State<MediaContextMenu> {
       case 'rate':
         if (context.mounted) await _handleRate(context, mediaItem);
         break;
+      case 'add_favorite' || 'remove_favorite':
+        await _handleToggleIptvFavorite(context, menu, favorite: selected == 'add_favorite');
+        break;
       case 'edit_metadata':
         outcome.didNavigate = true;
         if (context.mounted) await _pushAndRefresh(context, mediaItem, MetadataEditScreen(metadata: mediaItem));
@@ -1035,6 +1051,29 @@ class MediaContextMenuState extends State<MediaContextMenu> {
         } else {
           _notifyRefresh(item);
         }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        showErrorSnackBar(context, t.messages.errorLoading(error: localizedErrorReason(e)));
+      }
+    }
+  }
+
+  /// Toggle an IPTV movie/show/episode favourite (build #15, item 7).
+  /// The card's heart flips via [_notifyRefresh]; the Favourites tab
+  /// reloads when next shown, so the item is there with no restart.
+  Future<void> _handleToggleIptvFavorite(
+    BuildContext context,
+    _MenuContext menu, {
+    required bool favorite,
+  }) async {
+    final client = menu.mediaClient;
+    final item = menu.mediaItem;
+    if (client is! IptvClient || item == null) return;
+    try {
+      await client.setFavorite(item, favorite);
+      if (context.mounted) {
+        _notifyRefresh(item.copyWith(isFavorite: favorite));
       }
     } catch (e) {
       if (context.mounted) {

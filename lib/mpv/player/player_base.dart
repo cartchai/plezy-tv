@@ -680,7 +680,15 @@ abstract class PlayerBase with PlayerStreamControllersMixin implements Player {
         break;
 
       case 'playback-restart':
-        if (sourceId != null && sourceId != _activeSourceId) break;
+        if (sourceId != null && sourceId != _activeSourceId) {
+          // Build #15: a dropped restart used to vanish silently while
+          // the mini-player's black cover waited on it forever. Log the
+          // drop so the next "still black" report names a cause.
+          appLogger.w(
+            '[$logPrefix] playback-restart dropped: source=$sourceId active=$_activeSourceId',
+          );
+          break;
+        }
         _state = _state.copyWith(hasRenderedFrame: true);
         playbackRestartController.add(null);
         if (sourceId != null && !_activeSourceReadyEmitted) {

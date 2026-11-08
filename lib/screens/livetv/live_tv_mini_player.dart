@@ -12,6 +12,7 @@ import '../../mpv/video.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../services/playback_coordinator.dart';
 import '../../services/settings_service.dart';
+import '../../utils/app_logger.dart';
 import '../../utils/live_tv_player_navigation.dart';
 import '../video_player/live_tv_session_args.dart';
 
@@ -34,6 +35,54 @@ enum LiveTvMiniPlayerStatus {
   stopped,
 }
 
+/// How the mini-player's video was first revealed for one tune (build #15).
+///
+/// - [event]: a `playback-restart` arrived on the controller's subscription.
+/// - [latch]: the player's latched `hasRenderedFrame` was already true when
+///   the tune finished opening — no event was needed.
+/// - [watchdog]: nothing ever reported a frame while the stream played, so
+///   the grace timer revealed the surface rather than leaving a permanent
+///   black box. A watchdog reveal is a real finding: it means the backend
+///   never signalled a first frame for that tune.
+/// - [none]: nothing has revealed the surface yet for the current tune.
+enum LiveTvMiniPlayerReveal { none, event, latch, watchdog }
+
+/// On-device diagnostic for the last mini-player tune (build #15). Held
+/// in memory on the controller class (not per instance) so Settings → IPTV
+/// can read it after the guide is gone; it resets when the app restarts.
+class LiveTvMiniPlayerDiagnostic {
+  const LiveTvMiniPlayerDiagnostic({
+    required this.at,
+    required this.channelName,
+    required this.backend,
+    required this.restartObserved,
+    required this.reveal,
+    required this.videoRectSent,
+    this.msToReveal,
+  });
+
+  /// When the tune started.
+  final DateTime at;
+
+  /// The tuned channel's display name.
+  final String channelName;
+
+  /// The player backend (`Player.playerType`: 'mpv' or 'exoplayer').
+  final String backend;
+
+  /// Whether a `playback-restart` was ever observed for this tune.
+  final bool restartObserved;
+
+  /// How the surface was revealed (or [LiveTvMiniPlayerReveal.none]).
+  final LiveTvMiniPlayerReveal reveal;
+
+  /// Whether the native video rect was ever sent successfully.
+  final bool videoRectSent;
+
+  /// Milliseconds from tune start to reveal, when revealed.
+  final int? msToReveal;
+}
+
 /// Owns the single player behind the Live TV mini-player (build #12).
 ///
 /// The guide is portrait-only: video plays on top while the user browses
@@ -49,9 +98,23 @@ enum LiveTvMiniPlayerStatus {
 ///
 /// A tune that is superseded mid-flight is abandoned by generation, so a
 /// slow session can never overwrite the channel the user actually picked.
+///
+/// First-frame reveal (build #15): the [Video] cover is driven by the
+/// controller-owned [hasFirstFrame] notifier, NOT by the Video widget's
+/// own late subscription — the build #13 fix subscribed at Video mount,
+/// i.e. after `open()` returned, and on Matt's phone the surface stayed
+/// black while audio played. The controller subscribes to
+/// `playbackRestart` the moment the player is created (before any open),
+/// checks the player's latched `hasRenderedFrame` after every open and
+/// on every playing transition, and — as a backstop that cannot depend on
+/// any backend event — reveals the surface on a watchdog timer once the
+/// stream has played for [firstFrameWatchdogGrace] with no frame
+/// reported. A brief black flash is acceptable; a permanent black box is
+/// the bug.
 class LiveTvMiniPlayerController extends ChangeNotifier {
-  LiveTvMiniPlayerController({Player Function()? playerFactory})
-    : _playerFactory = playerFactory ?? _defaultPlayerFactory;
+  LiveTvMiniPlayerController({Player Function()? playerFactory, Duration? firstFrameWatchdogGrace})
+    : _playerFactory = playerFactory ?? _defaultPlayerFactory,
+      firstFrameWatchdogGrace = firstFrameWatchdogGrace ?? const Duration(seconds: 5);
 
   static Player _defaultPlayerFactory() {
     final settings = SettingsService.instance;
@@ -62,6 +125,20 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   }
 
   final Player Function() _playerFactory;
+
+  /// Grace after which a playing tune with no reported frame reveals the
+  /// surface anyway (build #15 watchdog). Overridable for tests.
+  final Duration firstFrameWatchdogGrace;
+
+  /// The last tune's diagnostic, for the Settings → IPTV "Mini-player"
+  /// row (build #15). In-memory; cleared when the app restarts.
+  static LiveTvMiniPlayerDiagnostic? lastDiagnostic;
+
+  /// Whether the current tune's video surface has been revealed. Owned by
+  /// the controller and passed to [Video] as its external `hasFirstFrame`
+  /// — the same notifier object across retunes, so the surface re-covers
+  /// and re-reveals per tune.
+  final ValueNotifier<bool> hasFirstFrame = ValueNotifier<bool>(false);
 
   LiveTvMiniPlayerStatus _status = LiveTvMiniPlayerStatus.idle;
   LiveTvChannel? _channel;
@@ -78,6 +155,109 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   StreamSubscription<bool>? _bufferingSubscription;
   StreamSubscription<PlayerError>? _errorSubscription;
   StreamSubscription<void>? _fileLoadFailedSubscription;
+  StreamSubscription<void>? _playbackRestartSubscription;
+  Timer? _firstFrameWatchdog;
+
+  /// First-frame state for the current tune (build #15).
+  bool _restartObserved = false;
+  LiveTvMiniPlayerReveal _revealMethod = LiveTvMiniPlayerReveal.none;
+  DateTime? _tuneStartedAt;
+  bool _videoRectSent = false;
+
+  /// How the current tune's surface was revealed ([LiveTvMiniPlayerReveal.none]
+  /// while it is still covered).
+  LiveTvMiniPlayerReveal get firstFrameReveal => _revealMethod;
+
+  /// Whether a `playback-restart` was observed for the current tune.
+  bool get firstFrameRestartObserved => _restartObserved;
+
+  /// Whether the native video rect was sent for the current tune.
+  bool get firstFrameVideoRectSent => _videoRectSent;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Record the current tune's diagnostic for the on-device readout.
+  void _recordDiagnostic() {
+    final channel = _channel;
+    if (channel == null) return;
+    final startedAt = _tuneStartedAt;
+    lastDiagnostic = LiveTvMiniPlayerDiagnostic(
+      at: startedAt ?? DateTime.now(),
+      channelName: channel.displayName,
+      backend: _player?.playerType ?? 'unknown',
+      restartObserved: _restartObserved,
+      reveal: _revealMethod,
+      videoRectSent: _videoRectSent,
+      msToReveal: startedAt == null || _revealMethod == LiveTvMiniPlayerReveal.none
+          ? null
+          : DateTime.now().difference(startedAt).inMilliseconds,
+    );
+  }
+
+  /// Reveal the surface once, by [method], and stop the watchdog. The
+  /// first reveal wins — a later event must not rewrite how it happened.
+  void _reveal(LiveTvMiniPlayerReveal method) {
+    if (_revealMethod != LiveTvMiniPlayerReveal.none) return;
+    _revealMethod = method;
+    hasFirstFrame.value = true;
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
+    _recordDiagnostic();
+  }
+
+  /// The latched state is the backstop for an event the subscription could
+  /// not have seen (e.g. a frame rendered before the player was created is
+  /// impossible — but a restart the source-id gate dropped leaves the
+  /// latch false too, so this also catches a latch set by any other path).
+  void _checkLatch() {
+    final player = _player;
+    if (player == null) return;
+    if (player.state.hasRenderedFrame) _reveal(LiveTvMiniPlayerReveal.latch);
+  }
+
+  /// Arm the watchdog: once the stream has played for the grace with no
+  /// frame reported, reveal anyway and log it — a permanent black box
+  /// while audio plays is the bug, a brief flash is not.
+  void _armWatchdog() {
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
+    if (_revealMethod != LiveTvMiniPlayerReveal.none || !_isPlaying) return;
+    _firstFrameWatchdog = Timer(firstFrameWatchdogGrace, () {
+      _firstFrameWatchdog = null;
+      if (_disposed || _status != LiveTvMiniPlayerStatus.active) return;
+      if (!hasFirstFrame.value) {
+        appLogger.w(
+          'LiveTvMiniPlayer: no first frame after ${firstFrameWatchdogGrace.inMilliseconds}ms of playing '
+          '(${_channel?.displayName ?? '?'}, restartObserved=$_restartObserved) — revealing by watchdog',
+        );
+        _reveal(LiveTvMiniPlayerReveal.watchdog);
+      }
+    });
+  }
+
+  /// Reset the first-frame state for a new tune (build #15). Runs
+  /// synchronously at the top of [tune] so the surface re-covers the
+  /// moment a retune starts, before any await.
+  void _resetFirstFrame() {
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
+    _restartObserved = false;
+    _revealMethod = LiveTvMiniPlayerReveal.none;
+    _tuneStartedAt = DateTime.now();
+    _videoRectSent = false;
+    hasFirstFrame.value = false;
+  }
+
+  /// Called by the [Video] surface when the native rect is first sent
+  /// successfully (build #15). Feeds the diagnostic: a watchdog reveal
+  /// with no rect sent means the plane was never positioned.
+  void noteVideoRectSent() {
+    if (_videoRectSent) return;
+    _videoRectSent = true;
+    _recordDiagnostic();
+  }
 
   /// The shutdown the coordinator calls to stop this player (app
   /// background, agent stop). Registered when the player is created and
@@ -91,10 +271,6 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   bool get isPlaying => _isPlaying;
   bool get isBuffering => _isBuffering;
   bool get isMuted => _muted;
-
-  void _notify() {
-    if (!_disposed) notifyListeners();
-  }
 
   /// Tune (or retune) the mini-player to [channel], opening the stream on
   /// the one player. [catchUpStartEpoch] starts the archive at the
@@ -113,6 +289,8 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _status = LiveTvMiniPlayerStatus.tuning;
     _isPlaying = false;
     _isBuffering = true;
+    // Re-cover the surface for the new tune before any await (build #15).
+    _resetFirstFrame();
     _notify();
 
     final serverInfo = liveTvServerInfoForChannel(multiServer, channel);
@@ -177,6 +355,11 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _status = LiveTvMiniPlayerStatus.active;
     _isPlaying = true;
     _isBuffering = false;
+    // The open returned: the frame may already be latched (build #15),
+    // and the watchdog starts from here if it is not.
+    _checkLatch();
+    _armWatchdog();
+    _recordDiagnostic();
     _notify();
   }
 
@@ -244,6 +427,12 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _playingSubscription = player.streams.playing.listen((playing) {
       if (_isPlaying == playing) return;
       _isPlaying = playing;
+      if (playing) {
+        // A playing transition is another chance to notice a frame the
+        // restart subscription could not have seen (build #15).
+        _checkLatch();
+        _armWatchdog();
+      }
       _notify();
     });
     _bufferingSubscription = player.streams.buffering.listen((buffering) {
@@ -253,6 +442,13 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     });
     _errorSubscription = player.streams.error.listen((_) => _onPlayerError());
     _fileLoadFailedSubscription = player.streams.fileLoadFailed.listen((_) => _onPlayerError());
+    // Build #15: subscribe the moment the player is created — BEFORE any
+    // open() — so a restart fired during the open is caught. The build #13
+    // Video-widget subscription mounted after open() returned and missed it.
+    _playbackRestartSubscription = player.streams.playbackRestart.listen((_) {
+      _restartObserved = true;
+      _reveal(LiveTvMiniPlayerReveal.event);
+    });
     return player;
   }
 
@@ -271,6 +467,10 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     final session = _session;
     _session = null;
     if (session != null) unawaited(session.discard());
+    // Record the tune as failed (reveal: none) before the player goes.
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
+    _recordDiagnostic();
     // The failed card replaces the video: release the player so a stale
     // stream does not keep playing behind it.
     unawaited(_disposePlayer());
@@ -297,10 +497,14 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     unawaited(_bufferingSubscription?.cancel());
     unawaited(_errorSubscription?.cancel());
     unawaited(_fileLoadFailedSubscription?.cancel());
+    unawaited(_playbackRestartSubscription?.cancel());
     _playingSubscription = null;
     _bufferingSubscription = null;
     _errorSubscription = null;
     _fileLoadFailedSubscription = null;
+    _playbackRestartSubscription = null;
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
     PlaybackCoordinator.instance.unregisterVideoSession(_coordinatorShutdown);
     try {
       await player.dispose();
@@ -313,7 +517,10 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   Future<void> dispose() async {
     _generation++;
     _disposed = true;
+    _firstFrameWatchdog?.cancel();
+    _firstFrameWatchdog = null;
     await _releasePlayerAndSession();
+    hasFirstFrame.dispose();
     super.dispose();
   }
 }
@@ -404,7 +611,17 @@ class LiveTvMiniPlayer extends StatelessWidget {
                         ),
                       )
                     else if (controller.player != null)
-                      (videoBuilder ?? ((context, player) => Video(player: player)))(context, controller.player!)
+                      // Build #15: the Video cover is driven by the
+                      // controller-owned hasFirstFrame notifier (subscribed
+                      // at player creation) plus the rect-sent callback for
+                      // the diagnostic — not by Video's own late
+                      // subscription, which missed the restart on the phone.
+                      (videoBuilder ??
+                          ((context, player) => Video(
+                            player: player,
+                            hasFirstFrame: controller.hasFirstFrame,
+                            onVideoRectSent: controller.noteVideoRectSent,
+                          )))(context, controller.player!)
                     else
                       const ColoredBox(color: Colors.black),
                     if ((isTuning || controller.isBuffering) && !isFailed)

@@ -784,7 +784,9 @@
     "mediaFailedToDelete": "Failed to delete media item",
     "rate": "Rate",
     "playFromBeginning": "Play from Beginning",
-    "playVersion": "Play Version..."
+    "playVersion": "Play Version...",
+    "addToFavorites": "Add to favourites",
+    "removeFromFavorites": "Remove from favourites"
   },
   "rateSheet": {
     "title": "Rate",
@@ -1130,28 +1132,7 @@
     "accessDeniedMany": "${count} servers refused access for this account",
     "signInAgain": "Sign in again",
     "editMediaBrowserTitle": "Edit ${product} connection",
-    "editMediaBrowserIntro": "Add or remove URLs for ${serverName}. PlezTV will use the reachable URL with the lowest latency.",
-    "iptvFilterTitle": "Countries & regions",
-    "iptvFilterIntro": "Turn off a country or region to hide its channels and on-demand titles.",
-    "iptvFilterEmpty": "No categories found for this connection.",
-    "iptvFilterLoading": "Loading categories…",
-    "iptvFilterLoadFailed": "Could not load the categories. Check the connection and try again.",
-    "iptvFilterShowAll": "Show all",
-    "iptvFilterHideAll": "Hide all",
-    "iptvFilterLiveTv": "Live TV",
-    "iptvFilterMovies": "Movies",
-    "iptvFilterSeries": "TV Series",
-    "iptvFilterGroups": "Groups",
-    "iptvFilterInitials": "Category initials",
-    "iptvFilterInitialsCount": {
-      "one": "${n} initial",
-      "other": "${n} initials"
-    },
-    "iptvFilterSectionCount": {
-      "one": "${n} category",
-      "other": "${n} categories"
-    },
-    "iptvFilterSectionOff": "${off} of ${total} hidden"
+    "editMediaBrowserIntro": "Add or remove URLs for ${serverName}. PlezTV will use the reachable URL with the lowest latency."
   },
   "accountPreferences": {
     "sectionTitle": "Account preferences",
@@ -1329,7 +1310,8 @@
       "browse": "Browse",
       "collections": "Collections",
       "playlists": "Playlists",
-      "categories": "Categories"
+      "categories": "Categories",
+      "favorites": "Favourites"
     },
     "groupings": {
       "title": "Grouping",
@@ -1410,7 +1392,8 @@
     "categoryItemCount": {
       "one": "${n} item",
       "other": "${n} items"
-    }
+    },
+    "noFavorites": "No favourites yet — long-press a movie or show to add it here."
   },
   "about": {
     "title": "About",
@@ -1419,6 +1402,16 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2261": [
+      "Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame",
+      "Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left",
+      "Turning categories off no longer touches Plex — Plex libraries stay loaded while Trex filters change",
+      "Searching the guide under one source (Trex or HOME PC) now searches that source, and jumping to a result switches source if needed",
+      "Settings → Live TV has a switch per server, so Plex live TV can be turned off while Trex stays on",
+      "Categories are now one screen per connection — every category listed with its count, every switch takes effect straight away",
+      "The Live TV guide now loads from a saved copy of the programme guide, so it opens fast instead of loading forever",
+      "Every IPTV library (Movies, TV/Series) has a Favourites tab — long-press a movie or show to add it"
+    ],
     "changelog2260": [
       "Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up",
       "Refreshing playlists or switching a library now updates the lists straight away too",
@@ -1752,6 +1745,11 @@
   },
   "liveTv": {
     "title": "Live TV",
+    "settingsDescription": "Choose which servers show Live TV",
+    "settingsHint": "Turn a server off to hide its channels from the guide. Its libraries are not affected.",
+    "settingsEmpty": "No Live TV servers connected",
+    "settingsEmptyHint": "Connect a server with Live TV to see it here.",
+    "fromServer": "Live TV from ${server}",
     "guide": "Guide",
     "noChannels": "No channels available",
     "noDvr": "No DVR configured on any server",
@@ -1773,6 +1771,7 @@
     "searchGuide": "Search Guide",
     "searchHint": "Search channels & programs",
     "searchNoResults": "No matches for \"${query}\"",
+    "searchJumpNotFound": "That channel isn't in the guide any more — try refreshing it.",
     "channelsSection": "Channels",
     "programsSection": "Programs",
     "now": "Now",
@@ -2804,6 +2803,40 @@
     "lastSearchScopedSuffix": " · scoped",
     "lastSearchSection": "${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms",
     "lastSearchSectionLoadNeverLanded": "${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms",
-    "lastSearchSectionSkipped": "${section}: skipped"
+    "lastSearchSectionSkipped": "${section}: skipped",
+    "miniPlayerTitle": "Mini-player",
+    "miniPlayerNone": "No tune yet — play a channel in Live TV, then check back here.",
+    "miniPlayerChannel": "${channel} · ${backend}",
+    "miniPlayerRevealEvent": "First frame: restart event · ${ms} ms",
+    "miniPlayerRevealLatch": "First frame: already rendered · ${ms} ms",
+    "miniPlayerRevealWatchdog": "First frame: watchdog reveal after ${ms} ms — no frame was reported",
+    "miniPlayerRevealNone": "First frame: not revealed yet",
+    "miniPlayerRestartYes": "Restart seen: yes",
+    "miniPlayerRestartNo": "Restart seen: no",
+    "miniPlayerRectYes": "Video rect sent: yes",
+    "miniPlayerRectNo": "Video rect sent: no",
+    "groupsOff": "${count} groups off"
+  },
+  "iptvCategories": {
+    "title": "${name} categories",
+    "intro": "Turn off a category to hide its channels and on-demand titles. Changes apply right away.",
+    "hiddenTotal": "${count} categories hidden",
+    "liveTvHeading": "Live TV categories",
+    "moviesHeading": "Movies categories",
+    "seriesHeading": "TV Series categories",
+    "groupsHeading": "Groups",
+    "sectionCount": "${total} categories, ${hidden} hidden",
+    "initialsHeading": "Turn off whole groups at once",
+    "initialsSubheading": "These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.",
+    "initialsSubheadingM3u": "These letters start a lot of group names — turning one off hides every group that starts with it.",
+    "initialRow": "${initial} — ${count} categories",
+    "showAll": "Show all",
+    "hideAll": "Hide all",
+    "loading": "Loading categories…",
+    "loadFailed": "Could not load the categories. Check the connection and try again.",
+    "sectionLoadFailed": "Could not load this section.",
+    "empty": "No categories found for this connection.",
+    "retry": "Retry",
+    "persistFailed": "Could not save that change. Try again."
   }
 }

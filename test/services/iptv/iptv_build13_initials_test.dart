@@ -71,14 +71,14 @@ void main() {
   });
 
   group('build13: buried initials hide their categories end to end', () {
-    IptvClient buriedClient({List<String> disabledInitials = const []}) {
+    IptvClient buriedClient({List<String> hiddenCategoryInitials = const []}) {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
         serverUrl: 'https://panel.example.com:8080',
         username: 'user',
         password: testPassword,
-        disabledInitials: disabledInitials,
+        hiddenCategoryInitials: hiddenCategoryInitials,
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
@@ -87,7 +87,7 @@ void main() {
     }
 
     test('disabling FR hides every FR category — including buried ones — everywhere', () async {
-      final client = buriedClient(disabledInitials: const ['FR']);
+      final client = buriedClient(hiddenCategoryInitials: const ['FR']);
       try {
         final seriesCategories = await client.iptvCategoriesForLibrary('iptv:conn-xt-1:series');
         expect(seriesCategories.map((c) => c.name), isNot(contains('SERIES | FR | Drama')));
@@ -128,7 +128,7 @@ void main() {
 
       // Toggle the filter: the settings/edit flow rebinds the same
       // connection with new filter state.
-      await manager.addIptvConnection(connection.copyWith(disabledInitials: const ['FR']));
+      await manager.addIptvConnection(connection.copyWith(hiddenCategoryInitials: const ['FR']));
       await Future<void>.delayed(const Duration(milliseconds: 200));
 
       expect(events.where((e) => e.serverId == ServerId('conn-xt-1')), isNotEmpty);

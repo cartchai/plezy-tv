@@ -35,8 +35,8 @@ void main() {
 
   IptvClient xtreamClient({
     XtreamApi? api,
-    List<String> disabledInitials = const [],
-    List<String> disabledCategoryIds = const [],
+    List<String> hiddenCategoryInitials = const [],
+    List<String> hiddenCategoryIds = const [],
   }) {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
@@ -44,8 +44,8 @@ void main() {
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: disabledInitials,
-      disabledCategoryIds: disabledCategoryIds,
+      hiddenCategoryInitials: hiddenCategoryInitials,
+      hiddenCategoryIds: hiddenCategoryIds,
       createdAt: DateTime.utc(2026, 11, 5),
     );
     final client = IptvClient.forConnection(connection);
@@ -81,7 +81,7 @@ void main() {
 
   group('category initials: toggling hides whole regions', () {
     test('disabling FR hides all its categories and their items everywhere', () async {
-      final client = xtreamClient(disabledInitials: const ['FR']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['FR']);
       // Browse: Beta Movie sits in "FR - Films", Beta Show in "FR - Drama".
       final movies = await client.fetchLibraryPagedContent(moviesLibraryId, query: const LibraryQuery());
       expect(movies.items.map((i) => i.title), ['Alpha Movie']);
@@ -101,7 +101,7 @@ void main() {
     });
 
     test('re-enabling the initial restores its categories', () async {
-      final hidden = xtreamClient(disabledInitials: const ['FR']);
+      final hidden = xtreamClient(hiddenCategoryInitials: const ['FR']);
       expect((await hidden.fetchLibraryPagedContent(seriesLibraryId, query: const LibraryQuery())).items.map((i) => i.title), ['Alpha Show', 'Gamma Show']);
       hidden.close();
       final shown = xtreamClient();
@@ -113,7 +113,7 @@ void main() {
     });
 
     test('an individual category toggle still hides just that category', () async {
-      final client = xtreamClient(disabledCategoryIds: const ['1']);
+      final client = xtreamClient(hiddenCategoryIds: const ['1']);
       final series = await client.fetchLibraryPagedContent(seriesLibraryId, query: const LibraryQuery());
       expect(series.items.map((i) => i.title), ['Beta Show', 'Gamma Show']);
       expect(await client.iptvItemsForCategory(seriesLibraryId, '1'), isEmpty);
@@ -121,7 +121,7 @@ void main() {
     });
 
     test('category toggle and initial toggle work alongside each other', () async {
-      final client = xtreamClient(disabledInitials: const ['FR'], disabledCategoryIds: const ['1']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['FR'], hiddenCategoryIds: const ['1']);
       final series = await client.fetchLibraryPagedContent(seriesLibraryId, query: const LibraryQuery());
       expect(series.items.map((i) => i.title), ['Gamma Show']);
       client.close();
@@ -130,7 +130,7 @@ void main() {
     test('item names are never filtered: an EN-named channel in a UK category stays when EN is off', () async {
       // "EN - Special" carries EN in its NAME but sits in "UK - Live 1".
       // Turning EN off hides the EN categories, not the EN-named item.
-      final client = xtreamClient(disabledInitials: const ['EN']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['EN']);
       final channels = await client.iptvChannels();
       expect(channels.map((c) => c.title), contains('EN - Special'));
       expect(channels.map((c) => c.title), isNot(contains('EN - Channel')));
@@ -141,7 +141,7 @@ void main() {
   group('category initials: the search goal', () {
     test('(a) most initials hidden, EN shown — an EN show is found', () async {
       // Matt's current state, minus nothing: FR and UK off, EN on.
-      final client = xtreamClient(disabledInitials: const ['FR', 'UK']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['FR', 'UK']);
       final alpha = await client.searchItems('alpha');
       expect(alpha.map((i) => i.title), contains('Alpha Show'));
       // The FR show is hidden by its category, not by search failing.
@@ -247,7 +247,7 @@ void main() {
     });
 
     test('seriesCatalogDiagnostics reports the catalog state', () async {
-      final client = xtreamClient(disabledInitials: const ['FR'], disabledCategoryIds: const ['1']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['FR'], hiddenCategoryIds: const ['1']);
       final diagnostics = await client.seriesCatalogDiagnostics();
       expect(diagnostics.unfilteredSeriesRows, 3);
       expect(diagnostics.seriesCategoryCount, 12);
@@ -256,8 +256,8 @@ void main() {
         'EN - Drama (2)': 0,
         'EN - Comedy (3)': 0,
       });
-      expect(diagnostics.disabledInitialsCount, 1);
-      expect(diagnostics.disabledCategoriesCount, 1);
+      expect(diagnostics.hiddenCategoryInitialsCount, 1);
+      expect(diagnostics.hiddenCategoriesCount, 1);
       client.close();
     });
   });

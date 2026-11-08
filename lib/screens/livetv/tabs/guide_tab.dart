@@ -338,15 +338,18 @@ class GuideTabState extends State<GuideTab>
   }
 
   /// Jump the guide to [channel] (from guide search): scroll to its row and
-  /// land d-pad focus on the channel cell in keyboard mode.
-  void jumpToChannel(LiveTvChannel channel) {
+  /// land d-pad focus on the channel cell in keyboard mode. Returns false
+  /// when the channel is not in the current rows (build #15, item 2) — the
+  /// caller switches source and retries instead of silently doing nothing.
+  /// A jump stashed while loading returns true: it runs when the load lands.
+  bool jumpToChannel(LiveTvChannel channel) {
     if (_isLoading) {
       _pendingJumpChannel = channel;
       _pendingJumpProgram = null;
-      return;
+      return true;
     }
     final index = _channelIndexFor(channel);
-    if (index == null) return;
+    if (index == null) return false;
 
     // Focus state renders through _focusSnapshot listeners; _updateFocus
     // publishes it (a bare setState would leave the cells unchanged).
@@ -360,18 +363,21 @@ class GuideTabState extends State<GuideTab>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scrollToChannel(index);
     });
+    return true;
   }
 
   /// Jump the guide to [program] on [channel] (from guide search), shifting
   /// the time window first when the airing isn't visible in the current one.
-  Future<void> jumpToProgram(LiveTvChannel channel, LiveTvProgram program) async {
+  /// Same contract as [jumpToChannel]: false when the channel is not in the
+  /// current rows, true when stashed while loading.
+  Future<bool> jumpToProgram(LiveTvChannel channel, LiveTvProgram program) async {
     if (_isLoading) {
       _pendingJumpChannel = channel;
       _pendingJumpProgram = program;
-      return;
+      return true;
     }
     final index = _channelIndexFor(channel);
-    if (index == null) return;
+    if (index == null) return false;
 
     final begin = program.startTime;
     final end = program.endTime ?? begin;
@@ -387,7 +393,7 @@ class GuideTabState extends State<GuideTab>
         _nowWasInWindow = _nowInWindow(DateTime.now());
       });
       await _loadPrograms();
-      if (!mounted) return;
+      if (!mounted) return false;
     }
 
     // Re-resolve against the loaded list — the search sheet's program objects
@@ -408,6 +414,7 @@ class GuideTabState extends State<GuideTab>
       _scrollToChannel(index);
       if (target != null) _scrollToProgramTime(target);
     });
+    return true;
   }
 
   int? _channelIndexFor(LiveTvChannel channel) {

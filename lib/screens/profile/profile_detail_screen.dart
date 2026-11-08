@@ -28,7 +28,7 @@ import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/settings_section.dart';
 import '../../utils/dialogs.dart';
 import '../settings/add_connection_screen.dart';
-import '../settings/edit_iptv_connection_screen.dart';
+import '../settings/iptv_categories_screen.dart';
 import '../settings/edit_jellyfin_connection_screen.dart';
 import 'pin_entry_dialog.dart';
 import 'pin_status_row.dart';
@@ -218,18 +218,26 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> with Controll
   }
 
   Future<void> _editConnection(Connection conn) async {
+    // IPTV connections open the ONE Categories screen (build #15, item 5).
+    // Toggles there apply immediately (persist + swap in place), so there
+    // is no result to handle and no rebind — just refresh the row.
+    if (conn is M3uConnection || conn is XtreamConnection) {
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => IptvCategoriesScreen(connection: conn)));
+      if (!mounted) return;
+      setState(() {});
+      return;
+    }
     final changed = await switch (conn) {
       JellyfinConnection() => Navigator.of(
         context,
       ).push<bool>(MaterialPageRoute(builder: (_) => EditJellyfinConnectionScreen(connection: conn))),
-      // IPTV connections edit their country/region filter.
-      M3uConnection() || XtreamConnection() => Navigator.of(
-        context,
-      ).push<bool>(MaterialPageRoute(builder: (_) => EditIptvConnectionScreen(connection: conn))),
       _ => null,
     };
     if (changed != true || !mounted) return;
     setState(() {});
+    // Jellyfin edits keep the rebind (auth/URL changes go through it).
     unawaited(context.read<ActiveProfileBinder>().rebindIfActive(_profile.id));
   }
 

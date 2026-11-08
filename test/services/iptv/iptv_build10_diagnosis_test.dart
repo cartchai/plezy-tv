@@ -37,14 +37,14 @@ void main() {
   // (The password is split so the literal never appears in new code.)
   const testPassword = 'pa' 'ss';
 
-  IptvClient xtreamClient({XtreamApi? api, List<String> disabledInitials = const []}) {
+  IptvClient xtreamClient({XtreamApi? api, List<String> hiddenCategoryInitials = const []}) {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: disabledInitials,
+      hiddenCategoryInitials: hiddenCategoryInitials,
       createdAt: DateTime.utc(2026, 11, 5),
     );
     final client = IptvClient.forConnection(connection);
@@ -94,7 +94,7 @@ void main() {
       // iptv_category_initials_test.dart. Matt also turned ALL initials
       // back on and search STILL failed, so (h) is ruled out for search
       // regardless — search has its own root cause (the cold-path race).
-      final client = xtreamClient(api: _EnInitialApi(), disabledInitials: const ['EN']);
+      final client = xtreamClient(api: _EnInitialApi(), hiddenCategoryInitials: const ['EN']);
       final categoryItems = await client.iptvItemsForCategory(seriesLibraryId, '1');
       expect(categoryItems.map((i) => i.title), ['EN - Alpha Show']);
       final results = await client.searchItems('alpha');

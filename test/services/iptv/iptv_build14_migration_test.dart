@@ -67,15 +67,15 @@ void main() {
   // the SHAPE does — a large legacy set that hides most categories.
   final List<String> hiddenInitials = _mattHiddenInitials();
 
-  XtreamConnection trexConnection({List<String>? disabledInitials, List<String>? disabledCategoryIds}) {
+  XtreamConnection trexConnection({List<String>? hiddenCategoryInitials, List<String>? hiddenCategoryIds}) {
     return XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: disabledInitials ?? hiddenInitials,
-      disabledCategoryIds: disabledCategoryIds ?? const [],
+      hiddenCategoryInitials: hiddenCategoryInitials ?? hiddenInitials,
+      hiddenCategoryIds: hiddenCategoryIds ?? const [],
       createdAt: DateTime.utc(2026, 11, 5),
     );
   }
@@ -276,7 +276,7 @@ void main() {
           rebound.testXtreamApi = api;
           return rebound;
         };
-        expect(await manager.addIptvConnection(trexConnection(disabledInitials: [...hiddenInitials, 'EN'])), isTrue);
+        expect(await manager.addIptvConnection(trexConnection(hiddenCategoryInitials: [...hiddenInitials, 'EN'])), isTrue);
         await Future.delayed(const Duration(milliseconds: 500));
         final rebound = manager.getClient(ServerId('conn-xt-1')) as IptvClient;
         final afterToggle = await rebound.fetchLibraryPagedContent(

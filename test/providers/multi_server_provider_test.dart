@@ -10,9 +10,11 @@ import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/plex_client.dart';
+import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/utils/active_client_scope.dart';
 
 import '../test_helpers/backend_client_fixtures.dart';
+import '../test_helpers/prefs.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -369,6 +371,98 @@ void main() {
         failure = http.Response('', 503);
         await p.checkLiveTvAvailability();
         expect(p.liveTvServers, isEmpty);
+      });
+    });
+
+    group('per-server Live TV hiding (build #15, item 1)', () {
+      setUp(() async {
+        resetSharedPreferencesForTest();
+        await SettingsService.getInstance();
+      });
+
+      MultiServerProvider providerWithTwoServers() {
+        final p = MultiServerProvider(manager, aggregation);
+        addTearDown(p.dispose);
+        p.debugSetLiveTvServersForTesting([
+          LiveTvServerInfo(serverId: 'home-pc', dvrKey: 'dvr-home'),
+          LiveTvServerInfo(serverId: 'trex', dvrKey: 'xtream'),
+        ]);
+        return p;
+      }
+
+      test('hiding one server hides only its Live TV, and the settings list still names it', () async {
+        final p = providerWithTwoServers();
+
+        await p.setLiveTvServerHidden('home-pc', true);
+
+        expect(p.isLiveTvServerHidden('home-pc'), isTrue);
+        expect(p.isLiveTvServerHidden('trex'), isFalse);
+        expect(p.liveTvServers.map((s) => s.serverId), ['trex']);
+        expect(p.hasLiveTv, isTrue);
+        // The settings screen lists every probed server, hidden or not,
+        // so a hidden server can be turned back on.
+        expect(p.liveTvServerIds, containsAllInOrder(['home-pc', 'trex']));
+        // Persisted, so the choice survives a relaunch.
+        expect(
+          SettingsService.instance.readStringList('livetv_hidden_server_ids'),
+          ['home-pc'],
+        );
+      });
+
+      test('hiding the last live-TV server hides the Live TV tab itself', () async {
+        final p = providerWithTwoServers();
+
+        await p.setLiveTvServerHidden('home-pc', true);
+        await p.setLiveTvServerHidden('trex', true);
+
+        expect(p.liveTvServers, isEmpty);
+        expect(p.hasLiveTv, isFalse);
+        expect(p.liveTvServerIds, containsAllInOrder(['home-pc', 'trex']));
+      });
+
+      test('unhiding restores the server instantly from the last probe, no re-probe', () async {
+        final p = providerWithTwoServers();
+
+        await p.setLiveTvServerHidden('home-pc', true);
+        expect(p.liveTvServers.map((s) => s.serverId), ['trex']);
+
+        await p.setLiveTvServerHidden('home-pc', false);
+
+        expect(p.liveTvServers.map((s) => s.serverId), ['home-pc', 'trex']);
+        expect(p.hasLiveTv, isTrue);
+        expect(
+          SettingsService.instance.readStringList('livetv_hidden_server_ids'),
+          isEmpty,
+        );
+      });
+
+      test('a stored hidden server stays hidden for a fresh provider', () async {
+        final first = providerWithTwoServers();
+        await first.setLiveTvServerHidden('trex', true);
+        expect(first.liveTvServers.map((s) => s.serverId), ['home-pc']);
+
+        // A fresh provider (relaunch) loads the stored set before applying
+        // any toggle — hiding the OTHER server must keep trex hidden too,
+        // because trex's hidden state came from the store, not from a call
+        // on this provider.
+        final second = MultiServerProvider(manager, aggregation);
+        addTearDown(second.dispose);
+        second.debugSetLiveTvServersForTesting([
+          LiveTvServerInfo(serverId: 'home-pc', dvrKey: 'dvr-home'),
+          LiveTvServerInfo(serverId: 'trex', dvrKey: 'xtream'),
+        ]);
+        await second.setLiveTvServerHidden('home-pc', true);
+
+        expect(second.isLiveTvServerHidden('trex'), isTrue);
+        expect(second.liveTvServers, isEmpty);
+        expect(second.hasLiveTv, isFalse);
+        expect(
+          SettingsService.instance.readStringList('livetv_hidden_server_ids'),
+          containsAll(['home-pc', 'trex']),
+        );
+
+        await second.setLiveTvServerHidden('home-pc', false);
+        expect(second.liveTvServers.map((s) => s.serverId), ['home-pc']);
       });
     });
 

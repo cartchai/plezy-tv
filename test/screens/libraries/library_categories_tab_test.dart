@@ -86,7 +86,7 @@ IptvClient _client({List<String> disabled = const []}) {
     serverUrl: 'https://panel.example.com:8080',
     username: 'user',
     password: _testPassword,
-    disabledCategoryIds: disabled,
+    hiddenCategoryIds: disabled,
     createdAt: DateTime.utc(2026, 11, 5),
   );
   final client = IptvClient.forConnection(connection);
@@ -183,18 +183,38 @@ void main() {
   });
 
   test('IPTV libraries replace Collections with Categories', () {
+    // Build #15, item 7: every IPTV library also gets a Favourites tab
+    // after Categories.
     expect(
       visibleLibraryTabs(_moviesLibrary),
-      [LibraryTabType.recommended, LibraryTabType.browse, LibraryTabType.categories, LibraryTabType.playlists],
+      [
+        LibraryTabType.recommended,
+        LibraryTabType.browse,
+        LibraryTabType.categories,
+        LibraryTabType.favorites,
+        LibraryTabType.playlists,
+      ],
     );
     expect(
       visibleLibraryTabs(_seriesLibrary),
-      [LibraryTabType.recommended, LibraryTabType.browse, LibraryTabType.categories, LibraryTabType.playlists],
+      [
+        LibraryTabType.recommended,
+        LibraryTabType.browse,
+        LibraryTabType.categories,
+        LibraryTabType.favorites,
+        LibraryTabType.playlists,
+      ],
     );
     const m3u = MediaLibrary(id: 'm3u', backend: MediaBackend.m3u, title: 'M3U', kind: MediaKind.unknown);
     expect(
       visibleLibraryTabs(m3u),
-      [LibraryTabType.recommended, LibraryTabType.browse, LibraryTabType.categories, LibraryTabType.playlists],
+      [
+        LibraryTabType.recommended,
+        LibraryTabType.browse,
+        LibraryTabType.categories,
+        LibraryTabType.favorites,
+        LibraryTabType.playlists,
+      ],
     );
   });
   });

@@ -77,14 +77,14 @@ void main() {
   // Matt's filter state, in shape: every initial hidden except EN.
   const hiddenInitials = ['AR', 'FR', 'DE', 'PL', 'ES', 'IN', 'NL', 'SE'];
 
-  XtreamConnection trexConnection({List<String>? disabledInitials}) {
+  XtreamConnection trexConnection({List<String>? hiddenCategoryInitials}) {
     return XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: disabledInitials ?? hiddenInitials,
+      hiddenCategoryInitials: hiddenCategoryInitials ?? hiddenInitials,
       createdAt: DateTime.utc(2026, 11, 5),
     );
   }
@@ -175,7 +175,7 @@ void main() {
       // Movies 1) is now hidden. Rebind through the real manager path.
       expect(
         await harness.manager.addIptvConnection(
-          trexConnection(disabledInitials: [...hiddenInitials, 'EN']),
+          trexConnection(hiddenCategoryInitials: [...hiddenInitials, 'EN']),
         ),
         isTrue,
       );

@@ -87,7 +87,7 @@ void main() {
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
       password: testPassword,
-      disabledInitials: hiddenInitials,
+      hiddenCategoryInitials: hiddenInitials,
       createdAt: DateTime.utc(2026, 11, 5),
     );
   }

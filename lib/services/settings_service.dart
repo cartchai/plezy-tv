@@ -954,18 +954,6 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Empty before the first load. Shown as "Last updated" in IPTV settings.
   static const iptvEpgLastUpdated = StringPref('iptv_epg_last_updated', defaultValue: '');
 
-  /// Expanded/collapsed state of the three category sections on the IPTV
-  /// connection edit screen (Live TV / Movies / TV Series). Defaults open.
-  static const iptvCategoriesLiveExpanded = BoolPref('iptv_categories_live_expanded', defaultValue: true);
-  static const iptvCategoriesMoviesExpanded = BoolPref('iptv_categories_movies_expanded', defaultValue: true);
-  static const iptvCategoriesSeriesExpanded = BoolPref('iptv_categories_series_expanded', defaultValue: true);
-
-  /// Expanded/collapsed state of the M3U groups section on the same screen.
-  static const iptvCategoriesGroupsExpanded = BoolPref('iptv_categories_groups_expanded', defaultValue: true);
-
-  /// Expanded/collapsed state of the name-initials section on the same
-  /// screen (build #8 Task 4). Defaults open, like the category sections.
-  static const iptvCategoriesInitialsExpanded = BoolPref('iptv_categories_initials_expanded', defaultValue: true);
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();

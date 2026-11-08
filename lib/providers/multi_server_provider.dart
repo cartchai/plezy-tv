@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../connection/connection.dart';
 import '../exceptions/media_server_exceptions.dart';
 import '../media/ids.dart';
 
@@ -10,6 +11,7 @@ import '../mixins/disposable_change_notifier_mixin.dart';
 import '../services/plex_client.dart';
 import '../services/data_aggregation_service.dart';
 import '../services/multi_server_manager.dart';
+import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 
 /// Cached info about a DVR-enabled server
@@ -38,6 +40,79 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
   /// Info about servers with DVR capability
   final List<LiveTvServerInfo> _liveTvServers = [];
   List<LiveTvServerInfo> get liveTvServers => List.unmodifiable(_liveTvServers);
+
+  /// The last probe result, before the per-server hide filter below. Kept
+  /// so toggling a server off and on again is instant and offline — it
+  /// re-derives the visible list from this instead of re-probing.
+  final List<LiveTvServerInfo> _probedLiveTvServers = [];
+
+  /// Server ids whose Live TV is turned off (build #15, item 1). Stored in
+  /// `livetv_hidden_server_ids`; the guide, search, What's On and the
+  /// mini-player all read `liveTvServers`, so hiding here hides everywhere
+  /// while the server's libraries are untouched.
+  static const _kHiddenLiveTvServerIds = 'livetv_hidden_server_ids';
+  final Set<String> _hiddenLiveTvServerIds = {};
+  Future<void>? _hiddenLiveTvLoadFuture;
+
+  /// Every server the last probe found Live TV on, hidden or not — the
+  /// Settings → Live TV screen lists these so a hidden server can be
+  /// turned back on.
+  List<String> get liveTvServerIds {
+    final ids = <String>{};
+    for (final s in _probedLiveTvServers) {
+      ids.add(s.serverId);
+    }
+    return ids.toList();
+  }
+
+  /// Whether Live TV from [serverId] is turned off.
+  bool isLiveTvServerHidden(String serverId) => _hiddenLiveTvServerIds.contains(serverId);
+
+  Future<void> _ensureHiddenLiveTvLoaded() => _hiddenLiveTvLoadFuture ??= _loadHiddenLiveTvServerIds();
+
+  Future<void> _loadHiddenLiveTvServerIds() async {
+    try {
+      final settings = await SettingsService.getInstance();
+      _hiddenLiveTvServerIds
+        ..clear()
+        ..addAll(settings.readStringList(_kHiddenLiveTvServerIds));
+    } catch (_) {
+      // No settings yet (a test that never initialised them) or prefs
+      // unreadable: nothing hidden, the guide behaves as today.
+    }
+  }
+
+  /// Turn Live TV from [serverId] on or off (build #15, item 1). Persists
+  /// to `livetv_hidden_server_ids` and re-derives the visible list from
+  /// the last probe result — no re-probe, no Plex involvement, libraries
+  /// untouched. Hiding the last live-TV server hides the Live TV tab
+  /// itself (`hasLiveTv` goes false).
+  Future<void> setLiveTvServerHidden(String serverId, bool hidden) async {
+    await _ensureHiddenLiveTvLoaded();
+    final changed = hidden ? _hiddenLiveTvServerIds.add(serverId) : _hiddenLiveTvServerIds.remove(serverId);
+    if (!changed) return;
+    try {
+      final settings = await SettingsService.getInstance();
+      await settings.writeStringList(_kHiddenLiveTvServerIds, _hiddenLiveTvServerIds.toList());
+    } catch (e) {
+      appLogger.w('Live TV: could not persist hidden server $serverId', error: e);
+    }
+    if (_applyLiveTvVisibility()) safeNotifyListeners();
+  }
+
+  /// Re-derive the visible Live TV servers from the last probe result minus
+  /// the hidden set. Returns true when the visible set changed.
+  bool _applyLiveTvVisibility() {
+    final filtered = _probedLiveTvServers.where((s) => !_hiddenLiveTvServerIds.contains(s.serverId)).toList();
+    final oldIds = _liveTvServers.map((s) => '${s.serverId}\u0000${s.dvrKey}').toSet();
+    final newIds = filtered.map((s) => '${s.serverId}\u0000${s.dvrKey}').toSet();
+    final hadLiveTv = _hasLiveTv;
+    _liveTvServers
+      ..clear()
+      ..addAll(filtered);
+    _hasLiveTv = filtered.isNotEmpty;
+    return hadLiveTv != _hasLiveTv || !oldIds.containsAll(newIds) || !newIds.containsAll(oldIds);
+  }
 
   /// The client, and its authentication session at probe time, whose probe
   /// produced each server's [_liveTvServers] entries. A failed re-probe may
@@ -129,8 +204,8 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
 
   void _pruneLiveTvServersForVisibility() {
     if (_visibleServerIds == null) return;
-    _liveTvServers.removeWhere((s) => !_serverManager.isServerVisible(ServerId(s.serverId)));
-    _hasLiveTv = _liveTvServers.isNotEmpty;
+    _probedLiveTvServers.removeWhere((s) => !_serverManager.isServerVisible(ServerId(s.serverId)));
+    _applyLiveTvVisibility();
   }
 
   void _refreshLiveTvAvailabilitySoon() {
@@ -141,10 +216,10 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
 
   @visibleForTesting
   void debugSetLiveTvServersForTesting(List<LiveTvServerInfo> servers) {
-    _liveTvServers
+    _probedLiveTvServers
       ..clear()
       ..addAll(servers);
-    _hasLiveTv = servers.isNotEmpty;
+    _applyLiveTvVisibility();
   }
 
   MultiServerProvider(this._serverManager, this._aggregationService) {
@@ -185,6 +260,20 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
   }
 
   MultiServerManager get serverManager => _serverManager;
+
+  /// Swap one IPTV connection's client in place (build #15, P-1): the new
+  /// client is built from the updated connection — filter, credentials and
+  /// name are all baked in at construction — installed, warmed, and
+  /// announced, without touching any other server. A full profile rebind
+  /// recreates the Plex client too, and a slow or failed Plex bind in that
+  /// pass can leave Plex libraries not loading (Matt, 2026-11-08:
+  /// "something is not loading anymore"). Use this for every IPTV-only
+  /// change (filter toggles, connection edits). The add flow (a NEW server
+  /// needs profile visibility) and connection removal still go through
+  /// the binder.
+  Future<bool> refreshIptvConnection(Connection connection) {
+    return _serverManager.addIptvConnection(connection);
+  }
 
   /// Get the data aggregation service
   DataAggregationService get aggregationService => _aggregationService;
@@ -288,6 +377,7 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
   Future<void> checkLiveTvAvailability() async {
     if (isDisposed) return;
     final generation = ++_liveTvCheckGeneration;
+    await _ensureHiddenLiveTvLoaded();
     final newLiveTvServers = <LiveTvServerInfo>[];
     final newProbes = <String, ({MediaServerClient client, Object authentication})>{};
     for (final serverId in onlineServerIds) {
@@ -323,13 +413,16 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
         // the DVR went away; keep what the last successful check on this same
         // client and session found instead of dropping Live TV on a blip. A
         // definitive answer (401/403, other 4xx, bad data) drops the entry.
+        // Carry over from the PROBED list, not the visible one — a hidden
+        // server's probe must survive a blip so unhiding it needs no
+        // re-probe (build #15, item 1).
         final previous = _liveTvProbes[serverId];
         if (_isTransientLiveTvProbeFailure(e) &&
             !sessionChanged() &&
             previous != null &&
             identical(previous.client, genericClient) &&
             identical(previous.authentication, probe.authentication)) {
-          newLiveTvServers.addAll(_liveTvServers.where((s) => s.serverId == serverId));
+          newLiveTvServers.addAll(_probedLiveTvServers.where((s) => s.serverId == serverId));
           newProbes[serverId] = probe;
         }
       }
@@ -339,20 +432,15 @@ class MultiServerProvider extends ChangeNotifier with DisposableChangeNotifierMi
         .where((s) => _serverManager.isServerVisible(ServerId(s.serverId)))
         .toList();
 
-    final hadLiveTv = _hasLiveTv;
-    final oldServerIds = _liveTvServers.map((s) => '${s.serverId}\u0000${s.dvrKey}').toSet();
-    final newServerIds = visibleLiveTvServers.map((s) => '${s.serverId}\u0000${s.dvrKey}').toSet();
     if (isDisposed || generation != _liveTvCheckGeneration) return;
-    _liveTvServers
+    _probedLiveTvServers
       ..clear()
       ..addAll(visibleLiveTvServers);
     _liveTvProbes = newProbes;
-    _hasLiveTv = visibleLiveTvServers.isNotEmpty;
-
-    // Notify when availability changes OR when the server set changes
-    if (hadLiveTv != _hasLiveTv || !oldServerIds.containsAll(newServerIds) || !newServerIds.containsAll(oldServerIds)) {
-      safeNotifyListeners();
-    }
+    // The visible list is the probed list minus the hidden servers — the
+    // one place the hide filter applies, so the guide, search, What's On
+    // and the mini-player all see the same filtered set (build #15, item 1).
+    if (_applyLiveTvVisibility()) safeNotifyListeners();
   }
 
   static bool _isTransientLiveTvProbeFailure(Object error) {

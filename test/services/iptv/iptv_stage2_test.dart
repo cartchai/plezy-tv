@@ -175,7 +175,7 @@ https://example.com/cnn.ts
         serverUrl: 'https://panel.example.com:8080',
         username: 'user',
         password: 'pass',
-        disabledCategoryIds: const ['2'],
+        hiddenCategoryIds: const ['2'],
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
@@ -236,7 +236,7 @@ https://example.com/cnn.m3u8
         id: 'conn-m3u-1',
         name: 'Trex M3U',
         playlistUrl: 'https://example.com/playlist.m3u',
-        disabledCategoryIds: disabled,
+        hiddenCategoryIds: disabled,
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
@@ -468,14 +468,14 @@ https://example.com/cnn.m3u8
     // (The password is split so the literal never appears in new code.)
     const testPassword = 'pa' 'ss';
 
-    IptvClient xtreamClient({XtreamApi? api, List<String> disabledInitials = const []}) {
+    IptvClient xtreamClient({XtreamApi? api, List<String> hiddenCategoryInitials = const []}) {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
         serverUrl: 'https://panel.example.com:8080',
         username: 'user',
         password: testPassword,
-        disabledInitials: disabledInitials,
+        hiddenCategoryInitials: hiddenCategoryInitials,
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
@@ -498,7 +498,7 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its content in browse', () async {
-      final client = xtreamClient(disabledInitials: const ['NF']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
       final movies = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
       expect(movies.items.map((i) => i.title), contains('EN - Movie 1'));
       expect(movies.items.map((i) => i.title), isNot(contains('NF - Movie')));
@@ -508,7 +508,7 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its content in search', () async {
-      final client = xtreamClient(disabledInitials: const ['NF']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
       final results = await client.searchItems('show');
       expect(results, isEmpty);
       final movies = await client.searchItems('movie');
@@ -517,27 +517,27 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its channels in Live TV', () async {
-      final client = xtreamClient(disabledInitials: const ['EN']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['EN']);
       final channels = await client.iptvChannels();
       expect(channels.map((c) => c.title), ['ES - Channel']);
       client.close();
     });
 
     test('a category whose name carries a disabled initial is hidden', () async {
-      final client = xtreamClient(disabledInitials: const ['NF']);
+      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
       final categories = await client.iptvCategoriesForLibrary('iptv:conn-xt-1:movies');
       expect(categories.map((c) => c.name), ['Action']);
       client.close();
     });
 
-    test('disabledInitials survives a JSON round-trip (persists like the category filter)', () {
+    test('hiddenCategoryInitials survives a JSON round-trip (persists like the category filter)', () {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
         serverUrl: 'https://panel.example.com:8080',
         username: 'user',
         password: testPassword,
-        disabledInitials: const ['EN', 'NF'],
+        hiddenCategoryInitials: const ['EN', 'NF'],
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final restored = XtreamConnection.fromConfigJson(
@@ -545,7 +545,7 @@ https://example.com/cnn.m3u8
         json: connection.toConfigJson(),
         createdAt: DateTime.utc(2026, 11, 5),
       );
-      expect(restored.disabledInitials, ['EN', 'NF']);
+      expect(restored.hiddenCategoryInitials, ['EN', 'NF']);
     });
   });
 
@@ -805,7 +805,7 @@ https://example.com/cnn.m3u8
         serverUrl: 'https://panel.example.com:8080',
         username: 'user',
         password: testPassword,
-        disabledCategoryIds: disabled,
+        hiddenCategoryIds: disabled,
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final c = IptvClient.forConnection(connection);

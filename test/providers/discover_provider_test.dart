@@ -1424,6 +1424,29 @@ void main() {
       expect(aggregation.hubCalls, hubCallsBefore);
     });
 
+    test('a user-initiated IPTV change refreshes only that server, never Plex (build #15, P-2)', () async {
+      aggregation.onDeckResult = () => [_item('a')];
+      aggregation.hubsResult = () => [_hub('hub-1')];
+      final scoped = pushProvider();
+      await scoped.load();
+      expect(aggregation.hubCalls, 1);
+
+      // Matt toggling an IPTV category: the change is his own action on
+      // Trex, so the Home refresh must re-fetch Trex hubs only — a full
+      // pass re-fetches Plex hubs too, on every single toggle.
+      LibraryContentNotifier().notifyChanged(
+        LibraryChangeEvent(serverId: ServerId('trex'), itemsAdded: true, userInitiated: true),
+      );
+      await settle();
+      expect(aggregation.hubCalls, 2, reason: 'the user change still refreshes');
+      expect(
+        aggregation.lastHubsServerIds,
+        {'trex'},
+        reason: 'only the changed server is refetched — Plex hubs are untouched',
+      );
+      expect(aggregation.lastOnDeckServerIds, {'trex'});
+    });
+
     test('active playback defers the refresh until it ends', () async {
       aggregation.onDeckResult = () => [_item('a')];
       aggregation.hubsResult = () => [_hub('hub-1')];

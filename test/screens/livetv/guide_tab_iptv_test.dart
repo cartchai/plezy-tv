@@ -76,7 +76,10 @@ class _EpgControllableApi extends XtreamApi {
   // The login's xmltv.php feed is the primary EPG source (Task 7), but
   // these tests control the EPG through get_short_epg's Completers — the
   // feed must fail fast here so the flow falls back to getShortEpg
-  // without ever touching the network or the compute isolate.
+  // without ever touching the network or the compute isolate. The
+  // persisted feed FILE is still read (build #15 caches the feed on
+  // disk); the harness gives that real I/O a runAsync window in
+  // waitForEpgCalls so it can settle in the fake async zone.
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
     throw Exception('xmltv feed unavailable in guide tests');
@@ -166,6 +169,17 @@ final class _IptvGuideHarness {
       await tester.pump();
     }
     expect(api.epgCalls, count);
+    // Build #15: the xmltv feed read is real disk I/O kicked in the
+    // background alongside get_short_epg (the persisted feed file is
+    // checked before the feed is downloaded). Real I/O only completes
+    // inside runAsync in the fake async zone, and pumpAndSettle alone
+    // never delivers it — give the background read one more real-async
+    // window so the fetch chain can settle before the test completes
+    // the short-EPG Completers.
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
   }
 
   void dispose() => provider.dispose();

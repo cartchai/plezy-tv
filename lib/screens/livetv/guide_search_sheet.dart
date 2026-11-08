@@ -8,6 +8,7 @@ import '../../focus/focusable_text_field.dart';
 import '../../focus/input_mode_tracker.dart';
 import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
+import '../../media/iptv_live_tv.dart';
 import '../../mixins/controller_disposer_mixin.dart';
 import '../../models/livetv_channel.dart';
 import '../../models/livetv_program.dart';
@@ -27,14 +28,25 @@ import 'live_tv_server_iteration.dart';
 
 /// Search sheet for the Live TV guide: filters channels and the next 24 hours
 /// of programs in memory; selecting a result jumps to it in the guide grid.
+///
+/// The sheet is scoped to the guide's selected source (build #15, item 2):
+/// [channels] is already the source-filtered list and [selectedServerId] is
+/// the picked source (null = All sources), so results are always jumpable
+/// in the current tab — a Plex programme could never land in the
+/// Trex-filtered guide, which was the whole bug.
 class GuideSearchSheet extends StatefulWidget {
   final List<LiveTvChannel> channels;
+
+  /// The guide's selected source, or null for All sources. Programme
+  /// fetching is limited to this server.
+  final String? selectedServerId;
   final void Function(LiveTvChannel channel) onChannelSelected;
   final void Function(LiveTvChannel channel, LiveTvProgram program) onProgramSelected;
 
   const GuideSearchSheet({
     super.key,
     required this.channels,
+    this.selectedServerId,
     required this.onChannelSelected,
     required this.onProgramSelected,
   });
@@ -95,13 +107,44 @@ class _GuideSearchSheetState extends State<GuideSearchSheet> with ControllerDisp
     final from = now.subtract(const Duration(hours: 1));
     final to = now.add(_scheduleWindow);
     final fetched = <LiveTvProgram>[];
+    final cachedResolved = <({LiveTvProgram program, LiveTvChannel channel})>[];
+    final scopedServerId = widget.selectedServerId;
 
     await forEachLiveTvServer(
       multiServer,
       resolveClient: multiServer.getClientForServer,
       isCurrent: () => mounted,
       body: (client, serverInfo) async {
+        // Scoped to the selected source (build #15, item 2): under the Trex
+        // tab only Trex programmes are fetched. A Plex programme result
+        // could never jump in the Trex-filtered guide, so loading it was
+        // the bug — under All it jumped fine.
+        if (scopedServerId != null && serverInfo.serverId != scopedServerId) return;
         fetched.addAll(await client.liveTv.fetchSchedule(from: from, to: to));
+        // IPTV servers report no schedule (fetchSchedule is intentionally
+        // empty) — their programmes come from the EPG cache only, never a
+        // per-channel network fetch. Only channels with a cache entry
+        // contribute; the rest match by channel name.
+        final liveTv = client.liveTv;
+        if (liveTv is IptvLiveTvSupport) {
+          final keys = {
+            for (final c in widget.channels)
+              if (c.serverId == serverInfo.serverId) c.key,
+          };
+          final cached = await liveTv.cachedEpgForChannels(keys, from: from, to: to);
+          final nowEpoch = now.millisecondsSinceEpoch ~/ 1000;
+          for (final entry in cached.entries) {
+            final channel = widget.channels
+                .where((c) => c.serverId == serverInfo.serverId && c.key == entry.key)
+                .firstOrNull;
+            if (channel == null) continue;
+            for (final program in entry.value) {
+              final endsAt = program.endsAt;
+              if (endsAt != null && endsAt <= nowEpoch) continue;
+              cachedResolved.add((program: program, channel: channel));
+            }
+          }
+        }
       },
       onError: (client, serverInfo, error, stackTrace) {
         appLogger.e(
@@ -118,7 +161,7 @@ class _GuideSearchSheetState extends State<GuideSearchSheet> with ControllerDisp
     // pays the programs × channels matching cost. The lookback window can
     // return programs that already finished — drop those.
     final nowEpoch = now.millisecondsSinceEpoch ~/ 1000;
-    final resolved = <({LiveTvProgram program, LiveTvChannel channel})>[];
+    final resolved = <({LiveTvProgram program, LiveTvChannel channel})>[...cachedResolved];
     for (final program in fetched) {
       final endsAt = program.endsAt;
       if (endsAt != null && endsAt <= nowEpoch) continue;

@@ -141,6 +141,16 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     return _filteredChannels.where((c) => c.serverId == selected).toList();
   }
 
+  /// Search-sheet channels: the selected server's channels, but WITHOUT
+  /// the favorites filter — the sheet searches the full lineup of the
+  /// current source, and the jump drops the favorites filter so the
+  /// target row exists to land on (build #15, item 2).
+  List<LiveTvChannel> get _searchSheetChannels {
+    final selected = _selectedLiveTvServerId;
+    if (selected == null) return _channels;
+    return _channels.where((c) => c.serverId == selected).toList();
+  }
+
   /// True when a source is picked but none of its channels loaded — a
   /// provider fetch failure, not an empty playlist — so the guide shows a
   /// reload action instead of a bare grid.
@@ -737,7 +747,12 @@ class _LiveTvScreenState extends State<LiveTvScreen>
       context,
       isScrollControlled: true,
       builder: (sheetContext) => GuideSearchSheet(
-        channels: _channels,
+        // Build #15, item 2: the current source's full lineup, not every
+        // channel — results must be jumpable in the current tab — and
+        // not the favorites-filtered list, so the sheet searches the
+        // full lineup of that source.
+        channels: _searchSheetChannels,
+        selectedServerId: _selectedLiveTvServerId,
         onChannelSelected: _jumpToGuideChannel,
         onProgramSelected: (channel, program) => _jumpToGuideChannel(channel, program: program),
       ),
@@ -758,14 +773,38 @@ class _LiveTvScreenState extends State<LiveTvScreen>
       setState(() => tabController.index = guideIndex);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final guide = _guideTabKey.currentState;
-      if (guide == null) return;
-      if (program != null) {
-        unawaited(guide.jumpToProgram(channel, program));
-      } else {
-        guide.jumpToChannel(channel);
-      }
+      if (!mounted) return;
+      _jumpToGuideChannelOnce(channel, program: program);
     });
+  }
+
+  /// One jump attempt. On a miss, switch the source picker to the result's
+  /// server and try once more, so a tap never silently does nothing (build
+  /// #15, item 2). If it still misses, say so — the channel left the guide
+  /// between the search and the tap (a reload dropped it).
+  void _jumpToGuideChannelOnce(LiveTvChannel channel, {LiveTvProgram? program, bool retried = false}) {
+    final guide = _guideTabKey.currentState;
+    if (guide == null) return;
+    Future<bool> attempt() async {
+      if (program != null) return guide.jumpToProgram(channel, program);
+      return guide.jumpToChannel(channel);
+    }
+
+    unawaited(
+      attempt().then((landed) {
+        if (landed || retried || !mounted) return;
+        final serverId = channel.serverId;
+        if (serverId == null || serverId == _selectedLiveTvServerId) {
+          showErrorSnackBar(context, t.liveTv.searchJumpNotFound);
+          return;
+        }
+        setState(() => _selectedLiveTvServerId = serverId);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _jumpToGuideChannelOnce(channel, program: program, retried: true);
+        });
+      }),
+    );
   }
 
   void _showReorderFavorites() {

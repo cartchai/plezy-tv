@@ -12,21 +12,19 @@ import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../media/iptv_live_tv.dart';
-import '../../profiles/active_profile_binder.dart';
 import '../../profiles/active_profile_provider.dart';
 import '../../providers/multi_server_provider.dart';
+import '../../screens/livetv/live_tv_mini_player.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../utils/formatters.dart';
-import '../../utils/iptv_initials.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
-import '../../widgets/iptv_initials_checklist.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_section.dart';
 import 'add_connection_screen.dart';
-import 'edit_iptv_connection_screen.dart';
+import 'iptv_categories_screen.dart';
 import 'playback_settings_screen.dart';
 import 'settings_utils.dart';
 
@@ -210,6 +208,16 @@ class IptvSettingsScreen extends StatelessWidget {
             ),
           ),
         ),
+        const SliverPadding(padding: EdgeInsets.only(top: 24)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverToBoxAdapter(
+            child: SettingsGroup(
+              title: t.iptv.miniPlayerTitle,
+              children: [const _MiniPlayerDiagnosticTile()],
+            ),
+          ),
+        ),
         const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
       ],
     );
@@ -316,10 +324,71 @@ class _EpgLastUpdatedTile extends StatelessWidget {
   }
 }
 
+/// "Mini-player" diagnostic (build #15): what the last Live TV tune did —
+/// which channel, which backend (mpv / ExoPlayer), whether a first frame
+/// was ever reported, how the surface was revealed, and whether the native
+/// video rect was sent. If the video is black again, this row names the
+/// failed step instead of another "still black". Not tappable — a status.
+class _MiniPlayerDiagnosticTile extends StatelessWidget {
+  const _MiniPlayerDiagnosticTile();
+
+  String _revealLine(LiveTvMiniPlayerDiagnostic diagnostic) {
+    final ms = diagnostic.msToReveal;
+    return switch (diagnostic.reveal) {
+      LiveTvMiniPlayerReveal.event => t.iptv.miniPlayerRevealEvent(ms: ms ?? 0),
+      LiveTvMiniPlayerReveal.latch => t.iptv.miniPlayerRevealLatch(ms: ms ?? 0),
+      LiveTvMiniPlayerReveal.watchdog => t.iptv.miniPlayerRevealWatchdog(ms: ms ?? 0),
+      LiveTvMiniPlayerReveal.none => t.iptv.miniPlayerRevealNone,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final diagnostic = LiveTvMiniPlayerController.lastDiagnostic;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppIcon(Symbols.live_tv_rounded, fill: 1),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t.iptv.miniPlayerTitle, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 2),
+                if (diagnostic == null)
+                  Text(t.iptv.miniPlayerNone, style: theme.textTheme.bodyMedium)
+                else ...[
+                  Text(
+                    t.iptv.miniPlayerChannel(channel: diagnostic.channelName, backend: diagnostic.backend),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  Text(_revealLine(diagnostic), style: theme.textTheme.bodyMedium),
+                  Text(
+                    diagnostic.restartObserved ? t.iptv.miniPlayerRestartYes : t.iptv.miniPlayerRestartNo,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  Text(
+                    diagnostic.videoRectSent ? t.iptv.miniPlayerRectYes : t.iptv.miniPlayerRectNo,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The user's IPTV connections, live from the registry. Each row shows the
 /// user-given name plus its source label (M3U / Xtream Codes) and how many
-/// categories are turned off; tapping one opens its edit screen, where the
-/// country/region filter (Manage groups) lives.
+/// categories are turned off; tapping one opens the Categories screen for
+/// that connection (build #15, item 5).
 class _IptvConnectionsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -347,7 +416,6 @@ class _IptvConnectionsList extends StatelessWidget {
           children: [
             for (final connection in connections) ...[
               _IptvConnectionTile(connection: connection),
-              _IptvConnectionInitials(connection: connection),
               if (connection is XtreamConnection)
                 _IptvCatalogDiagnostics(connection: connection),
             ],
@@ -370,14 +438,21 @@ class _IptvConnectionTile extends StatelessWidget {
   };
 
   String _subtitle(BuildContext context) {
-    final disabledCount = switch (connection) {
-      M3uConnection(:final disabledCategoryIds) => disabledCategoryIds.length,
-      XtreamConnection(:final disabledCategoryIds) => disabledCategoryIds.length,
-      _ => 0,
+    final (ids, initials) = switch (connection) {
+      M3uConnection(:final hiddenCategoryIds, :final hiddenCategoryInitials) =>
+        (hiddenCategoryIds.length, hiddenCategoryInitials.length),
+      XtreamConnection(:final hiddenCategoryIds, :final hiddenCategoryInitials) =>
+        (hiddenCategoryIds.length, hiddenCategoryInitials.length),
+      _ => (0, 0),
     };
-    final filter = disabledCount == 0
-        ? t.iptv.categoriesAllOn
-        : t.iptv.categoriesOff(count: disabledCount);
+    // Both lists hide categories — the initials hide whole groups at once
+    // — so "All categories on" is only true when BOTH are empty.
+    final filter = switch ((ids, initials)) {
+      (0, 0) => t.iptv.categoriesAllOn,
+      (_, 0) => t.iptv.categoriesOff(count: ids),
+      (0, _) => t.iptv.groupsOff(count: initials),
+      (_, _) => '${t.iptv.categoriesOff(count: ids)} · ${t.iptv.groupsOff(count: initials)}',
+    };
     return '$_sourceLabel · $filter';
   }
 
@@ -387,17 +462,13 @@ class _IptvConnectionTile extends StatelessWidget {
       icon: Symbols.live_tv_rounded,
       title: connection.displayName,
       subtitle: _subtitle(context),
-      onTap: () async {
-        final changed = await Navigator.of(
+      // Build #15, item 5: the tile opens the ONE Categories screen for
+      // this connection. Toggles there apply immediately (persist + swap
+      // in place), so there is no result to handle and no rebind.
+      onTap: () {
+        Navigator.of(
           context,
-        ).push<bool>(MaterialPageRoute(builder: (_) => EditIptvConnectionScreen(connection: connection)));
-        if (changed != true || !context.mounted) return;
-        // The edit screen persisted the new filter; rebind so the client
-        // is recreated with it (the filter is baked in at construction).
-        final activeId = context.read<ActiveProfileProvider>().active?.id;
-        if (activeId != null) {
-          unawaited(context.read<ActiveProfileBinder>().rebindIfActive(activeId));
-        }
+        ).push(MaterialPageRoute(builder: (_) => IptvCategoriesScreen(connection: connection)));
       },
     );
   }
@@ -413,83 +484,6 @@ class _IptvConnectionTile extends StatelessWidget {
 /// Unlike the edit screen's deferred save, a toggle here persists
 /// immediately (registry upsert + rebind, like the edit screen's caller
 /// does after Save), so the filter applies everywhere at once.
-class _IptvConnectionInitials extends StatefulWidget {
-  final Connection connection;
-
-  const _IptvConnectionInitials({required this.connection});
-
-  @override
-  State<_IptvConnectionInitials> createState() => _IptvConnectionInitialsState();
-}
-
-class _IptvConnectionInitialsState extends State<_IptvConnectionInitials> {
-  bool _expanded = false;
-  List<IptvInitial>? _initials;
-
-  Set<String> get _disabled => switch (widget.connection) {
-    M3uConnection(:final disabledInitials) => disabledInitials.toSet(),
-    XtreamConnection(:final disabledInitials) => disabledInitials.toSet(),
-    _ => <String>{},
-  };
-
-  Future<void> _persist(Set<String> disabled) async {
-    final registry = context.read<ConnectionRegistry>();
-    final updated = switch (widget.connection) {
-      final M3uConnection c => c.copyWith(disabledInitials: disabled.toList()),
-      final XtreamConnection c => c.copyWith(disabledInitials: disabled.toList()),
-      _ => widget.connection,
-    };
-    await registry.upsert(updated);
-    if (!mounted) return;
-    final activeId = context.read<ActiveProfileProvider>().active?.id;
-    if (activeId != null) {
-      unawaited(context.read<ActiveProfileBinder>().rebindIfActive(activeId));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final offCount = _disabled.length;
-    final total = _initials?.length;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FocusableListTile(
-          title: Text(t.connections.iptvFilterInitials, style: theme.textTheme.titleSmall),
-          subtitle: total == null
-              ? null
-              : offCount == 0
-                  ? Text(
-                      t.connections.iptvFilterInitialsCount(n: total),
-                      style: theme.textTheme.bodySmall,
-                    )
-                  : Text(
-                      t.connections.iptvFilterSectionOff(off: offCount, total: total),
-                      style: theme.textTheme.bodySmall,
-                    ),
-          trailing: AppIcon(
-            _expanded ? Symbols.expand_less_rounded : Symbols.expand_more_rounded,
-            fill: 1,
-          ),
-          onTap: () => setState(() => _expanded = !_expanded),
-        ),
-        if (_expanded)
-          Padding(
-            padding: const EdgeInsets.only(left: 16),
-            child: IptvInitialsChecklist(
-              connection: widget.connection,
-              disabled: _disabled,
-              onDisabledChanged: (next) => unawaited(_persist(next)),
-              onLoaded: (initials) => setState(() => _initials = initials),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
 /// On-device series catalog readout (build #10, diagnosis recommendation
 /// 6): what this phone loaded from the series catalog — the unfiltered
 /// row count, the series category count, per-category row counts for the
@@ -688,13 +682,13 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
                                     ),
                                   Text(
                                     t.iptv.catalogDiagnosticsDisabledInitials(
-                                      count: diagnostics.disabledInitialsCount,
+                                      count: diagnostics.hiddenCategoryInitialsCount,
                                     ),
                                     style: theme.textTheme.bodySmall,
                                   ),
                                   Text(
                                     t.iptv.catalogDiagnosticsDisabledCategories(
-                                      count: diagnostics.disabledCategoriesCount,
+                                      count: diagnostics.hiddenCategoriesCount,
                                     ),
                                     style: theme.textTheme.bodySmall,
                                   ),

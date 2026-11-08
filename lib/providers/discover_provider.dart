@@ -169,6 +169,13 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   StreamSubscription<LibraryChangeEvent>? _libraryEventSubscription;
   late final RefreshPacer _libraryEventPacer;
 
+  /// Servers named by library-change events still waiting for their pacer
+  /// pass (build #15, P-2). A user's own change (filter toggle, connection
+  /// edit) refreshes ONLY those servers — a full Home reload on every IPTV
+  /// toggle re-fetched Plex hubs too. Server pushes keep the full pass.
+  Set<String> _pendingLibraryEventServerIds = {};
+  Set<String> _pendingUserInitiatedServerIds = {};
+
   /// Authoritative fetches tell the store which items the server re-observed,
   /// so a stale local watch patch stops overriding fresh server state (#1829).
   /// Optional: tests and isolated subtrees may have no store.
@@ -347,6 +354,10 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// period always refreshes promptly.
   void _onLibraryContentChanged(LibraryChangeEvent event) {
     if (isDisposed || !event.hasChanges) return;
+    // Build #15 (P-2): remember WHICH server changed, so the pass can
+    // refresh only it when every pending change is the user's own.
+    _pendingLibraryEventServerIds.add(event.serverId.value);
+    if (event.userInitiated) _pendingUserInitiatedServerIds.add(event.serverId.value);
     // The user's own change (filter toggle / rebind) bypasses the pacer
     // cooldown (build #14): deferring it to the trailing edge leaves the
     // toggle invisible on Home for up to 2 minutes. Server pushes stay paced.
@@ -359,8 +370,21 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
 
   bool _runLibraryEventRefresh() {
     if (isDisposed) return false;
-    appLogger.d('DiscoverProvider: refreshing after server library change');
-    unawaited(load());
+    final ids = Set<String>.of(_pendingLibraryEventServerIds);
+    final userIds = Set<String>.of(_pendingUserInitiatedServerIds);
+    _pendingLibraryEventServerIds = {};
+    _pendingUserInitiatedServerIds = {};
+    // Build #15 (P-2): when every pending change is the user's own (an
+    // IPTV filter toggle, a connection edit), refresh only those servers'
+    // hubs — a full pass re-fetches Plex hubs on every toggle. Server
+    // pushes, or a mix of pushes and user changes, keep the full pass.
+    if (ids.isNotEmpty && userIds.length == ids.length) {
+      appLogger.d('DiscoverProvider: refreshing hubs for user-changed servers $ids');
+      unawaited(_loadDeltaOnce(ids, force: true));
+    } else {
+      appLogger.d('DiscoverProvider: refreshing after server library change');
+      unawaited(load());
+    }
     return true;
   }
 
@@ -606,10 +630,15 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// online after the last full pass) and merge them into the loaded state.
   /// Failures keep the loaded state and leave the ids un-loaded, so the next
   /// status emission retries them.
-  Future<void> _loadDeltaOnce(Set<String> serverIds) async {
+  ///
+  /// [force] (build #15, P-2): re-fetch even servers that are already fully
+  /// loaded — a filter toggle's whole point is that an already-loaded
+  /// server's hubs changed. Without it the `difference` below would drop
+  /// the toggle's server and the pass would fetch nothing.
+  Future<void> _loadDeltaOnce(Set<String> serverIds, {bool force = false}) async {
     ++_contentRevision;
     // A full pass may have covered these ids while they sat in the queue.
-    final ids = serverIds.difference(_fullyLoadedServerIds);
+    final ids = force ? serverIds : serverIds.difference(_fullyLoadedServerIds);
     final onDeckIds = ids.difference(_loadedOnDeckServerIds);
     final hubIds = ids.difference(_loadedHubServerIds);
     if (onDeckIds.isEmpty && hubIds.isEmpty) return;
