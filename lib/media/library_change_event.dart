@@ -31,6 +31,15 @@ class LibraryChangeEvent {
   final bool itemsRemoved;
   final bool itemsUpdated;
 
+  /// True when the change was caused by the user's own action on this
+  /// device (a filter toggle / connection edit rebind, a manual playlist
+  /// refresh) rather than a server push or a background refresh landing.
+  /// Consumers pace server pushes behind a cooldown so a bulk import
+  /// doesn't refetch continuously — but a user's own change must show
+  /// promptly, not at the cooldown's trailing edge (up to 2 minutes
+  /// later). Defaults to false: pushes stay paced.
+  final bool userInitiated;
+
   const LibraryChangeEvent({
     required this.serverId,
     this.libraryIds = const {},
@@ -38,6 +47,7 @@ class LibraryChangeEvent {
     this.itemsAdded = false,
     this.itemsRemoved = false,
     this.itemsUpdated = false,
+    this.userInitiated = false,
   });
 
   bool get hasChanges => itemsAdded || itemsRemoved || itemsUpdated;

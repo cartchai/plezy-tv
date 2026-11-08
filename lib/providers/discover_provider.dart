@@ -347,7 +347,14 @@ class DiscoverProvider extends ChangeNotifier with DisposableChangeNotifierMixin
   /// period always refreshes promptly.
   void _onLibraryContentChanged(LibraryChangeEvent event) {
     if (isDisposed || !event.hasChanges) return;
-    _libraryEventPacer.schedule();
+    // The user's own change (filter toggle / rebind) bypasses the pacer
+    // cooldown (build #14): deferring it to the trailing edge leaves the
+    // toggle invisible on Home for up to 2 minutes. Server pushes stay paced.
+    if (event.userInitiated) {
+      _libraryEventPacer.scheduleBypassCooldown();
+    } else {
+      _libraryEventPacer.schedule();
+    }
   }
 
   bool _runLibraryEventRefresh() {

@@ -13,7 +13,7 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **361 files changed, 29448 insertions, 3164 deletions**
+- Scale of the fork vs base: **366 files changed, 29593 insertions, 3174 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
   verified 2026-11-06 after the build #11 commit — was 344 files /
   +23,111/−3,147 at build #10).
@@ -446,6 +446,55 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   detail's section filter runs over it — row-level section filter is
   future work), image loading (still not cached).
 - Progress notes: `IPTV_BUILD13_NOTES.md`.
+
+### 12. Build #14 — v2.25.9 startup crash hunt (NOT reproduced) + RefreshPacer cooldown bypass (v2.25.10)
+- New files: `IPTV_BUILD14_NOTES.md` (crash report, three independent
+  hunts with counts, harness-blind spots, cooldown fix with failing-first
+  proof, next evidence step), `test/services/iptv/iptv_build14_migration_test.dart`
+  (4 tests — v2.25.8-format disk cache, 161 hidden initials, Trex-shaped
+  fake panel), `test/services/iptv/iptv_build14_startup_test.dart` (2
+  tests — dummy Plex HOME PC + Trex, library aggregation, Discover load),
+  `test/screens/libraries/iptv_build14_startup_libraries_test.dart` (4
+  tests — real Libraries screen, 360×800 + 1280×800, incl. the cooldown
+  failing-first test),
+  `test/screens/iptv_build14_startup_discover_test.dart` (1 test — real
+  Discover screen, 360×800, full provider stack).
+- Touched upstream files: `lib/utils/refresh_pacer.dart` (new
+  `scheduleBypassCooldown()` — one-shot cooldown skip, debounce kept,
+  blocked-retry kept), `lib/media/library_change_event.dart` (new
+  `userInitiated` flag), `lib/media/iptv_client.dart`
+  (`notifyCatalogRefreshed({userInitiated:})`, `clearCatalogCache` passes
+  `userInitiated: true`), `lib/services/multi_server_manager.dart`
+  (rebind passes `userInitiated: true`),
+  `lib/screens/libraries/tabs/base_library_tab.dart`
+  (`_onLiveLibraryChange` branches on `event.userInitiated`),
+  `lib/providers/discover_provider.dart` (`_onLibraryContentChanged`
+  branches the same way), `lib/i18n/en.i18n.json` + generated
+  `strings*.g.dart` (`changelog2260`),
+  `lib/screens/settings/about_screen.dart` (changelog entry first),
+  `pubspec.yaml` (version `2.25.10+167`).
+- Touched test files: `test/utils/refresh_pacer_test.dart` (+4 tests —
+  bypass at debounce edge, bypass upgrades pending trailing pass, later
+  push event paced normally, bypass retries while blocked; suite 13/13).
+- The v2.25.9 startup crash ("Right after the app loads and the whole UI
+  starts to come in", Plex HOME PC + Trex connected) was NOT reproduced:
+  builder migration 4/4 + startup unit 2/2 + Libraries widget 4/4 +
+  Discover widget 1/1; tester Task 1 (6/6 unit + 4/4 widget,
+  services/iptv 174/174); tester Task 1b (7/7 unit + 4/4 widget, dummy
+  Plex + Trex, Plex-offline/network-down, bind-racing-UI). No crash fix is
+  claimed in this build. Remaining harness-blind spots: real `main()`
+  startup sequence, real SharedPreferences migration on the phone, native
+  mpv player, real panel data at full scale. Next evidence step: an
+  on-device fatal-error catcher that persists the last crash for
+  screenshotting (see `IPTV_BUILD14_NOTES.md` §6).
+- Secondary finding, NOT fixed: pre-existing 40px RenderFlex overflow in
+  the Discover app bar at 360dp (`lib/screens/discover_screen.dart:803`,
+  `_buildOverlaidAppBar`) — paints stripes in a debug build, does not kill
+  the app, build #13 never touched that file. Parent decides whether it
+  rides in a later build.
+- NOT touched: EPG behaviour, mini-player, in-app updater, TV/tablet
+  layouts, image loading, the `fetchMoreHubItems` full-list build.
+- Progress notes: `IPTV_BUILD14_NOTES.md`.
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

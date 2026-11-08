@@ -159,4 +159,66 @@ void main() {
       expect(async.pendingTimers, isEmpty);
     });
   });
+
+  // Build #14: a user-initiated change (filter toggle / rebind) bypasses
+  // the cooldown — it is one deliberate event, not a push burst, so
+  // deferring it to the trailing edge leaves the user's own toggle
+  // invisible for up to 2 minutes.
+  test('scheduleBypassCooldown runs at the debounce edge despite a fresh notePass', () {
+    fakeAsync((async) {
+      final h = build();
+      h.pacer.notePass(); // tab just loaded; cooldown window open
+      h.pacer.scheduleBypassCooldown(); // user's own toggle
+      async.elapse(debounce);
+      expect(h.passes, hasLength(1), reason: 'bypass skips the cooldown');
+      h.pacer.dispose();
+    });
+  });
+
+  test('scheduleBypassCooldown upgrades a pending trailing pass', () {
+    fakeAsync((async) {
+      final h = build();
+      h.pacer.schedule();
+      async.elapse(debounce); // leading pass, window opens
+      h.pacer.schedule(); // push event inside the window: trailing pass owed
+      async.elapse(const Duration(seconds: 10));
+      expect(h.passes, hasLength(1));
+      h.pacer.scheduleBypassCooldown(); // user's own toggle upgrades it
+      async.elapse(debounce);
+      expect(h.passes, hasLength(2), reason: 'fires promptly instead of at the 2-minute edge');
+      h.pacer.dispose();
+    });
+  });
+
+  test('a later push event after a bypass is paced normally', () {
+    fakeAsync((async) {
+      final h = build();
+      h.pacer.notePass();
+      h.pacer.scheduleBypassCooldown();
+      async.elapse(debounce);
+      expect(h.passes, hasLength(1));
+      // The bypass is one-shot: a push event right after is paced again.
+      h.pacer.schedule();
+      async.elapse(debounce);
+      expect(h.passes, hasLength(1), reason: 'cooldown holds for pushes');
+      async.elapse(cooldown);
+      expect(h.passes, hasLength(2), reason: 'the push still lands as the trailing pass');
+      h.pacer.dispose();
+    });
+  });
+
+  test('scheduleBypassCooldown still retries while blocked', () {
+    fakeAsync((async) {
+      final h = build();
+      h.pacer.notePass();
+      h.setBlocked(true);
+      h.pacer.scheduleBypassCooldown();
+      async.elapse(debounce + blockedRetry);
+      expect(h.passes, isEmpty, reason: 'blocked pass must not run during playback');
+      h.setBlocked(false);
+      async.elapse(blockedRetry);
+      expect(h.passes, hasLength(1), reason: 'bypass survives the blocked retry and still skips the cooldown');
+      h.pacer.dispose();
+    });
+  });
 }

@@ -359,7 +359,14 @@ abstract class BaseLibraryTabState<T, W extends BaseLibraryTab<T>> extends State
     // route or another main tab replays the drop when [TickerMode] re-enables
     // it ([_onSurfaceVisibilityChanged]) — never fetch invisibly.
     if (!_isLiveSurfaceVisible) return;
-    _livePacer.schedule();
+    // The user's own change (filter toggle / rebind) bypasses the pacer
+    // cooldown (build #14): deferring it to the trailing edge leaves the
+    // toggle invisible for up to 2 minutes. Server pushes stay paced.
+    if (event.userInitiated) {
+      _livePacer.scheduleBypassCooldown();
+    } else {
+      _livePacer.schedule();
+    }
   }
 
   /// Active within the Libraries screen *and* the screen itself is the

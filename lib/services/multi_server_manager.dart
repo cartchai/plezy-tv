@@ -981,7 +981,9 @@ class MultiServerManager {
       // when the server-id set changes — so without this the toggled
       // categories stay visible until a restart. A first bind needs no
       // notification: the status emission drives the initial load.
-      if (oldClient != null) client.notifyCatalogRefreshed();
+      // The rebind is the user's own action (build #14): the refresh
+      // bypasses the pacer cooldown so the toggle shows promptly.
+      if (oldClient != null) client.notifyCatalogRefreshed(userInitiated: true);
 
       appLogger.i(
         'Added IPTV server: ${client.serverName ?? connection.id}${healthy ? '' : ' (unhealthy)'}',

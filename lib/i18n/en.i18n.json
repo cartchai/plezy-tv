@@ -1414,6 +1414,10 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2260": [
+      "Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up",
+      "Refreshing playlists or switching a library now updates the lists straight away too"
+    ],
     "changelog2259": [
       "Live TV channels can be searched now, just like movies and TV shows — searching finds channels too",
       "TV show search is fixed: it no longer gives up while the show list is still loading",

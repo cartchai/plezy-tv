@@ -3679,6 +3679,10 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2260 => [
+		'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
+		'Refreshing playlists or switching a library now updates the lists straight away too',
+	];
 	List<String> get changelog2259 => [
 		'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
 		'TV show search is fixed: it no longer gives up while the show list is still loading',
@@ -9902,6 +9906,8 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2260.0' => 'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
+			'about.changelog2260.1' => 'Refreshing playlists or switching a library now updates the lists straight away too',
 			'about.changelog2259.0' => 'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
 			'about.changelog2259.1' => 'TV show search is fixed: it no longer gives up while the show list is still loading',
 			'about.changelog2259.2' => 'Movie and TV show lists now load from the phone first, so browsing feels quicker after the first open',
@@ -10143,10 +10149,10 @@ extension on Translations {
 			'explore.detail.links' => 'Links',
 			'explore.detail.watchOn' => 'Watch on',
 			'explore.detail.watchTrailer' => 'Watch trailer',
-			'explore.detail.openOn' => ({required Object site}) => 'Open on ${site}',
-			'explore.detail.crew' => 'Crew',
 			_ => null,
 		} ?? switch (path) {
+			'explore.detail.openOn' => ({required Object site}) => 'Open on ${site}',
+			'explore.detail.crew' => 'Crew',
 			'explore.detail.ratings' => 'Ratings',
 			'explore.detail.schedule' => 'Schedule',
 			'explore.detail.recommendedByUsers' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Recommended by ${n} user', other: 'Recommended by ${n} users', ), 
@@ -10657,10 +10663,10 @@ extension on Translations {
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Attempt ${current} of 5',
 			'companionRemote.remote.retryNow' => 'Retry Now',
 			'companionRemote.remote.tabRemote' => 'Remote',
-			'companionRemote.remote.tabPlay' => 'Play',
-			'companionRemote.remote.tabMore' => 'More',
 			_ => null,
 		} ?? switch (path) {
+			'companionRemote.remote.tabPlay' => 'Play',
+			'companionRemote.remote.tabMore' => 'More',
 			'companionRemote.remote.menu' => 'Menu',
 			'companionRemote.remote.tabNavigation' => 'Tab Navigation',
 			'companionRemote.remote.tabDiscover' => 'Discover',

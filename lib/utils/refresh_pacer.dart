@@ -45,10 +45,32 @@ class RefreshPacer {
   DateTime? _lastPassAt;
   bool _disposed = false;
 
+  /// Set by [scheduleBypassCooldown]; consumed by the next [_run] so a
+  /// user-initiated pass skips the cooldown check once. Preserved across
+  /// blocked retries (the pass still hasn't run); cleared when the pass
+  /// runs or is deferred by the cooldown path (which only happens when
+  /// the flag was already false).
+  bool _bypassCooldown = false;
+
   /// An event arrived. No-op while a pass is already scheduled.
   void schedule() {
     if (_disposed) return;
     if (_timer?.isActive ?? false) return;
+    _timer = Timer(debounce, _run);
+  }
+
+  /// Schedule a pass that skips the [cooldown] window (build #14): a
+  /// user-initiated change — a filter toggle / connection edit rebind, a
+  /// manual refresh — is one deliberate event, not a push burst or a
+  /// sustained import stream, so deferring it to the cooldown's trailing
+  /// edge leaves the user's own change invisible for up to [cooldown]
+  /// (2 minutes on the library tabs). Still honors the debounce merge and
+  /// the blocked retry; a pass already pending is re-armed under the
+  /// bypass so it fires promptly instead of at the old trailing edge.
+  void scheduleBypassCooldown() {
+    if (_disposed) return;
+    _timer?.cancel();
+    _bypassCooldown = true;
     _timer = Timer(debounce, _run);
   }
 
@@ -73,14 +95,21 @@ class RefreshPacer {
       _timer = Timer(blockedRetry, _run);
       return;
     }
-    final last = _lastPassAt;
-    if (last != null) {
-      final remaining = cooldown - clock.now().difference(last);
-      if (remaining > Duration.zero) {
-        // Defer to the trailing edge; re-checks the window on fire in case a
-        // [notePass] moved it meanwhile.
-        _timer = Timer(remaining, _run);
-        return;
+    // A user-initiated pass skips the cooldown check once (see
+    // [scheduleBypassCooldown]); the flag is consumed here so a later
+    // push event behind it is paced normally.
+    final bypassCooldown = _bypassCooldown;
+    _bypassCooldown = false;
+    if (!bypassCooldown) {
+      final last = _lastPassAt;
+      if (last != null) {
+        final remaining = cooldown - clock.now().difference(last);
+        if (remaining > Duration.zero) {
+          // Defer to the trailing edge; re-checks the window on fire in case a
+          // [notePass] moved it meanwhile.
+          _timer = Timer(remaining, _run);
+          return;
+        }
       }
     }
     if (_runPass()) _lastPassAt = clock.now();

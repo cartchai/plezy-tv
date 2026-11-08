@@ -364,7 +364,9 @@ class IptvClient implements MediaServerClient {
     _xtreamChannelByKey.clear();
     _m3uChannelByKey.clear();
     unawaited(_catalogCache.clear(connection.id));
-    notifyCatalogRefreshed();
+    // A manual clear is the user's own action: the tabs must refresh
+    // promptly, not at the pacer cooldown's trailing edge (build #14).
+    notifyCatalogRefreshed(userInitiated: true);
   }
 
   /// Tell the app's library views that this connection's catalog changed
@@ -375,9 +377,14 @@ class IptvClient implements MediaServerClient {
   /// The Live TV guide listens to it too (build #13). Public so the
   /// manager can fire it when a rebind replaces this client: without it
   /// a filter toggle shows stale lists until a restart.
-  void notifyCatalogRefreshed() {
+  ///
+  /// [userInitiated] marks the change as the user's own action (a filter
+  /// toggle / connection edit rebind, a manual playlist refresh) so
+  /// consumers bypass the [RefreshPacer] cooldown for it (build #14).
+  /// Background refresh landings leave it false and stay paced.
+  void notifyCatalogRefreshed({bool userInitiated = false}) {
     LibraryContentNotifier().notifyChanged(
-      LibraryChangeEvent(serverId: ServerId(connection.id), itemsUpdated: true),
+      LibraryChangeEvent(serverId: ServerId(connection.id), itemsUpdated: true, userInitiated: userInitiated),
     );
   }
 
