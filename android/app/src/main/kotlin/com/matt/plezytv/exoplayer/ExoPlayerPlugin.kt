@@ -250,6 +250,7 @@ class ExoPlayerPlugin :
       "addSubtitleTrack" -> handleAddSubtitleTrack(call, result)
       "setVisible" -> handleSetVisible(call, result)
       "updateFrame" -> handleUpdateFrame(result)
+      "setVideoRect" -> handleSetVideoRect(call, result)
       "setVideoFrameRate" -> handleSetVideoFrameRate(call, result)
       "clearVideoFrameRate" -> handleClearVideoFrameRate(result)
       "requestAudioFocus" -> handleRequestAudioFocus(result)
@@ -365,6 +366,10 @@ class ExoPlayerPlugin :
         // Seed from this device's persisted calibration, falling back to the Dart perf-tier proxy.
         core.seedAssVideoLatencyFrames(assVideoLatencyFrames)
         core.setVisible(false)
+        // A rect Dart sent before initialize (the mini-player's Video mounts
+        // before the first open initializes the core) is applied now
+        // instead of leaving the container full-window.
+        lastVideoRect?.let { rect -> core.setVideoRect(rect.left, rect.top, rect.right, rect.bottom) }
 
         Log.d(TAG, "Initialized: true")
         result.success(true)
@@ -695,6 +700,10 @@ class ExoPlayerPlugin :
     generation: Int
   ) {
     inFlightOpen = request
+    // The fallback core is created fresh with a full-window container;
+    // Dart's Video dedups by value and will not resend the rect, so give
+    // the new core the last rect now, before the media loads.
+    lastVideoRect?.let { rect -> core.setVideoRect(rect.left, rect.top, rect.right, rect.bottom) }
     val settled = AtomicBoolean(false)
     val timeout = Runnable {
       if (!settled.compareAndSet(false, true)) return@Runnable
@@ -1017,6 +1026,33 @@ class ExoPlayerPlugin :
 
   private fun handleUpdateFrame(result: MethodChannel.Result) {
     activeSurfaceCore?.updateFrame()
+    result.success(null)
+  }
+
+  // Last video rect Dart sent (physical pixels). Kept so a core created
+  // after the rect arrived — the ExoPlayer core at initialize, or the mpv
+  // fallback core at its first open — can be given the same rect; Dart's
+  // Video dedups by value and will not resend it.
+  private var lastVideoRect: android.graphics.Rect? = null
+
+  /**
+   * Move/resize the surface container to the rect Dart's `Video` occupies
+   * (build #16). Routes to whichever core currently owns the surface
+   * ([activeSurfaceCore]) — the ExoPlayer core, or the mpv fallback core
+   * after a backend switch.
+   */
+  private fun handleSetVideoRect(call: MethodCall, result: MethodChannel.Result) {
+    val left = call.argument<Number>("left")?.toInt()
+    val top = call.argument<Number>("top")?.toInt()
+    val right = call.argument<Number>("right")?.toInt()
+    val bottom = call.argument<Number>("bottom")?.toInt()
+    if (left == null || top == null || right == null || bottom == null) {
+      result.error("INVALID_ARGS", "setVideoRect needs left/top/right/bottom", null)
+      return
+    }
+    val rect = android.graphics.Rect(left, top, right, bottom)
+    lastVideoRect = rect
+    activeSurfaceCore?.setVideoRect(left, top, right, bottom)
     result.success(null)
   }
 

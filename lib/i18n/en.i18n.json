@@ -1402,6 +1402,12 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2262": [
+      "Categories now scroll smoothly — the list only builds the rows on screen instead of all 1,200 at once",
+      "Live TV mini-player should show video now: the app finally tells Android where the video goes, so the picture sits in the mini-player instead of hidden behind the guide",
+      "Catch-up now plays from the start of a past programme — the app was asking the provider for the time in a format it does not accept",
+      "When a channel will not start, Settings → IPTV now says why instead of just showing “Could not start the live channel”"
+    ],
     "changelog2261": [
       "Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame",
       "Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left",
@@ -2815,6 +2821,7 @@
     "miniPlayerRestartNo": "Restart seen: no",
     "miniPlayerRectYes": "Video rect sent: yes",
     "miniPlayerRectNo": "Video rect sent: no",
+    "miniPlayerFailReason": "Could not start: ${reason}",
     "groupsOff": "${count} groups off"
   },
   "iptvCategories": {

@@ -219,6 +219,12 @@ void main() {
 
     expect(controller.status, LiveTvMiniPlayerStatus.active);
     expect(players.single.openedUris.single, contains('timeshift'));
+    // Build #16: the start stamp is YYYY-MM-DD:HH-MM with NO seconds —
+    // the panel's strict parse rejects HH-MM-SS, so catch-up never
+    // played ("Could not start the live channel").
+    final uri = players.single.openedUris.single;
+    expect(uri, matches(RegExp(r'/\d{4}-\d{2}-\d{2}:\d{2}-\d{2}/')));
+    expect(uri, isNot(matches(RegExp(r'/\d{4}-\d{2}-\d{2}:\d{2}-\d{2}-\d{2}/'))));
   });
 
   test('tune with no live server fails, and retry stays failed for the same channel', () async {
@@ -227,6 +233,12 @@ void main() {
 
     expect(controller.status, LiveTvMiniPlayerStatus.failed);
     expect(players, isEmpty);
+    // Build #16: the failure names its stage in the diagnostic — the
+    // "Could not start" card used to hide every error.
+    expect(
+      LiveTvMiniPlayerController.lastDiagnostic?.failReason,
+      'no live server for this channel',
+    );
 
     // Retry re-tunes the same channel, so it fails the same way — but
     // the controller stays usable for a real channel afterwards.

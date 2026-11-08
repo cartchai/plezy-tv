@@ -75,7 +75,9 @@ https://example.com/cnn.ts
       final start = DateTime.utc(2026, 11, 5, 20, 30, 0);
       expect(
         api.timeshiftUrl(streamId: '123', durationMinutes: 60, start: start),
-        'https://panel.example.com:8080/timeshift/user/pass/60/2026-11-05:20-30-00/123.m3u8',
+        // Build #16: the start is YYYY-MM-DD:HH-MM, no seconds — the
+        // panel's strict parse rejects HH-MM-SS, so catch-up never played.
+        'https://panel.example.com:8080/timeshift/user/pass/60/2026-11-05:20-30/123.m3u8',
       );
     });
 

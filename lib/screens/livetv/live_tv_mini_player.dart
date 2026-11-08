@@ -59,6 +59,7 @@ class LiveTvMiniPlayerDiagnostic {
     required this.reveal,
     required this.videoRectSent,
     this.msToReveal,
+    this.failReason,
   });
 
   /// When the tune started.
@@ -81,6 +82,13 @@ class LiveTvMiniPlayerDiagnostic {
 
   /// Milliseconds from tune start to reveal, when revealed.
   final int? msToReveal;
+
+  /// Why the tune failed, when it did (build #16): the "Could not start
+  /// the live channel" card used to hide every error — the tune swallowed
+  /// them all — so a failed catch-up left nothing to diagnose. The reason
+  /// is a short stage label or the player error's cause tag, never a raw
+  /// URL (a stream URL carries the provider login).
+  final String? failReason;
 }
 
 /// Owns the single player behind the Live TV mini-player (build #12).
@@ -164,6 +172,10 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   DateTime? _tuneStartedAt;
   bool _videoRectSent = false;
 
+  /// Why the current tune failed, when it did (build #16 — see
+  /// [LiveTvMiniPlayerDiagnostic.failReason]).
+  String? _failReason;
+
   /// How the current tune's surface was revealed ([LiveTvMiniPlayerReveal.none]
   /// while it is still covered).
   LiveTvMiniPlayerReveal get firstFrameReveal => _revealMethod;
@@ -193,6 +205,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       msToReveal: startedAt == null || _revealMethod == LiveTvMiniPlayerReveal.none
           ? null
           : DateTime.now().difference(startedAt).inMilliseconds,
+      failReason: _failReason,
     );
   }
 
@@ -247,6 +260,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _revealMethod = LiveTvMiniPlayerReveal.none;
     _tuneStartedAt = DateTime.now();
     _videoRectSent = false;
+    _failReason = null;
     hasFirstFrame.value = false;
   }
 
@@ -295,7 +309,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
 
     final serverInfo = liveTvServerInfoForChannel(multiServer, channel);
     if (serverInfo == null) {
-      _fail();
+      _fail('no live server for this channel');
       return;
     }
     final client = multiServer.getClientForServer(ServerId(serverInfo.serverId));
@@ -312,7 +326,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       return;
     }
     if (session == null) {
-      _fail();
+      _fail('startPlayback returned no session');
       return;
     }
     _session = session;
@@ -336,7 +350,7 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       return;
     }
     if (url == null) {
-      _fail();
+      _fail('no stream URL for the requested offset');
       return;
     }
 
@@ -346,9 +360,9 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       // player applies before every live open.
       await player.setProperty('force-seekable', 'no');
       await player.open(Media(url, headers: const {'Accept-Language': 'en'}), play: true, isLive: true);
-    } catch (_) {
+    } catch (e) {
       if (generation != _generation) return;
-      _fail();
+      _fail('open failed (${e.runtimeType})');
       return;
     }
     if (generation != _generation) return;
@@ -440,8 +454,8 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       _isBuffering = buffering;
       _notify();
     });
-    _errorSubscription = player.streams.error.listen((_) => _onPlayerError());
-    _fileLoadFailedSubscription = player.streams.fileLoadFailed.listen((_) => _onPlayerError());
+    _errorSubscription = player.streams.error.listen((error) => _onPlayerError(_reasonForError(error)));
+    _fileLoadFailedSubscription = player.streams.fileLoadFailed.listen((_) => _onPlayerError('file failed to load'));
     // Build #15: subscribe the moment the player is created — BEFORE any
     // open() — so a restart fired during the open is caught. The build #13
     // Video-widget subscription mounted after open() returned and missed it.
@@ -455,12 +469,27 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   /// A load/playback failure once a stream is up: the slot shows the
   /// failed card with a retry. Errors during a tune are handled by the
   /// tune itself (the open's catch), not here.
-  void _onPlayerError() {
+  void _onPlayerError([String? reason]) {
     if (_status != LiveTvMiniPlayerStatus.active) return;
-    _fail();
+    _fail(reason);
   }
 
-  void _fail() {
+  /// Short failure reason for the diagnostic from a player error (build
+  /// #16). The cause tag wins when the backend set one (`server-http-404`
+  /// names the failure outright); otherwise the message's first line,
+  /// truncated, with any `://user:pass@` credentials stripped — a stream
+  /// URL must never land in a readout the user might screenshot.
+  static String _reasonForError(PlayerError error) {
+    final cause = error.cause;
+    if (cause != null && cause.isNotEmpty) return cause;
+    var line = error.message.split('\n').first.trim();
+    line = line.replaceAll(RegExp(r'://[^/\s]*@'), '://…@');
+    if (line.length > 120) line = '${line.substring(0, 117)}…';
+    return line.isEmpty ? 'player error' : line;
+  }
+
+  void _fail([String? reason]) {
+    _failReason = reason;
     _status = LiveTvMiniPlayerStatus.failed;
     _isPlaying = false;
     _isBuffering = false;

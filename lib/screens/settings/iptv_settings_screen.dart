@@ -375,6 +375,11 @@ class _MiniPlayerDiagnosticTile extends StatelessWidget {
                     diagnostic.videoRectSent ? t.iptv.miniPlayerRectYes : t.iptv.miniPlayerRectNo,
                     style: theme.textTheme.bodyMedium,
                   ),
+                  if (diagnostic.failReason != null)
+                    Text(
+                      t.iptv.miniPlayerFailReason(reason: diagnostic.failReason!),
+                      style: theme.textTheme.bodyMedium,
+                    ),
                 ],
               ],
             ),

@@ -5,10 +5,11 @@ import '../../media/playback_rate.dart';
 import '../models.dart';
 import 'audio_rendering_mode.dart';
 import 'platform/player_android.dart';
+import 'platform/player_linux.dart';
+import 'platform/player_native_android.dart';
 import 'player_native.dart';
 import 'player_state.dart';
 import 'player_streams.dart';
-import 'platform/player_linux.dart';
 import 'platform/player_windows.dart';
 
 export 'player_base.dart';
@@ -407,7 +408,11 @@ abstract class Player {
       if (useExo) {
         return PlayerAndroid(); // ExoPlayer (opt-in)
       }
-      return PlayerNative(hardwareDecoding: hardwareDecoding); // MPV (default)
+      // Build #16: the Android mpv player carries VideoRectSupport so
+      // `Video` sends the native surface container's rect (mini-player
+      // hole vs fullscreen). The plain PlayerNative stays rect-less for
+      // iOS/macOS, where no native setVideoRect handler exists.
+      return PlayerNativeAndroid(hardwareDecoding: hardwareDecoding); // MPV (default)
     }
     if (Platform.isMacOS || Platform.isIOS) {
       return PlayerNative();

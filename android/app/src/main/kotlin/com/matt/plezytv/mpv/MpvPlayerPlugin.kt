@@ -235,6 +235,7 @@ open class MpvPlayerPlugin(
       "command" -> handleCommand(call, result)
       "setVisible" -> handleSetVisible(call, result)
       "updateFrame" -> handleUpdateFrame(result)
+      "setVideoRect" -> handleSetVideoRect(call, result)
       "setVideoFrameRate" -> handleSetVideoFrameRate(call, result)
       "clearVideoFrameRate" -> handleClearVideoFrameRate(result)
       "requestAudioFocus" -> handleRequestAudioFocus(result)
@@ -375,6 +376,13 @@ open class MpvPlayerPlugin(
           // not the SurfaceView directly (matching ExoPlayer's approach).
           // No-op on the audio-only core, which has no render layer.
           core.setVisible(false)
+          // A rect Dart sent before the core existed (the mini-player's
+          // Video mounts before the first open initializes it) is applied
+          // now instead of leaving the container full-window.
+          pendingVideoRect?.let { rect ->
+            core.setVideoRect(rect.left, rect.top, rect.right, rect.bottom)
+            pendingVideoRect = null
+          }
           PlayerDebugLog.d(tag) { "Initialized: true" }
         }
         completePendingInits(attempt, success = !stale && success)
@@ -613,6 +621,41 @@ open class MpvPlayerPlugin(
 
   private fun handleUpdateFrame(result: MethodChannel.Result) {
     playerCore?.updateFrame()
+    result.success(null)
+  }
+
+  // A rect Dart sent before the core existed (the mini-player's Video
+  // mounts before the first open initializes the core). Applied when the
+  // init succeeds; a later rect overwrites it. The core itself remembers
+  // the last rect once it has one.
+  private var pendingVideoRect: android.graphics.Rect? = null
+
+  /**
+   * Move/resize the surface container to the rect Dart's `Video` occupies
+   * (build #16). The video surface and OSD plane are full-container, so a
+   * hole-sized container puts the picture in the mini-player's 16:9 hole
+   * instead of centered in the full window behind opaque Flutter UI.
+   */
+  private fun handleSetVideoRect(call: MethodCall, result: MethodChannel.Result) {
+    val left = call.argument<Number>("left")?.toInt()
+    val top = call.argument<Number>("top")?.toInt()
+    val right = call.argument<Number>("right")?.toInt()
+    val bottom = call.argument<Number>("bottom")?.toInt()
+    if (left == null || top == null || right == null || bottom == null) {
+      result.error("INVALID_ARGS", "setVideoRect needs left/top/right/bottom", null)
+      return
+    }
+    // The audio-only core has no surface; there is nothing to position.
+    if (audioOnly) {
+      result.success(null)
+      return
+    }
+    val core = playerCore
+    if (core == null) {
+      pendingVideoRect = android.graphics.Rect(left, top, right, bottom)
+    } else {
+      core.setVideoRect(left, top, right, bottom)
+    }
     result.success(null)
   }
 

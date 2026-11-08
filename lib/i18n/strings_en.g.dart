@@ -3653,6 +3653,12 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2262 => [
+		'Categories now scroll smoothly — the list only builds the rows on screen instead of all 1,200 at once',
+		'Live TV mini-player should show video now: the app finally tells Android where the video goes, so the picture sits in the mini-player instead of hidden behind the guide',
+		'Catch-up now plays from the start of a past programme — the app was asking the provider for the time in a format it does not accept',
+		'When a channel will not start, Settings → IPTV now says why instead of just showing “Could not start the live channel”',
+	];
 	List<String> get changelog2261 => [
 		'Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame',
 		'Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left',
@@ -6676,6 +6682,9 @@ class Translations$iptv$en {
 
 	/// en: 'Video rect sent: no'
 	String get miniPlayerRectNo => 'Video rect sent: no';
+
+	/// en: 'Could not start: ${reason}'
+	String miniPlayerFailReason({required Object reason}) => 'Could not start: ${reason}';
 
 	/// en: '${count} groups off'
 	String groupsOff({required Object count}) => '${count} groups off';
@@ -10014,6 +10023,10 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2262.0' => 'Categories now scroll smoothly — the list only builds the rows on screen instead of all 1,200 at once',
+			'about.changelog2262.1' => 'Live TV mini-player should show video now: the app finally tells Android where the video goes, so the picture sits in the mini-player instead of hidden behind the guide',
+			'about.changelog2262.2' => 'Catch-up now plays from the start of a past programme — the app was asking the provider for the time in a format it does not accept',
+			'about.changelog2262.3' => 'When a channel will not start, Settings → IPTV now says why instead of just showing “Could not start the live channel”',
 			'about.changelog2261.0' => 'Live TV mini-player should show video now, not just sound — it reveals itself even when the player never reports its first frame',
 			'about.changelog2261.1' => 'Settings has a new Mini-player readout that says how the last tune showed its video, for figuring out any black video left',
 			'about.changelog2261.2' => 'Turning categories off no longer touches Plex — Plex libraries stay loaded while Trex filters change',
@@ -10259,12 +10272,12 @@ extension on Translations {
 			'explore.detail.released' => 'Released',
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.addedOn' => ({required Object date}) => 'Added ${date}',
 			'explore.detail.yourRating' => 'Your rating',
 			'explore.detail.budget' => 'Budget',
 			'explore.detail.revenue' => 'Box office',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.contentAdvisory' => 'Age guidance',
 			'explore.detail.tags' => 'Tags',
 			'explore.detail.revealSpoilerTags' => 'Show spoiler tags',
@@ -10773,12 +10786,12 @@ extension on Translations {
 			'companionRemote.pairing.hostAddressHint' => '192.168.1.100:48632',
 			'companionRemote.pairing.connecting' => 'Connecting...',
 			'companionRemote.pairing.searchingForDevices' => 'Looking for devices...',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.pairing.noDevicesFound' => 'No devices found on your network',
 			'companionRemote.pairing.noDevicesHint' => 'Open PlezTV on desktop and use the same Wi-Fi',
 			'companionRemote.pairing.availableDevices' => 'Available Devices',
 			'companionRemote.pairing.manualConnection' => 'Manual Connection',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.pairing.cryptoInitFailed' => 'Couldn\'t start secure connection. Sign in to Plex first.',
 			'companionRemote.pairing.validationHostRequired' => 'Please enter host address',
 			'companionRemote.pairing.validationHostFormat' => 'Format must be IP:port (e.g., 192.168.1.100:48632)',
@@ -11267,6 +11280,7 @@ extension on Translations {
 			'iptv.miniPlayerRestartNo' => 'Restart seen: no',
 			'iptv.miniPlayerRectYes' => 'Video rect sent: yes',
 			'iptv.miniPlayerRectNo' => 'Video rect sent: no',
+			'iptv.miniPlayerFailReason' => ({required Object reason}) => 'Could not start: ${reason}',
 			'iptv.groupsOff' => ({required Object count}) => '${count} groups off',
 			'iptvCategories.title' => ({required Object name}) => '${name} categories',
 			'iptvCategories.intro' => 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.',
@@ -11286,6 +11300,8 @@ extension on Translations {
 			'iptvCategories.loadFailed' => 'Could not load the categories. Check the connection and try again.',
 			'iptvCategories.sectionLoadFailed' => 'Could not load this section.',
 			'iptvCategories.empty' => 'No categories found for this connection.',
+			_ => null,
+		} ?? switch (path) {
 			'iptvCategories.retry' => 'Retry',
 			'iptvCategories.persistFailed' => 'Could not save that change. Try again.',
 			_ => null,

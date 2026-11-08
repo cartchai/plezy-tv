@@ -12,6 +12,19 @@ package com.matt.plezytv.shared
 interface SurfacePlayerCore {
   fun setVisible(visible: Boolean)
   fun updateFrame()
+
+  /**
+   * Move/resize the native surface container to the given physical-pixel
+   * rectangle (build #16): the Dart `Video` widget sends the rect its
+   * layout occupies — the mini-player's 16:9 hole, or the full window for
+   * the fullscreen player. Both backends fit the video into the container,
+   * so a hole-sized container puts the picture in the hole instead of
+   * centered in the full window behind opaque Flutter UI. A rect that
+   * covers the whole window restores fullscreen. The core remembers the
+   * last rect and applies it when the container is (re)created, so a rect
+   * arriving before the container exists is not lost.
+   */
+  fun setVideoRect(left: Int, top: Int, right: Int, bottom: Int)
   fun onPipModeChanged(isInPipMode: Boolean)
   fun requestAudioFocus(): Boolean
   fun abandonAudioFocus()

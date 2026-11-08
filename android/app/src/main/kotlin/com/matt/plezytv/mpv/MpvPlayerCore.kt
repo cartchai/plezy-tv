@@ -279,6 +279,14 @@ class MpvPlayerCore private constructor(
   private var osdSurfaceView: SurfaceView? = null
   private var surfaceContainer: android.widget.FrameLayout? = null
 
+  /** Last video rect Dart asked for (physical pixels), or null for the full
+   * window (build #16). The container is resized to it; both backends fit
+   * the video into the container, so a hole-sized container puts the
+   * picture in the hole instead of centered in the full window behind
+   * opaque Flutter UI. Remembered so a rect arriving before the container
+   * exists is applied when it is created. */
+  private var requestedVideoRect: android.graphics.Rect? = null
+
   @Volatile private var pendingOsdSurface: Surface? = null
 
   @Volatile private var attachedOsdSurface: Surface? = null
@@ -977,6 +985,10 @@ class MpvPlayerCore private constructor(
 
         val contentView = PlayerSurfaceHost.attachToContent(activity, surfaceContainer!!)
         flutterOverlayApplied = PlayerSurfaceHost.ensureFlutterOverlayOnTop(contentView, surfaceContainer)
+        // A rect that arrived before the core existed (the mini-player's
+        // Video mounts before the first open initializes the core) is
+        // applied now instead of leaving the container full-window.
+        applyRequestedVideoRect()
         ensureFlutterOverlayOnTop()
         overlayLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
           ensureFlutterOverlayOnTop()
@@ -2029,6 +2041,62 @@ class MpvPlayerCore private constructor(
     lp.height = android.widget.FrameLayout.LayoutParams.MATCH_PARENT
     lp.gravity = android.view.Gravity.NO_GRAVITY
     view.layoutParams = lp
+  }
+
+  /**
+   * Move/resize the surface container to the given physical-pixel rect
+   * (build #16, [SurfacePlayerCore.setVideoRect]). The video surface and
+   * the OSD plane are both full-container, so shrinking the container to
+   * the mini-player's 16:9 hole puts the picture — and the subtitles — in
+   * the hole; a full-window rect restores fullscreen. The surface view
+   * re-fits itself into the resized container on the next layout pass via
+   * the global-layout listener ([applyVideoRectLayout]), so this only
+   * moves the container.
+   */
+  override fun setVideoRect(left: Int, top: Int, right: Int, bottom: Int) {
+    requestedVideoRect = android.graphics.Rect(left, top, right, bottom)
+    runOnMain { applyRequestedVideoRect() }
+  }
+
+  /** Apply [requestedVideoRect] to the surface container, or restore the
+   * full window when there is none. No-op before the container exists —
+   * the init path calls this right after attaching it, so a rect that
+   * arrived before the core was created is not lost. The params are only
+   * written when they actually change: assigning them requests layout,
+   * and the global-layout listener would otherwise re-trigger forever. */
+  private fun applyRequestedVideoRect() {
+    val container = surfaceContainer ?: return
+    val rect = requestedVideoRect
+    val lp =
+      container.layoutParams as? android.widget.FrameLayout.LayoutParams
+        ?: android.widget.FrameLayout.LayoutParams(
+          android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+          android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        )
+    if (rect == null) {
+      if (lp.width == android.view.ViewGroup.LayoutParams.MATCH_PARENT &&
+        lp.height == android.view.ViewGroup.LayoutParams.MATCH_PARENT &&
+        lp.leftMargin == 0 &&
+        lp.topMargin == 0
+      ) {
+        return
+      }
+      lp.width = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+      lp.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+      lp.leftMargin = 0
+      lp.topMargin = 0
+      lp.gravity = android.view.Gravity.NO_GRAVITY
+    } else {
+      val width = (rect.right - rect.left).coerceAtLeast(0)
+      val height = (rect.bottom - rect.top).coerceAtLeast(0)
+      if (lp.width == width && lp.height == height && lp.leftMargin == rect.left && lp.topMargin == rect.top) return
+      lp.width = width
+      lp.height = height
+      lp.leftMargin = rect.left
+      lp.topMargin = rect.top
+      lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+    }
+    container.layoutParams = lp
   }
 
   private fun rememberSurfaceSize(width: Int, height: Int) {

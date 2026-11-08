@@ -11,6 +11,7 @@ import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../services/iptv/xtream_api.dart';
+import '../../theme/mono_tokens.dart';
 import '../../utils/iptv_initials.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
@@ -66,6 +67,26 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
   bool _groupsFailed = false;
   List<IptvInitial>? _initials;
   bool _initialsFailed = false;
+
+  /// Hidden-row counts, cached (build #16): build() used to rescan all
+  /// 1,236 rows on EVERY build (`_allRows.where(_isHidden)`) and every
+  /// section rescanned its rows for its heading. The counts only change
+  /// when the lists load or a toggle changes the connection, so they are
+  /// recomputed exactly then ([_recomputeCounts]) and read from the fields
+  /// below during build.
+  int _liveHidden = 0;
+  int _moviesHidden = 0;
+  int _seriesHidden = 0;
+  int _groupsHidden = 0;
+  int _hiddenTotal = 0;
+
+  void _recomputeCounts() {
+    _liveHidden = _hiddenCount(_live);
+    _moviesHidden = _hiddenCount(_movies);
+    _seriesHidden = _hiddenCount(_series);
+    _groupsHidden = _hiddenCount(_groups);
+    _hiddenTotal = _liveHidden + _moviesHidden + _seriesHidden + _groupsHidden;
+  }
 
   bool get _isXtream => _connection is XtreamConnection;
 
@@ -165,6 +186,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
         _seriesFailed = seriesFailed;
         _failed = live == null && movies == null && series == null;
         _loading = false;
+        _recomputeCounts();
       });
     } else {
       List<_CategoryRow>? groups;
@@ -180,6 +202,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
         _groupsFailed = groupsFailed;
         _failed = groups == null;
         _loading = false;
+        _recomputeCounts();
       });
     }
 
@@ -204,19 +227,14 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
 
   int _hiddenCount(List<_CategoryRow>? rows) => rows == null ? 0 : rows.where(_isHidden).length;
 
-  /// Every category row on the screen, for the live "N categories hidden"
-  /// confirmation line.
-  Iterable<_CategoryRow> get _allRows sync* {
-    for (final rows in [_live, _movies, _series, _groups]) {
-      if (rows != null) yield* rows;
-    }
-  }
-
   Future<void> _persist(Connection updated) async {
     final previous = _connection;
     // Optimistic: the row and the counts update in the same frame as the
     // tap. The persist below is local storage; if it fails, revert.
-    setState(() => _connection = updated);
+    setState(() {
+      _connection = updated;
+      _recomputeCounts();
+    });
     try {
       await context.read<ConnectionRegistry>().upsert(updated);
       if (!mounted) return;
@@ -227,7 +245,10 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       unawaited(context.read<MultiServerProvider>().refreshIptvConnection(updated));
     } catch (e) {
       if (!mounted) return;
-      setState(() => _connection = previous);
+      setState(() {
+        _connection = previous;
+        _recomputeCounts();
+      });
       showErrorSnackBar(context, t.iptvCategories.persistFailed);
     }
   }
@@ -280,7 +301,6 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hiddenTotal = _allRows.where(_isHidden).length;
     return FocusedScrollScaffold(
       title: Text(t.iptvCategories.title(name: _connection.displayName)),
       slivers: [
@@ -293,7 +313,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
                 Text(t.iptvCategories.intro, style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 Text(
-                  t.iptvCategories.hiddenTotal(count: hiddenTotal),
+                  t.iptvCategories.hiddenTotal(count: _hiddenTotal),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ],
@@ -329,22 +349,26 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
               heading: t.iptvCategories.liveTvHeading,
               rows: _live,
               failed: _liveFailed,
+              hidden: _liveHidden,
             ),
             _section(
               heading: t.iptvCategories.moviesHeading,
               rows: _movies,
               failed: _moviesFailed,
+              hidden: _moviesHidden,
             ),
             _section(
               heading: t.iptvCategories.seriesHeading,
               rows: _series,
               failed: _seriesFailed,
+              hidden: _seriesHidden,
             ),
           ] else
             _section(
               heading: t.iptvCategories.groupsHeading,
               rows: _groups,
               failed: _groupsFailed,
+              hidden: _groupsHidden,
             ),
           _initialsSection(),
           const SliverPadding(padding: EdgeInsets.only(top: 24)),
@@ -353,7 +377,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
     );
   }
 
-  Widget _section({required String heading, required List<_CategoryRow>? rows, required bool failed}) {
+  Widget _section({required String heading, required List<_CategoryRow>? rows, required bool failed, required int hidden}) {
     if (rows == null) {
       if (!failed) return const SliverToBoxAdapter(child: SizedBox.shrink());
       return SliverPadding(
@@ -371,21 +395,45 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
         ),
       );
     }
-    final hidden = _hiddenCount(rows);
+    final title = '$heading · ${t.iptvCategories.sectionCount(total: rows.length, hidden: hidden)}';
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      sliver: SliverToBoxAdapter(
-        child: SettingsGroup(
-          title: '$heading · ${t.iptvCategories.sectionCount(total: rows.length, hidden: hidden)}',
-          children: [
-            for (final row in rows)
-              FocusableSwitchListTile(
-                title: Text(row.name),
-                value: !_isHidden(row),
-                onChanged: (shown) => _toggleCategory(row.id, shown),
-              ),
-          ],
-        ),
+      sliver: SliverList.builder(
+        itemCount: rows.length + 1,
+        itemBuilder: (context, index) {
+          if (index == 0) return SettingsSectionHeader(title);
+          final i = index - 1;
+          final row = rows[i];
+          return _groupCard(
+            context,
+            index: i,
+            total: rows.length,
+            child: FocusableSwitchListTile(
+              title: Text(row.name),
+              value: !_isHidden(row),
+              onChanged: (shown) => _toggleCategory(row.id, shown),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// One card in a virtualized section (build #16). [SettingsGroup] wraps
+  /// every child in the same Material card — a plain Column — so a
+  /// [SliverList.builder] row has to build the card itself: same surface,
+  /// same corner radii for its position in the group ([groupItemRadii]),
+  /// same [groupGap] between cards. The heading is NOT a card (it is the
+  /// builder's item 0, a [SettingsSectionHeader]).
+  Widget _groupCard(BuildContext context, {required int index, required int total, required Widget child}) {
+    final t = tokens(context);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, index == 0 ? 0 : t.groupGap, 16, 0),
+      child: Material(
+        color: t.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: groupItemRadii(context, index, total)),
+        child: child,
       ),
     );
   }
@@ -415,42 +463,65 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       );
     }
     final hidden = _hiddenInitials.length;
+    final title =
+        '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.sectionCount(total: initials.length, hidden: hidden)}';
+    // Build #16: virtualized like the category sections — the subheading
+    // and the Show/Hide buttons are card items 0–1, the initials follow.
+    // A toggle rebuilds only the rows in view (see [_groupCard]).
     return SliverPadding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      sliver: SliverToBoxAdapter(
-        child: SettingsGroup(
-          title:
-              '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.sectionCount(total: initials.length, hidden: hidden)}',
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Text(
-                _isXtream ? t.iptvCategories.initialsSubheading : t.iptvCategories.initialsSubheadingM3u,
-                style: Theme.of(context).textTheme.bodySmall,
+      sliver: SliverList.builder(
+        itemCount: initials.length + 3,
+        itemBuilder: (context, index) {
+          if (index == 0) return SettingsSectionHeader(title);
+          final i = index - 1;
+          if (i == 0) {
+            return _groupCard(
+              context,
+              index: 0,
+              total: initials.length + 2,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                child: Text(
+                  _isXtream ? t.iptvCategories.initialsSubheading : t.iptvCategories.initialsSubheadingM3u,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
-            ),
-            Row(
-              children: [
-                TextButton(
-                  onPressed: () => _setAllInitials(true),
-                  child: Text(t.iptvCategories.showAll),
-                ),
-                TextButton(
-                  onPressed: () => _setAllInitials(false),
-                  child: Text(t.iptvCategories.hideAll),
-                ),
-              ],
-            ),
-            for (final initial in initials)
-              FocusableSwitchListTile(
-                title: Text(
-                  t.iptvCategories.initialRow(initial: initial.initial, count: initial.count),
-                ),
-                value: !_hiddenInitials.contains(initial.initial),
-                onChanged: (shown) => _toggleInitial(initial.initial, shown),
+            );
+          }
+          if (i == 1) {
+            return _groupCard(
+              context,
+              index: 1,
+              total: initials.length + 2,
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: () => _setAllInitials(true),
+                    child: Text(t.iptvCategories.showAll),
+                  ),
+                  TextButton(
+                    onPressed: () => _setAllInitials(false),
+                    child: Text(t.iptvCategories.hideAll),
+                  ),
+                ],
               ),
-          ],
-        ),
+            );
+          }
+          final initial = initials[i - 2];
+          return _groupCard(
+            context,
+            index: i,
+            total: initials.length + 2,
+            child: FocusableSwitchListTile(
+              title: Text(
+                t.iptvCategories.initialRow(initial: initial.initial, count: initial.count),
+              ),
+              value: !_hiddenInitials.contains(initial.initial),
+              onChanged: (shown) => _toggleInitial(initial.initial, shown),
+            ),
+          );
+        },
       ),
     );
   }

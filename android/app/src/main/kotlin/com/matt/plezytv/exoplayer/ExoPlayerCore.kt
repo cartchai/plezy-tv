@@ -185,6 +185,14 @@ class ExoPlayerCore(private val activity: Activity) :
 
   private var surfaceView: SurfaceView? = null
   private var surfaceContainer: FrameLayout? = null
+
+  /** Last video rect Dart asked for (physical pixels), or null for the full
+   * window (build #16) — same contract as [MpvPlayerCore.requestedVideoRect]:
+   * the container is resized to it, the AspectRatioFrameLayout fits the
+   * video into it, and the subtitle views (full-container) follow the hole.
+   * Remembered so a rect arriving before the container exists is applied
+   * when it is created. */
+  private var requestedVideoRect: android.graphics.Rect? = null
   private var videoAspectContainer: AspectRatioFrameLayout? = null
   private var subtitleView: SubtitleView? = null
   private var bitmapSubtitleView: SubtitleView? = null
@@ -662,6 +670,10 @@ class ExoPlayerCore(private val activity: Activity) :
 
       val contentView = PlayerSurfaceHost.attachToContent(activity, surfaceContainer!!)
 
+      // A rect that arrived before the core existed (the mini-player's
+      // Video mounts before the first open initializes the core) is
+      // applied now instead of leaving the container full-window.
+      applyRequestedVideoRect()
       ensureFlutterOverlayOnTop()
       overlayLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
         ensureFlutterOverlayOnTop()
@@ -4109,6 +4121,61 @@ class ExoPlayerCore(private val activity: Activity) :
         }
       }
     }
+  }
+
+  /**
+   * Move/resize the surface container to the given physical-pixel rect
+   * (build #16, [SurfacePlayerCore.setVideoRect]). The AspectRatioFrameLayout
+   * is full-container with RESIZE_MODE_FIT, so shrinking the container to
+   * the mini-player's 16:9 hole puts the picture in the hole; a full-window
+   * rect restores fullscreen. Subtitle views are full-container and follow.
+   * The global-layout listener re-runs [updateSurfaceViewSize] on the next
+   * layout pass, so this only moves the container.
+   */
+  override fun setVideoRect(left: Int, top: Int, right: Int, bottom: Int) {
+    requestedVideoRect = android.graphics.Rect(left, top, right, bottom)
+    activity.runOnUiThread { applyRequestedVideoRect() }
+  }
+
+  /** Apply [requestedVideoRect] to the surface container, or restore the
+   * full window when there is none. No-op before the container exists —
+   * the init path calls this right after attaching it, so a rect that
+   * arrived before the core was created is not lost. The params are only
+   * written when they actually change: assigning them requests layout,
+   * and the global-layout listener would otherwise re-trigger forever. */
+  private fun applyRequestedVideoRect() {
+    val container = surfaceContainer ?: return
+    val rect = requestedVideoRect
+    val lp =
+      container.layoutParams as? FrameLayout.LayoutParams
+        ?: FrameLayout.LayoutParams(
+          ViewGroup.LayoutParams.MATCH_PARENT,
+          ViewGroup.LayoutParams.MATCH_PARENT
+        )
+    if (rect == null) {
+      if (lp.width == ViewGroup.LayoutParams.MATCH_PARENT &&
+        lp.height == ViewGroup.LayoutParams.MATCH_PARENT &&
+        lp.leftMargin == 0 &&
+        lp.topMargin == 0
+      ) {
+        return
+      }
+      lp.width = ViewGroup.LayoutParams.MATCH_PARENT
+      lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+      lp.leftMargin = 0
+      lp.topMargin = 0
+      lp.gravity = Gravity.NO_GRAVITY
+    } else {
+      val width = (rect.right - rect.left).coerceAtLeast(0)
+      val height = (rect.bottom - rect.top).coerceAtLeast(0)
+      if (lp.width == width && lp.height == height && lp.leftMargin == rect.left && lp.topMargin == rect.top) return
+      lp.width = width
+      lp.height = height
+      lp.leftMargin = rect.left
+      lp.topMargin = rect.top
+      lp.gravity = Gravity.TOP or Gravity.START
+    }
+    container.layoutParams = lp
   }
 
   // Audio Focus

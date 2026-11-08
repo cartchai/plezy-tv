@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **379 files changed, 33323 insertions, 3250 deletions**
+- Scale of the fork vs base: **390 files changed, 35678 insertions, 3259 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-07 after the build #14 commit — was 366 files /
-  +29,593/−3,174 at build #11).
+  verified 2026-11-08 after the build #16 commit — was 379 files /
+  +33,323/−3,250 at build #14; build #15's commit did not update this line).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -508,6 +508,82 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   layouts, image loading, the `fetchMoreHubItems` full-list build.
 - Progress notes: `IPTV_BUILD14_NOTES.md` (§6 crash readout, §10 research
   fold-ins).
+
+### 13. Build #15 — Plex live-TV switch, guide search, black mini-player (2nd fix), categories rework, EPG cache, favourites, Plex isolation (v2.25.11)
+(Added retrospectively in the build #16 commit — build #15's own commit did
+not update this file.)
+- Per-server Plex live-TV switch: Settings → Live TV, one switch per
+  live-TV server, storage `livetv_hidden_server_ids`, applied in
+  `checkLiveTvAvailability()` (`lib/providers/multi_server_provider.dart`).
+- Guide search scoped to the selected source; IPTV programme results from
+  cached EPG only; jump fallback (switch source + retry once, else
+  snackbar) (`lib/screens/livetv/tabs/guide_tab.dart`).
+- Black mini-player, 2nd fix (FAILED on the phone — see build #16 §14):
+  controller-owned `hasFirstFrame` + 5s watchdog reveal + Mini-player
+  diagnostic row in Settings → IPTV (`lib/screens/livetv/live_tv_mini_player.dart`,
+  `lib/screens/settings/iptv_settings_screen.dart`).
+- Categories rework from scratch: one "Trex categories" screen per
+  connection (`lib/screens/settings/iptv_categories_screen.dart`), every
+  category visible with counts, immediate toggles; NEW storage keys
+  `hiddenCategoryIds` / `hiddenCategoryInitials` + one-time migration of
+  the 161 disabled initials; the old selectors and `IptvInitialsChecklist`
+  deleted.
+- EPG xmltv feed persisted to disk (stale-while-revalidate, 5-min
+  negative cache, short-EPG concurrency capped at 4 + 15s first-paint
+  timeout) (`lib/services/iptv/xtream_api.dart`,
+  `lib/media/iptv_live_tv.dart` — see `IPTV_BUILD15_NOTES.md`).
+- Favourites tab in every IPTV library (`LibraryTabType.favorites`) +
+  long-press "Add to favourites" in the catalog menu.
+- Plex isolation (P-1): IPTV-only changes swap the client in place via
+  `MultiServerManager.addIptvConnection` — zero Plex client creations
+  across an IPTV toggle; ADD/REMOVE flows keep their rebinds.
+- Progress notes: `IPTV_BUILD15_NOTES.md` (§9 = 10-step phone-verification
+  checklist). Phone verdicts that became build #16: mini-player still
+  black, Categories laggy, catch-up broken.
+
+### 14. Build #16 — Categories virtualization, Android video-rect path, timeshift stamp, tune-failure diagnostic (v2.25.12)
+- Categories virtualization (`lib/screens/settings/iptv_categories_screen.dart`):
+  each section is a `SliverList.builder` (header as item 0, rows after)
+  instead of one `SliverToBoxAdapter` + `SettingsGroup` Column; rows build
+  their own card via `_groupCard` (same `Material` surface,
+  `groupItemRadii(context, i, total)`, `groupGap`); hidden counts cached
+  (`_liveHidden` / `_moviesHidden` / `_seriesHidden` / `_groupsHidden` /
+  `_hiddenTotal`, recomputed in `_load`/`_persist` only); `_allRows`
+  deleted. Behaviour unchanged (every category visible, immediate toggles).
+- Android video-rect path — Dart: `VideoRectSupport` is now
+  `on PlayerBase` (`lib/mpv/player/video_rect_support.dart`); NEW
+  `lib/mpv/player/platform/player_native_android.dart`
+  (`PlayerNativeAndroid extends PlayerNative with VideoRectSupport`);
+  `Player` factory returns it for Android mpv
+  (`lib/mpv/player/player.dart`); `PlayerAndroid` mixes the mixin in too
+  (`lib/mpv/player/platform/player_android.dart`). iOS/macOS keep the plain
+  `PlayerNative`; `Video` unchanged.
+- Android video-rect path — Kotlin: NEW `setVideoRect(left, top, right,
+  bottom)` on `SurfacePlayerCore`
+  (`android/.../shared/SurfacePlayerCore.kt`), implemented in
+  `MpvPlayerCore` + `ExoPlayerCore` (remember `requestedVideoRect`,
+  resize/reposition the surface container via `FrameLayout.LayoutParams`,
+  applied after `attachToContent`); `"setVideoRect"` handlers in
+  `MpvPlayerPlugin` (pending rect applied at init success) +
+  `ExoPlayerPlugin` (routes via `activeSurfaceCore`, `lastVideoRect`
+  applied at initialize and to fresh mpv fallback cores in
+  `dispatchMpvOpen`).
+- Catch-up: `XtreamApi.timeshiftUrl` start stamp is now `YYYY-MM-DD:HH-MM`
+  (was `...:HH-MM-SS`, which the panel's strict parse rejects)
+  (`lib/services/iptv/xtream_api.dart`).
+- Tune-failure diagnostic: `LiveTvMiniPlayerDiagnostic.failReason`
+  (stage labels at tune failure points + player-error cause tag,
+  credentials stripped) + Settings → IPTV renders it
+  (`lib/screens/livetv/live_tv_mini_player.dart`,
+  `lib/screens/settings/iptv_settings_screen.dart`,
+  `t.iptv.miniPlayerFailReason`).
+- New tests: `test/screens/settings/iptv_categories_screen_scroll_test.dart`
+  (3), `test/mpv/video_android_rect_test.dart` (7),
+  `test/services/iptv/iptv_timeshift_url_test.dart` (3); strengthened
+  `test/screens/livetv/live_tv_mini_player_controller_test.dart`
+  (catch-up stamp shape + fail-reason assertions).
+- Progress notes: `IPTV_BUILD16_NOTES.md`. Research:
+  `~/workspace/tmp_work/plezy-tv-research16/RESEARCH_BUILD16.md`.
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

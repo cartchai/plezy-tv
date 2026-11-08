@@ -263,11 +263,19 @@ static List<XtreamCategory> parseCategoriesBody(String body) =>
 
   /// Catch-up URL. [durationMinutes] is the requested window length in
   /// minutes; [start] is the programme start, formatted
-  /// `YYYY-MM-DD:HH-MM-SS` in UTC (the panel's convention).
+  /// `YYYY-MM-DD:HH-MM` in UTC (the panel's convention).
+  ///
+  /// Build #16: the stamp used to carry seconds (`YYYY-MM-DD:HH-MM-SS`)
+  /// and catch-up never played on the real panel — every documented
+  /// source (UniPlayer catch-up spec, Dispatcharr's Xtream client, the
+  /// Xtream API docs) agrees the start is `YYYY-MM-DD:HH-MM`, no seconds
+  /// ("Strict `YYYY-MM-DD:HH-MM`"). A start the panel cannot parse
+  /// resolves no archive segment, so mpv's open fails and the mini-player
+  /// shows "Could not start the live channel".
   String timeshiftUrl({required String streamId, required int durationMinutes, required DateTime start}) {
     final utc = start.toUtc();
     String two(int n) => n.toString().padLeft(2, '0');
-    final stamp = '${utc.year}-${two(utc.month)}-${two(utc.day)}:${two(utc.hour)}-${two(utc.minute)}-${two(utc.second)}';
+    final stamp = '${utc.year}-${two(utc.month)}-${two(utc.day)}:${two(utc.hour)}-${two(utc.minute)}';
     return '$serverUrl/timeshift/$username/$password/$durationMinutes/$stamp/$streamId.m3u8';
   }
 }

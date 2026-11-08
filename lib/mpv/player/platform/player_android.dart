@@ -6,9 +6,15 @@ import '../../../services/device_performance.dart';
 import '../../../services/settings_service.dart';
 import '../../models.dart';
 import '../player_base.dart';
+import '../video_rect_support.dart';
 
 /// Android implementation using ExoPlayer with ASS subtitle support via libass-android.
-class PlayerAndroid extends PlayerBase {
+///
+/// Build #16: mixes in [VideoRectSupport] so `Video` sends the native
+/// surface container's rect (mini-player hole vs fullscreen) — the ExoPlayer
+/// plugin handles `setVideoRect` by resizing the container, mirroring the
+/// mpv core. Before this, ExoPlayer on Android never received a rect either.
+class PlayerAndroid extends PlayerBase with VideoRectSupport {
   static const _methodChannel = MethodChannel('com.plezy/exo_player');
   static const _eventChannel = EventChannel('com.plezy/exo_player/events');
 
