@@ -69,6 +69,12 @@ class _LibrariesClient implements MediaServerClient {
   @override
   final String serverName = 'Server';
 
+  /// The aggregation bridge reads this to pick the search deadline
+  /// (build #14, SA-12): the fake is a plain non-IPTV server, so it gets
+  /// the standard deadline — the same backend the test people carry.
+  @override
+  MediaBackend get backend => MediaBackend.plex;
+
   final Object? error;
   final List<MediaLibrary> libraries;
   final Object? searchError;

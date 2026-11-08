@@ -40,6 +40,15 @@ class LibraryChangeEvent {
   /// later). Defaults to false: pushes stay paced.
   final bool userInitiated;
 
+  /// True when the change can affect the live-TV catalog (live channels
+  /// or live categories). IPTV background refreshes set this per dataset
+  /// (build #14, SA-4 partial): a VOD- or series-only refresh must NOT
+  /// rebuild the whole Live TV guide — the guide only shows live
+  /// channels. Defaults to true: server pushes and any producer that
+  /// cannot distinguish (Plex/MediaBrowser) must be read as "may include
+  /// live", so the guide still reloads for them.
+  final bool liveCatalogChanged;
+
   const LibraryChangeEvent({
     required this.serverId,
     this.libraryIds = const {},
@@ -48,6 +57,7 @@ class LibraryChangeEvent {
     this.itemsRemoved = false,
     this.itemsUpdated = false,
     this.userInitiated = false,
+    this.liveCatalogChanged = true,
   });
 
   bool get hasChanges => itemsAdded || itemsRemoved || itemsUpdated;

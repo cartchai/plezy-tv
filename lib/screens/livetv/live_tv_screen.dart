@@ -195,6 +195,11 @@ class _LiveTvScreenState extends State<LiveTvScreen>
       // must not reload this guide (and a rebind of one of ours is
       // exactly what this is for).
       if (!_multiServer.liveTvServers.any((s) => s.serverId == event.serverId)) return;
+      // A VOD- or series-only refresh (movies/series background refresh
+      // landing) changes nothing the guide shows — reloading here rebuilt
+      // the whole channel list and re-fetched EPG for visible channels
+      // for nothing (build #14, SA-4 partial).
+      if (!event.liveCatalogChanged) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_channelsLoadFuture != null) {

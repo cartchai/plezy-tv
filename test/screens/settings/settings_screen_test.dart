@@ -728,6 +728,26 @@ void main() {
     },
     skip: !UpdateService.isUpdateCheckAvailable,
   );
+
+  testWidgets('Advanced section shows the Last crash row with no record', (tester) async {
+    final harness = await _pumpSettingsScreen(tester);
+    addTearDown(() => harness.dispose(tester));
+
+    await tester.scrollUntilVisible(find.text(t.settings.lastCrash), 200);
+    // The row reads its record from disk in initState (real dart:io via
+    // the test's fake path provider) — yield to the real event loop, then
+    // pump, until the load lands (same pattern as the guide EPG tests).
+    // No crash was recorded in this test's temp dir, and no launch was
+    // marked, so the row reads "no Dart error recorded".
+    for (var i = 0; i < 10 && find.text(t.settings.lastCrashLoading).evaluate().isNotEmpty; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pump();
+    }
+    expect(find.text(t.settings.lastCrash), findsOneWidget);
+    expect(find.text(t.settings.lastCrashNone), findsOneWidget);
+  });
 }
 
 Finder _navigationTileFor(String title) =>

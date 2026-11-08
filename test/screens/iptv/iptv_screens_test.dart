@@ -110,10 +110,20 @@ class _FakeXtreamApi extends XtreamApi {
     XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
   ];
 
+  /// When true, the unfiltered series call never answers — the diagnostics
+  /// probe hangs, so a test can prove the "Last search" row does not wait
+  /// for it (build #14, UI-2). Per-category calls still answer.
+  bool hangUnfilteredSeries = false;
+
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
-    XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
-  ];
+  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+    if (hangUnfilteredSeries && categoryId == null) {
+      return Completer<List<XtreamSeries>>().future;
+    }
+    return const [
+      XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
+    ];
+  }
 
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
@@ -653,6 +663,69 @@ void main() {
     expect(find.text('Trex'), findsWidgets);
     expect(find.textContaining('Xtream Codes'), findsWidgets);
     expect(find.text(t.iptv.refreshPlaylists), findsOneWidget);
+  });
+
+  testWidgets('Last search shows while the series probe is still running', (tester) async {
+    CredentialVault.resetKeyForTesting();
+    await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async => db.close());
+    final registry = _FakeConnectionRegistry(db);
+    await registry.upsert(_trexConnection());
+
+    // Build the bound client by hand (same fake as _trexClient) so the
+    // test can hang the probe on the SAME api the search ran against.
+    final api = _FakeXtreamApi();
+    final client = IptvClient.xtream(xtreamConnection: _trexConnection());
+    client.testXtreamApi = api;
+    client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
+
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(client);
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    // Run a search first, so the bound client has a last-search record.
+    await tester.runAsync(() => client.searchItems('Alpha Show'));
+    expect(client.lastSearchDiagnostics, isNotNull);
+
+    // Now hang the probe: the diagnostics section's series check never
+    // lands (build #14, UI-2 — the row used to wait on it).
+    api.hangUnfilteredSeries = true;
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          Provider<ConnectionRegistry>.value(value: registry),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Expand the diagnostics section (lazy sliver list: scroll it into
+    // view first). One pump after the tap: the probe is still spinning.
+    await tester.scrollUntilVisible(find.text(t.iptv.catalogDiagnosticsTitle), 200);
+    await tester.tap(find.text(t.iptv.catalogDiagnosticsTitle));
+    await tester.pump();
+
+    // The Last search readout renders synchronously from the in-memory
+    // getter — visible now, while the probe is still spinning. (The
+    // record stores the query lower-cased, as searched.)
+    expect(find.text(t.iptv.lastSearchTitle), findsOneWidget);
+    expect(find.textContaining('alpha show'), findsWidgets);
+    expect(find.text(t.iptv.catalogDiagnosticsLoading), findsOneWidget);
+
+    // Let the probe's 10s timeouts fire so no fake-async timer is left
+    // pending at teardown (the hanging getSeries never answers on its own).
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump();
   });
 
   testWidgets('IPTV settings screen renders the EPG section and its actions work', (tester) async {

@@ -511,7 +511,23 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
   bool _loading = false;
   bool _failed = false;
   IptvCatalogDiagnostics? _diagnostics;
-  IptvSearchDiagnostics? _lastSearch;
+
+  /// The BOUND client (the one that ran the searches), resolved without
+  /// awaiting anything — the "Last search" readout is an in-memory getter
+  /// on it, so it renders synchronously (build #14, UI-2). It used to be
+  /// set in [_load] next to the series probe, which meant the row only
+  /// appeared after the probe finished — up to ~40s on a slow panel, never
+  /// if the probe failed (and then it wrongly read "No search yet").
+  IptvClient? _boundClient() {
+    try {
+      final bound = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (bound is IptvClient) return bound;
+    } catch (_) {
+      // No provider above us, or the connection is not bound: a fresh
+      // client has no last-search record, so the row reads "no search yet".
+    }
+    return null;
+  }
 
   Future<void> _load() async {
     if (_loading) return;
@@ -519,10 +535,9 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
       _loading = true;
       _failed = false;
     });
-    // The LAST search readout lives on the BOUND client (the one that ran
-    // the searches), not a fresh one — resolve it, falling back to a
-    // fresh client when the connection isn't bound (a fresh client has
-    // no last-search record, so the row shows "no search yet").
+    // The probe runs on the BOUND client (the one that ran the searches),
+    // not a fresh one — resolve it, falling back to a fresh client when
+    // the connection isn't bound.
     IptvClient? liveClient;
     try {
       final bound = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
@@ -536,7 +551,6 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
       if (!mounted) return;
       setState(() {
         _diagnostics = diagnostics;
-        _lastSearch = client.lastSearchDiagnostics;
       });
     } catch (_) {
       if (!mounted) return;
@@ -571,6 +585,44 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
     );
   }
 
+  /// The "Last search" readout, rendered synchronously from the bound
+  /// client's in-memory getter — never gated on the series probe (UI-2).
+  /// Lives above the probe section so it is visible the moment the row is
+  /// expanded, even while the probe is still spinning.
+  Widget _buildLastSearch(ThemeData theme) {
+    final lastSearch = _boundClient()?.lastSearchDiagnostics;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(t.iptv.lastSearchTitle, style: theme.textTheme.titleSmall),
+        if (lastSearch == null)
+          Text(t.iptv.lastSearchNone, style: theme.textTheme.bodySmall)
+        else ...[
+          Text(
+            t.iptv.lastSearchQuery(
+              query: lastSearch.query,
+              totalMs: lastSearch.totalMs,
+              scoped: lastSearch.scoped ? t.iptv.lastSearchScopedSuffix : '',
+            ),
+            style: theme.textTheme.bodySmall,
+          ),
+          Text(
+            _lastSearchSectionLine('Movies', lastSearch.movies),
+            style: theme.textTheme.bodySmall,
+          ),
+          Text(
+            _lastSearchSectionLine('Series', lastSearch.series),
+            style: theme.textTheme.bodySmall,
+          ),
+          Text(
+            _lastSearchSectionLine('Live TV', lastSearch.live),
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -594,81 +646,62 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
         if (_expanded)
           Padding(
             padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-            child: _loading
-                ? Text(t.iptv.catalogDiagnosticsLoading, style: theme.textTheme.bodySmall)
-                : _failed
-                    ? Row(
-                        children: [
-                          Expanded(
-                            child: Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall),
-                          ),
-                          TextButton(
-                            onPressed: _load,
-                            child: Text(t.common.retry),
-                          ),
-                        ],
-                      )
-                    : diagnostics == null
-                        ? Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall)
-                        : Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLastSearch(theme),
+                const SizedBox(height: 8),
+                _loading
+                    ? Text(t.iptv.catalogDiagnosticsLoading, style: theme.textTheme.bodySmall)
+                    : _failed
+                        ? Row(
                             children: [
-                              Text(
-                                t.iptv.catalogDiagnosticsUnfilteredRows(count: diagnostics.unfilteredSeriesRows),
-                                style: theme.textTheme.bodySmall,
+                              Expanded(
+                                child: Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall),
                               ),
-                              Text(
-                                t.iptv.catalogDiagnosticsCategoryCount(count: diagnostics.seriesCategoryCount),
-                                style: theme.textTheme.bodySmall,
+                              TextButton(
+                                onPressed: _load,
+                                child: Text(t.common.retry),
                               ),
-                              for (final entry in diagnostics.perCategorySeriesRows.entries)
-                                Text(
-                                  t.iptv.catalogDiagnosticsPerCategory(
-                                    category: entry.key,
-                                    count: entry.value,
-                                  ),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              Text(
-                                t.iptv.catalogDiagnosticsDisabledInitials(
-                                  count: diagnostics.disabledInitialsCount,
-                                ),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                              Text(
-                                t.iptv.catalogDiagnosticsDisabledCategories(
-                                  count: diagnostics.disabledCategoriesCount,
-                                ),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(t.iptv.lastSearchTitle, style: theme.textTheme.titleSmall),
-                              if (_lastSearch == null)
-                                Text(t.iptv.lastSearchNone, style: theme.textTheme.bodySmall)
-                              else ...[
-                                Text(
-                                  t.iptv.lastSearchQuery(
-                                    query: _lastSearch!.query,
-                                    totalMs: _lastSearch!.totalMs,
-                                    scoped: _lastSearch!.scoped ? t.iptv.lastSearchScopedSuffix : '',
-                                  ),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                                Text(
-                                  _lastSearchSectionLine('Movies', _lastSearch!.movies),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                                Text(
-                                  _lastSearchSectionLine('Series', _lastSearch!.series),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                                Text(
-                                  _lastSearchSectionLine('Live TV', _lastSearch!.live),
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                              ],
                             ],
-                          ),
+                          )
+                        : diagnostics == null
+                            ? Text(t.iptv.catalogDiagnosticsFailed, style: theme.textTheme.bodySmall)
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    t.iptv.catalogDiagnosticsUnfilteredRows(count: diagnostics.unfilteredSeriesRows),
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                  Text(
+                                    t.iptv.catalogDiagnosticsCategoryCount(count: diagnostics.seriesCategoryCount),
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                  for (final entry in diagnostics.perCategorySeriesRows.entries)
+                                    Text(
+                                      t.iptv.catalogDiagnosticsPerCategory(
+                                        category: entry.key,
+                                        count: entry.value,
+                                      ),
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  Text(
+                                    t.iptv.catalogDiagnosticsDisabledInitials(
+                                      count: diagnostics.disabledInitialsCount,
+                                    ),
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                  Text(
+                                    t.iptv.catalogDiagnosticsDisabledCategories(
+                                      count: diagnostics.disabledCategoriesCount,
+                                    ),
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
+              ],
+            ),
           ),
       ],
     );

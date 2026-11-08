@@ -924,6 +924,21 @@ class Translations$settings$en {
 	/// en: 'Send crash reports to help improve the app'
 	String get crashReportingDescription => 'Send crash reports to help improve the app';
 
+	/// en: 'Last crash'
+	String get lastCrash => 'Last crash';
+
+	/// en: 'No Dart error recorded — if the app still crashed, the crash is outside Dart code'
+	String get lastCrashNone => 'No Dart error recorded — if the app still crashed, the crash is outside Dart code';
+
+	/// en: 'The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code'
+	String get lastCrashAbnormalExit => 'The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code';
+
+	/// en: 'Checking for a recorded crash…'
+	String get lastCrashLoading => 'Checking for a recorded crash…';
+
+	/// en: 'Clear'
+	String get lastCrashClear => 'Clear';
+
 	/// en: 'Debug Logging'
 	String get debugLogging => 'Debug Logging';
 
@@ -3682,6 +3697,10 @@ class Translations$about$en {
 	List<String> get changelog2260 => [
 		'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
 		'Refreshing playlists or switching a library now updates the lists straight away too',
+		'Settings now shows the last crash the app recorded, so a crash can be figured out from the phone',
+		'If the app closed without shutting down cleanly, Settings says so — even when no crash was recorded',
+		'The “Last search” readout in IPTV settings now shows straight away instead of waiting on the series check',
+		'Fixed the Discover header overflowing on narrow phones',
 	];
 	List<String> get changelog2259 => [
 		'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
@@ -8912,6 +8931,11 @@ extension on Translations {
 			'settings.watchTogetherRelayInvalid' => 'Enter a valid HTTP or HTTPS relay base URL.',
 			'settings.crashReporting' => 'Crash Reporting',
 			'settings.crashReportingDescription' => 'Send crash reports to help improve the app',
+			'settings.lastCrash' => 'Last crash',
+			'settings.lastCrashNone' => 'No Dart error recorded — if the app still crashed, the crash is outside Dart code',
+			'settings.lastCrashAbnormalExit' => 'The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code',
+			'settings.lastCrashLoading' => 'Checking for a recorded crash…',
+			'settings.lastCrashClear' => 'Clear',
 			'settings.debugLogging' => 'Debug Logging',
 			'settings.debugLoggingDescription' => 'Enable detailed logging for troubleshooting',
 			'settings.viewLogs' => 'View Logs',
@@ -9116,13 +9140,13 @@ extension on Translations {
 			'settings.playerScopeOff' => 'Don\'t save',
 			'settings.playerScopeGlobal' => 'Everywhere',
 			'settings.playerScopeLibrary' => 'Per library',
+			_ => null,
+		} ?? switch (path) {
 			'settings.playerScopeTitle' => 'Per show or movie',
 			'settings.exportDialogTitle' => 'Export PlezTV settings',
 			'themeEditor.builtIn' => 'Built-in',
 			'themeEditor.presets' => 'Presets',
 			'themeEditor.custom' => 'Custom',
-			_ => null,
-		} ?? switch (path) {
 			'themeEditor.customEmpty' => 'Not created yet',
 			'themeEditor.editCustom' => 'Edit custom theme',
 			'themeEditor.editCustomDescription' => 'Choose every color yourself',
@@ -9630,13 +9654,13 @@ extension on Translations {
 			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
 			'profiles.makeDefault' => 'Make default',
 			'profiles.removeConnection' => 'Remove',
+			_ => null,
+		} ?? switch (path) {
 			'profiles.profileRenamed' => 'Profile renamed.',
 			'profiles.borrowAddTo' => ({required Object displayName}) => 'Add to ${displayName}',
 			'profiles.borrowExplain' => 'Borrow another profile\'s connection. PIN-protected profiles require a PIN.',
 			'profiles.borrowEmpty' => 'Nothing to borrow yet.',
 			'profiles.borrowEmptySubtitle' => 'Connect Plex, Jellyfin, or Emby to another profile first.',
-			_ => null,
-		} ?? switch (path) {
 			'profiles.borrowLoadFailed' => 'Available connections could not be loaded. Try again.',
 			'profiles.borrowFromProfile' => ({required Object displayName}) => 'From ${displayName}',
 			'profiles.borrowConnectionBorrowed' => 'Connection borrowed.',
@@ -9908,6 +9932,10 @@ extension on Translations {
 			'about.changelogTitle' => 'What\'s new',
 			'about.changelog2260.0' => 'Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up',
 			'about.changelog2260.1' => 'Refreshing playlists or switching a library now updates the lists straight away too',
+			'about.changelog2260.2' => 'Settings now shows the last crash the app recorded, so a crash can be figured out from the phone',
+			'about.changelog2260.3' => 'If the app closed without shutting down cleanly, Settings says so — even when no crash was recorded',
+			'about.changelog2260.4' => 'The “Last search” readout in IPTV settings now shows straight away instead of waiting on the series check',
+			'about.changelog2260.5' => 'Fixed the Discover header overflowing on narrow phones',
 			'about.changelog2259.0' => 'Live TV channels can be searched now, just like movies and TV shows — searching finds channels too',
 			'about.changelog2259.1' => 'TV show search is fixed: it no longer gives up while the show list is still loading',
 			'about.changelog2259.2' => 'Movie and TV show lists now load from the phone first, so browsing feels quicker after the first open',
@@ -10140,6 +10168,8 @@ extension on Translations {
 			'explore.detail.physicalRelease' => 'On disc',
 			'explore.detail.ended' => 'Ended',
 			'explore.detail.addedOn' => ({required Object date}) => 'Added ${date}',
+			_ => null,
+		} ?? switch (path) {
 			'explore.detail.yourRating' => 'Your rating',
 			'explore.detail.budget' => 'Budget',
 			'explore.detail.revenue' => 'Box office',
@@ -10149,8 +10179,6 @@ extension on Translations {
 			'explore.detail.links' => 'Links',
 			'explore.detail.watchOn' => 'Watch on',
 			'explore.detail.watchTrailer' => 'Watch trailer',
-			_ => null,
-		} ?? switch (path) {
 			'explore.detail.openOn' => ({required Object site}) => 'Open on ${site}',
 			'explore.detail.crew' => 'Crew',
 			'explore.detail.ratings' => 'Ratings',
@@ -10654,6 +10682,8 @@ extension on Translations {
 			'companionRemote.pairing.cryptoInitFailed' => 'Couldn\'t start secure connection. Sign in to Plex first.',
 			'companionRemote.pairing.validationHostRequired' => 'Please enter host address',
 			'companionRemote.pairing.validationHostFormat' => 'Format must be IP:port (e.g., 192.168.1.100:48632)',
+			_ => null,
+		} ?? switch (path) {
 			'companionRemote.pairing.connectionTimedOut' => 'Connection timed out. Use the same network on both devices.',
 			'companionRemote.pairing.sessionNotFound' => 'Device not found. Make sure PlezTV is running on the host.',
 			'companionRemote.pairing.authFailed' => 'Authentication failed. Both devices need the same Plex account.',
@@ -10663,8 +10693,6 @@ extension on Translations {
 			'companionRemote.remote.attemptOf' => ({required Object current}) => 'Attempt ${current} of 5',
 			'companionRemote.remote.retryNow' => 'Retry Now',
 			'companionRemote.remote.tabRemote' => 'Remote',
-			_ => null,
-		} ?? switch (path) {
 			'companionRemote.remote.tabPlay' => 'Play',
 			'companionRemote.remote.tabMore' => 'More',
 			'companionRemote.remote.menu' => 'Menu',

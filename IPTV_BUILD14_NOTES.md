@@ -192,17 +192,18 @@ fresh notePass; bypass upgrades a pending trailing pass; a later push event
 is paced normally; bypass still retries while blocked). **Full pacer suite:
 13/13 PASS.**
 
-## 4. Secondary finding (NOT fixed — out of scope, parent decides)
+## 4. Secondary finding — FIXED in this build (second pass)
 
 **Pre-existing 40px RenderFlex overflow in the Discover app bar at 360dp**
 (`lib/screens/discover_screen.dart:803`, `_buildOverlaidAppBar` —
 "Discover" title + Spacer + FocusableActionBar with refresh / Watch
-Together / Companion Remote actions). It paints yellow/black stripes in a
-debug build but does NOT kill the app, and build #13 never touched that
-file. The Discover widget test acknowledges exactly that error via
-`tester.takeException()` + `contains('overflowed')` so it still fails on
-any OTHER exception. Do NOT fix it in build #14 — it is a layout bug, not
-the crash, and the parent decides whether it rides in a later build.
+Together / Companion Remote actions). It painted yellow/black stripes in
+a debug build but did NOT kill the app, and build #13 never touched that
+file. Fixed here because it was the trivial one-line case: the title
+`Text` is now wrapped in `Flexible` + `TextOverflow.ellipsis` (the same
+fix shape as build #12's library-header overflow). The Discover widget
+test now expects `tester.takeException()` to be null instead of
+acknowledging the overflow. UI-5 in the research report.
 
 ## 5. Harness lessons (kept for future crash hunts)
 
@@ -225,19 +226,45 @@ the crash, and the parent decides whether it rides in a later build.
 - **Real disk I/O hangs inside `testWidgets`' fake async zone** — follow
   the `IptvCatalogDiskCache.debugDisableDisk` precedent.
 
-## 6. Next evidence step — what would actually find this crash
+## 6. Next evidence step — DONE: the on-device crash readout is IN this build
 
 Another guessed fix would repeat the pattern that failed: same agent
 building + testing + declaring it works. What is needed is the crash
-itself, from the phone:
+itself, from the phone — and this build now collects it:
 
-1. **On-device crash readout (recommended):** add a fatal-error catcher
-   (`FlutterError.onError` + `PlatformDispatcher.instance.onError`) that
-   persists the last fatal Dart error + stack to disk and shows it in
-   Settings (or IPTV settings) on the next launch, so Matt can screenshot
-   the actual exception instead of describing the crash. If the crash is
-   native (mpv/libmpv), a Dart catcher will show nothing — that negative
-   result itself narrows it to native.
+1. **On-device crash readout (DONE):** `lib/services/last_crash_store.dart`
+   — `LastCrashCatcher.install()` (wired in `main.dart` `_bootstrapApp`,
+   before `runApp`) chains to the previous handlers and persists the last
+   fatal Dart error + stack to `last_crash.json` under the app support
+   directory (never the cache dir). `FlutterError.onError` records
+   framework errors (except the known-benign `RenderFlex overflowed`
+   diagnostic, which would otherwise overwrite the real record on a 360dp
+   screen every launch); `PlatformDispatcher.instance.onError` records
+   uncaught async errors. The message + stack are redacted with
+   `LogRedactionManager` before writing (Xtream URLs carry credentials).
+   All methods are total — a failed write is logged and swallowed, never
+   thrown. The write is synchronous once the directory is primed at
+   startup, so it lands before the dying process exits.
+   Shown as a **"Last crash" row in Settings → Advanced**
+   (`lib/screens/settings/last_crash_row.dart`, after the View Logs tile):
+   expandable, 240px scrollable error + stack, Clear button. It reads one
+   small file and does not depend on the IPTV/Plex clients, so it is
+   reachable even when the app is otherwise unstable.
+   **Abnormal-exit flag (research D-6, also in):** `markLaunched()` writes
+   `last_exit_state.txt` = 'running' at startup;
+   `_AppExitObserver` (in `main.dart`) writes 'clean' on engine detach.
+   A crash / force-stop / OS kill never reaches detach, so the next launch
+   finds 'running' and the row says "The app did not shut down cleanly
+   last time, and no Dart error was recorded" — the signature of a native
+   (mpv) crash. When nothing was recorded AND the exit was clean, the row
+   says so plainly ("No Dart error recorded — if the app still crashed,
+   the crash is outside Dart code").
+   **How Matt uses it:** if v2.25.10 crashes again, relaunch the app,
+   open Settings → Advanced → "Last crash", and screenshot the row. A
+   Dart error + stack names the site; an abnormal-exit note with no Dart
+   error proves native; a clean "no error recorded" with no abnormal
+   flag means the previous run exited normally and the crash report needs
+   re-checking.
 2. **Ask Matt:** does it crash on EVERY launch, or sometimes? Does the app
    window appear at all before it dies, or does it die on the splash? Does
    it crash with the Plex server unreachable (HOME PC off) vs reachable?
@@ -258,8 +285,16 @@ itself, from the phone:
 3. Report whether v2.25.9's startup crash still happens on v2.25.10, and
    if so, exactly what is on screen when it dies (splash? UI half-drawn?)
    and whether it is every launch.
-4. The Discover app-bar overflow stripes at 360dp are a known pre-existing
-   debug-build artifact, not the crash — report them separately if seen.
+4. **If it crashes again: relaunch, Settings → Advanced → "Last crash",
+   screenshot the row.** A Dart error + stack names the site; "did not
+   shut down cleanly" with no Dart error points at native (mpv); "No Dart
+   error recorded" with a clean exit means the previous run ended
+   normally. Clear the row after screenshotting it.
+5. IPTV settings → "Series catalog" → expand it: the **"Last search"**
+   readout must show straight away (last query + per-section lines) even
+   while the series check is still spinning below it.
+6. The Discover app-bar overflow stripes at 360dp are FIXED in this build
+   — the Discover header must no longer overflow on the cover screen.
 
 ## 8. Tests + analyze
 
@@ -267,38 +302,141 @@ itself, from the phone:
   (incl. cooldown failing-first), Discover widget 1/1, pacer unit 13/13.
 - Tester Task 1: 6/6 unit + 4/4 widget, services/iptv 174/174.
 - Tester Task 1b: 7/7 unit + 4/4 widget.
-- Touched suites re-run for this build: services/iptv, screens/iptv,
-  screens/libraries, screens/livetv, mpv, utils/refresh_pacer_test,
-  screens/iptv_build13_search_screen_test — combined run **599 pass, 2
-  fail, both explained, neither a regression**: (1) `test/screens/mpv`
-  does not exist — a bad path in the invocation (the mpv tests live in
-  `test/mpv/` and passed inside the run); (2) the build #13 cache
-  benchmark's first-launch test failed in its own teardown
-  (`FileSystemException: Directory not empty` deleting its temp dir — an
-  async disk write still in flight under suite load). Re-run alone:
-  **6/6 pass** (first launch wall 170ms / maxTickGap 172ms; second launch
-  1066ms / 113ms, 0 network calls). My diff does not touch the cache
-  write path; this is a pre-existing teardown race flake under load, not
-  a build #14 regression.
+- Second pass (crash readout + research fold-ins), all failing-first
+  where a behaviour is asserted (each new test was run with its lib fix
+  stashed and failed, then passed with it):
+  - `test/services/last_crash_store_test.dart` **11/11** (record round-trip,
+    overwrite, clear, corrupt file, credential redaction, catcher records
+    through both handlers + calls the previous handler, overflow does not
+    overwrite the record, abnormal-exit flag: first launch clean, second
+    launch without a clean exit flags abnormal, clean exit clears it,
+    reset clears it). One inherited compile error fixed in the file
+    itself: the saved `FlutterError.onError` handler was declared as
+    returning `FlutterErrorDetails` — it returns `void`.
+  - `test/screens/settings/last_crash_row_test.dart` **3/3** (recorded
+    crash shows headline + details, Clear removes it; abnormal exit with
+    no record shows the abnormal text; clean previous exit reads "no Dart
+    error recorded"). Disk reads in the row use the `runAsync` real-delay
+    + pump loop (same pattern as the guide EPG tests).
+  - `test/screens/settings/settings_screen_test.dart` **26 pass, 3 skipped**
+    (skips pre-existing), incl. the new integration test: the Advanced
+    section shows the Last crash row with no record.
+  - `test/services/data_aggregation_bridge_test.dart` **41/41** (was 12
+    failing on pristine HEAD — SA-12: the `_LibrariesClient` fake now
+    implements the `backend` getter as `MediaBackend.plex`).
+  - `test/services/iptv/iptv_catalog_cache_test.dart` **22/22**, incl. the
+    new SA-4 group: a stale VOD refresh emits `liveCatalogChanged=false`,
+    a stale live refresh emits `true`.
+  - `test/screens/livetv/live_tv_screen_test.dart` **14/14**, incl. the
+    new SA-4 tests: a VOD-only event does not reload the guide, a live
+    one does, an event for another server does not. Harness note: the
+    guide reload is deferred to a post-frame callback, which does not
+    schedule a frame — and `tester.pump()` is a no-op without a scheduled
+    frame — so the tests call `tester.binding.scheduleFrame()` before
+    pumping (found by instrumenting the listener: it fired, the callback
+    only ran at tearDown with `mounted=false`).
+  - `test/screens/iptv/iptv_screens_test.dart` **18/18**, incl. the new
+    UI-2 test: "Last search" shows while the series probe is still
+    running (fake API hangs the unfiltered `getSeries`; the test advances
+    the clock 11s at the end so the probe's 10s timeouts fire and no
+    timer is left pending at teardown). Found while writing it: the
+    diagnostics record stores the query lower-cased (`needle`).
+- Touched suites re-run for this build: services/iptv **176/176**
+  (first run: 1 fail — the build #13 browse benchmark's Movies hub test,
+  load flake under suite load; passes standalone 2/2 and on the full
+  re-run), screens/iptv **18/18**, screens/libraries **131/131**,
+  screens/livetv **78/78**, test/mpv/ + pacer + crash-store + bridge
+  **251/251** combined, search screen + startup discover **31/31**,
+  settings row + settings screen **26 pass, 3 skipped**.
 - `flutter analyze`: **49 issues — the wakelock baseline, zero in build
   #14 files.**
 
 ## 9. Files changed
 
 - `lib/utils/refresh_pacer.dart` (`scheduleBypassCooldown`),
-  `lib/media/library_change_event.dart` (`userInitiated` flag),
-  `lib/media/iptv_client.dart` (`notifyCatalogRefreshed(userInitiated:)`),
+  `lib/media/library_change_event.dart` (`userInitiated` flag +
+  `liveCatalogChanged` flag, default true),
+  `lib/media/iptv_client.dart` (`notifyCatalogRefreshed(userInitiated:,
+  liveCatalogChanged:)`, dataset-derived flag in
+  `_refreshCatalogInBackground`),
   `lib/services/multi_server_manager.dart` (rebind passes
   `userInitiated: true`), `lib/screens/libraries/tabs/base_library_tab.dart`
   (branch in `_onLiveLibraryChange`),
   `lib/providers/discover_provider.dart` (branch in
-  `_onLibraryContentChanged`).
+  `_onLibraryContentChanged`),
+  `lib/screens/livetv/live_tv_screen.dart` (guide ignores
+  VOD/series-only events),
+  `lib/screens/discover_screen.dart` (title `Flexible` + ellipsis —
+  overflow fix).
+- Crash readout: `lib/services/last_crash_store.dart` (new),
+  `lib/screens/settings/last_crash_row.dart` (new),
+  `lib/screens/settings/settings_screen.dart` (row in Advanced section),
+  `lib/main.dart` (`LastCrashCatcher.install()` + `prime()` +
+  `markLaunched()` + `_AppExitObserver`).
+- UI-2: `lib/screens/settings/iptv_settings_screen.dart` ("Last search"
+  renders synchronously from the bound client's in-memory getter, above
+  the probe-gated diagnostics).
 - `pubspec.yaml` (version `2.25.10+167`), `lib/i18n/en.i18n.json` +
-  generated `strings*.g.dart` (`changelog2260`),
+  generated `strings*.g.dart` (`changelog2260` now 6 bullets, incl.
+  crash readout + abnormal-exit flag + Last search + Discover overflow),
   `lib/screens/settings/about_screen.dart` (changelog entry first).
 - New tests: `test/services/iptv/iptv_build14_migration_test.dart` (4),
   `test/services/iptv/iptv_build14_startup_test.dart` (2),
   `test/screens/libraries/iptv_build14_startup_libraries_test.dart` (4),
-  `test/screens/iptv_build14_startup_discover_test.dart` (1).
-- Modified tests: `test/utils/refresh_pacer_test.dart` (+4).
+  `test/screens/iptv_build14_startup_discover_test.dart` (1),
+  `test/services/last_crash_store_test.dart` (11),
+  `test/screens/settings/last_crash_row_test.dart` (3).
+- Modified tests: `test/utils/refresh_pacer_test.dart` (+4),
+  `test/services/data_aggregation_bridge_test.dart` (fake gains `backend`),
+  `test/services/iptv/iptv_catalog_cache_test.dart` (SA-4 group, +2),
+  `test/screens/livetv/live_tv_screen_test.dart` (SA-4 tests, +2, fake
+  gains `fetchChannelsCalls`),
+  `test/screens/iptv/iptv_screens_test.dart` (UI-2 test, +1, fake gains
+  `hangUnfilteredSeries`),
+  `test/screens/settings/settings_screen_test.dart` (Last crash row
+  integration test, +1).
 - This file: `IPTV_BUILD14_NOTES.md`.
+
+## 10. Research fold-ins (RESEARCH_BUILD14.md, 2026-11-07)
+
+The research agent's verdict: **keep the fork, do NOT rewrite** — the IPTV
+layer is cleanly separated behind `MediaServerClient`, the bugs are
+ordinary and local, TVmagic v0.2.0 (no import/EPG/VOD/playback yet) is not
+a shortcut. Its adversarial self-audit also did NOT find the v2.25.9
+startup crash in our code. One brief premise was WRONG and is corrected
+here: the IndexedStack does NOT eagerly mount all tabs at startup —
+`_mountedTabs` starts with only the current tab
+(`main_screen.dart:446,558,1200`); startup cost is one tab + the binder.
+Do not chase eager mounting; it doesn't exist.
+
+Folded into #14 (small, startup-visible, per the report's §7 table):
+
+- **(a) Abnormal-exit flag (D-6)** — §6 above. The Dart catcher alone
+  cannot see a native mpv crash; the flag distinguishes "no Dart error
+  recorded + abnormal exit" (native) from "no Dart error + clean exit".
+- **(b) UI-2 — "Last search" renders synchronously** — §9 above. It was
+  gated behind the series probe (up to ~40s, "No search yet" if the probe
+  failed); now it reads `client.lastSearchDiagnostics` on build, above
+  the probe section, which keeps its own spinner.
+- **(c) UI-5 — Discover 40px overflow** — §4 above, fixed (one-line
+  layout change + test).
+- **(d) SA-12 — 12 red bridge tests** — fixed: the `_LibrariesClient`
+  fake implements `backend` (`MediaBackend.plex`). Zero-red-on-HEAD is
+  now the rule: a red suite trains everyone to ignore red, which is how
+  a real regression ships.
+- **(e) SA-4 partial — guide ignores VOD/series-only events** — the
+  background refresh now carries `liveCatalogChanged` on the event
+  (live rows / live categories → true; VOD / series rows / categories →
+  false; clear / rebind / M3U → true by default) and the guide returns
+  early on false. Full coalescing (a 1–2s trailing-edge timer / pacer
+  for the guide) stays in #15.
+
+Deliberately LEFT for build #15 (per the report, not expanded here):
+E-1 warm-up staggering, SA-5 filtered-row memoization, SA-6 row-level
+`fetchMoreHubItems`, SA-3 + SA-8 live crawl + partial rows, SA-7 search
+abort, SA-1 live-tap loading state, UI-1 browse timeout + retry, UI-3
+filtered empty state, D-1 startup smoke harness, D-2 benchmark gates.
+Build #16: fork re-seating (`guide_tab.dart` delegate, updater dialog
+renders service state), SA-2 `(rows, body)` return, SA-10 diagnostics
+probe bound, SA-9 pacer flag hardening, UI-4 live scope chip/note, UI-7
+mini-player switching state. Form-factor integration after #16.

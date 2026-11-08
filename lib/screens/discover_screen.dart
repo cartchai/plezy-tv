@@ -803,9 +803,12 @@ class _DiscoverScreenState extends State<DiscoverScreen>
       child: Row(
         children: [
           if (!PlatformDetector.isTV())
-            Text(
-              t.discover.title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(color: foregroundColor, fontWeight: .bold),
+            Flexible(
+              child: Text(
+                t.discover.title,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(color: foregroundColor, fontWeight: .bold),
+              ),
             ),
           const Spacer(),
           // TV only: a fullscreen leanback app hides the system clock, while a

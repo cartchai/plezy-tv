@@ -325,6 +325,11 @@
     "watchTogetherRelayInvalid": "Enter a valid HTTP or HTTPS relay base URL.",
     "crashReporting": "Crash Reporting",
     "crashReportingDescription": "Send crash reports to help improve the app",
+    "lastCrash": "Last crash",
+    "lastCrashNone": "No Dart error recorded — if the app still crashed, the crash is outside Dart code",
+    "lastCrashAbnormalExit": "The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code",
+    "lastCrashLoading": "Checking for a recorded crash…",
+    "lastCrashClear": "Clear",
     "debugLogging": "Debug Logging",
     "debugLoggingDescription": "Enable detailed logging for troubleshooting",
     "viewLogs": "View Logs",
@@ -1416,7 +1421,11 @@
     "changelogTitle": "What's new",
     "changelog2260": [
       "Turning a country or region off or on now takes effect straight away — before, the lists could take up to two minutes to catch up",
-      "Refreshing playlists or switching a library now updates the lists straight away too"
+      "Refreshing playlists or switching a library now updates the lists straight away too",
+      "Settings now shows the last crash the app recorded, so a crash can be figured out from the phone",
+      "If the app closed without shutting down cleanly, Settings says so — even when no crash was recorded",
+      "The “Last search” readout in IPTV settings now shows straight away instead of waiting on the series check",
+      "Fixed the Discover header overflowing on narrow phones"
     ],
     "changelog2259": [
       "Live TV channels can be searched now, just like movies and TV shows — searching finds channels too",

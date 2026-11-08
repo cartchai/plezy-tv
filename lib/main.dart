@@ -72,6 +72,7 @@ import 'services/library_events/library_event_service.dart';
 import 'services/offline_watch_sync_service.dart';
 import 'services/data_aggregation_service.dart';
 import 'services/credential_vault.dart';
+import 'services/last_crash_store.dart';
 import 'services/server_registry.dart';
 import 'services/download_manager_service.dart';
 import 'services/pip_service.dart';
@@ -167,6 +168,17 @@ void main() {
   _bootstrapApp();
 }
 
+/// Marks a clean exit so the next launch can tell a crash from a normal
+/// close (build #14, D-6): `detached` fires when the engine is destroyed
+/// on a normal close; a crash or a force-stop never gets here, so the
+/// exit-state file still says 'running' on the next launch.
+class _AppExitObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) LastCrashStore.markCleanExit();
+  }
+}
+
 void _bootstrapApp() {
   // In release mode, show a colored placeholder instead of a blank/white screen
   // when a widget build() throws an unhandled exception.
@@ -174,6 +186,25 @@ void _bootstrapApp() {
     if (kDebugMode) return ErrorWidget(details.exception);
     return const ColoredBox(color: Color(0xFF000000));
   };
+
+  // Fatal-error catcher (build #14): persists the last fatal Dart error +
+  // stack to disk so Settings can show it on the next launch — the v2.25.9
+  // startup crash was never reproduced in the harness, so the crash itself,
+  // from the phone, is the evidence. Installed before runApp, and chains to
+  // whatever handler was there before (Sentry's, when enabled, chains to
+  // this one). The support directory is resolved ahead of any crash so the
+  // record writes synchronously when the process is dying.
+  LastCrashCatcher.install();
+  unawaited(LastCrashStore.prime());
+
+  // Abnormal-exit flag (build #14, D-6): mark this launch 'running' now;
+  // a clean engine detach (see [_AppExitObserver]) marks it 'clean'. A
+  // crash, a force-stop, or the OS killing the process never reaches the
+  // detach, so the next launch finds 'running' and the Settings "Last
+  // crash" row can say the app did not shut down cleanly even when no Dart
+  // error was recorded — the signature of a native (mpv) crash.
+  unawaited(LastCrashStore.markLaunched());
+  WidgetsBinding.instance.addObserver(_AppExitObserver());
 
   // Off the critical path: the version label only decorates a diagnostic.
   unawaited(_primeDiagnosticsVersion());

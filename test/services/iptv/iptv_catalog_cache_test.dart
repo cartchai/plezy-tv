@@ -29,9 +29,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/media/library_change_event.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
+import 'package:plezy/utils/library_content_notifier.dart';
 
 import '../../test_helpers/prefs.dart';
 
@@ -550,6 +552,52 @@ https://example.com/cnn.ts
       final again = await relaunched.iptvChannels();
       expect(again.map((c) => c.title), ['BBC One', 'CNN']);
       expect(playlistCalls, 1, reason: 'the disk cache must be served, not refetched');
+    });
+  });
+
+  group('background refresh events carry the live flag (build #14, SA-4)', () {
+    test('a stale VOD refresh emits liveCatalogChanged=false', () async {
+      final first = xtreamClient();
+      await first.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
+      await waitForDataset(IptvCatalogDiskCache.vodDataset);
+
+      // Age the cache past the 24h TTL.
+      final file = datasetFile('conn-xt-1', IptvCatalogDiskCache.vodDataset);
+      await file.setLastModified(DateTime.now().subtract(const Duration(hours: 25)));
+
+      final events = <LibraryChangeEvent>[];
+      final subscription = LibraryContentNotifier().stream.listen(events.add);
+      addTearDown(subscription.cancel);
+
+      // Relaunch: the stale rows show immediately and the background
+      // refresh lands — the guide must not reload for it.
+      final relaunched = xtreamClient();
+      await relaunched.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
+      await waitFor(() => events.isNotEmpty, 'the VOD background refresh event');
+      // Let any second event land before asserting the count.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(events, hasLength(1));
+      expect(events.single.liveCatalogChanged, isFalse);
+    });
+
+    test('a stale live refresh emits liveCatalogChanged=true', () async {
+      final first = xtreamClient();
+      await first.iptvChannels();
+      await waitForDataset(IptvCatalogDiskCache.liveDataset);
+
+      final file = datasetFile('conn-xt-1', IptvCatalogDiskCache.liveDataset);
+      await file.setLastModified(DateTime.now().subtract(const Duration(hours: 25)));
+
+      final events = <LibraryChangeEvent>[];
+      final subscription = LibraryContentNotifier().stream.listen(events.add);
+      addTearDown(subscription.cancel);
+
+      final relaunched = xtreamClient();
+      await relaunched.iptvChannels();
+      await waitFor(() => events.isNotEmpty, 'the live background refresh event');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(events, hasLength(1));
+      expect(events.single.liveCatalogChanged, isTrue);
     });
   });
 }

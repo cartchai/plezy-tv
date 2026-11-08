@@ -382,9 +382,19 @@ class IptvClient implements MediaServerClient {
   /// toggle / connection edit rebind, a manual playlist refresh) so
   /// consumers bypass the [RefreshPacer] cooldown for it (build #14).
   /// Background refresh landings leave it false and stay paced.
-  void notifyCatalogRefreshed({bool userInitiated = false}) {
+  ///
+  /// [liveCatalogChanged] marks whether the change can affect the live-TV
+  /// catalog; the Live TV guide ignores events that are false (build #14,
+  /// SA-4 partial). Defaults to true — a clear, a rebind and an M3U
+  /// refresh all touch live channels.
+  void notifyCatalogRefreshed({bool userInitiated = false, bool liveCatalogChanged = true}) {
     LibraryContentNotifier().notifyChanged(
-      LibraryChangeEvent(serverId: ServerId(connection.id), itemsUpdated: true, userInitiated: userInitiated),
+      LibraryChangeEvent(
+        serverId: ServerId(connection.id),
+        itemsUpdated: true,
+        userInitiated: userInitiated,
+        liveCatalogChanged: liveCatalogChanged,
+      ),
     );
   }
 
@@ -549,7 +559,14 @@ class IptvClient implements MediaServerClient {
           return;
         }
         swap(rows);
-        notifyCatalogRefreshed();
+        // The Live TV guide subscribes to the same notifier: it must only
+        // reload for live rows / live categories. A VOD- or series-only
+        // refresh landing used to rebuild the whole 55k-channel guide and
+        // re-fetch EPG for the visible channels (build #14, SA-4 partial),
+        // so the event carries which catalog actually changed.
+        final liveCatalogChanged = dataset == IptvCatalogDiskCache.liveDataset ||
+            dataset == IptvCatalogDiskCache.liveCategoriesDataset;
+        notifyCatalogRefreshed(liveCatalogChanged: liveCatalogChanged);
       }).catchError((Object e) {
         appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
       }),

@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **366 files changed, 29593 insertions, 3174 deletions**
+- Scale of the fork vs base: **374 files changed, 32343 insertions, 3186 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-06 after the build #11 commit — was 344 files /
-  +23,111/−3,147 at build #10).
+  verified 2026-11-07 after the build #14 commit — was 366 files /
+  +29,593/−3,174 at build #11).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -484,17 +484,30 @@ Detail: `IPTV_BUILD8_NOTES.md`.
   Plex + Trex, Plex-offline/network-down, bind-racing-UI). No crash fix is
   claimed in this build. Remaining harness-blind spots: real `main()`
   startup sequence, real SharedPreferences migration on the phone, native
-  mpv player, real panel data at full scale. Next evidence step: an
-  on-device fatal-error catcher that persists the last crash for
-  screenshotting (see `IPTV_BUILD14_NOTES.md` §6).
-- Secondary finding, NOT fixed: pre-existing 40px RenderFlex overflow in
-  the Discover app bar at 360dp (`lib/screens/discover_screen.dart:803`,
-  `_buildOverlaidAppBar`) — paints stripes in a debug build, does not kill
-  the app, build #13 never touched that file. Parent decides whether it
-  rides in a later build.
+  mpv player, real panel data at full scale.
+- Second pass (same build, same version): the on-device crash readout IS
+  in — `lib/services/last_crash_store.dart` (new: `LastCrashCatcher` +
+  `LastCrashStore` + abnormal-exit flag) + `lib/screens/settings/last_crash_row.dart`
+  (new: "Last crash" row in Settings → Advanced) + `lib/main.dart`
+  (install + prime + `markLaunched()` + `_AppExitObserver`); research
+  fold-ins (report `~/workspace/tmp_work/plezy-tv-research14/RESEARCH_BUILD14.md`):
+  UI-2 "Last search" renders synchronously from the bound client's
+  in-memory getter (`lib/screens/settings/iptv_settings_screen.dart`),
+  SA-12 red bridge tests fixed (fake gains `backend`),
+  SA-4 partial — `liveCatalogChanged` flag on `LibraryChangeEvent`,
+  dataset-derived in `IptvClient._refreshCatalogInBackground`, guide
+  ignores VOD/series-only events (`lib/screens/livetv/live_tv_screen.dart`).
+  Verdict from the research: keep the fork, do NOT rewrite; the
+  IndexedStack does NOT eagerly mount tabs at startup (corrected premise).
+- Secondary finding, FIXED in the second pass: the pre-existing 40px
+  RenderFlex overflow in the Discover app bar at 360dp
+  (`lib/screens/discover_screen.dart:803`, `_buildOverlaidAppBar`) — the
+  title Text is now wrapped in `Flexible` + `TextOverflow.ellipsis`;
+  the Discover widget test now expects no exception.
 - NOT touched: EPG behaviour, mini-player, in-app updater, TV/tablet
   layouts, image loading, the `fetchMoreHubItems` full-list build.
-- Progress notes: `IPTV_BUILD14_NOTES.md`.
+- Progress notes: `IPTV_BUILD14_NOTES.md` (§6 crash readout, §10 research
+  fold-ins).
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

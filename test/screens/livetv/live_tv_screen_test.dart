@@ -8,6 +8,7 @@ import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/ids.dart';
+import 'package:plezy/media/library_change_event.dart';
 import 'package:plezy/media/live_tv_support.dart';
 import 'package:plezy/media/media_backend.dart';
 import 'package:plezy/media/media_server_client.dart';
@@ -23,6 +24,7 @@ import 'package:plezy/screens/livetv/tabs/guide_tab.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/theme/mono_theme.dart';
+import 'package:plezy/utils/library_content_notifier.dart';
 import 'package:provider/provider.dart';
 
 import '../../test_helpers/multi_server_fixtures.dart';
@@ -305,6 +307,75 @@ void main() {
     expect(find.text(t.liveTv.dvrAdminRequired), findsOneWidget);
     expect(find.text(t.liveTv.guideReloadRequested), findsNothing);
   });
+
+  testWidgets('a VOD-only catalog event does not reload the guide, a live one does', (tester) async {
+    final harness = await _pumpLiveTvScreen(tester);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      harness.dispose();
+    });
+
+    // Let the initial load finish first, or the live event below would
+    // only set _reloadAfterLoad instead of reloading.
+    harness.liveTv.favorites.complete([
+      FavoriteChannel(id: 'channel-a', source: 'server://server-a/provider-a'),
+    ]);
+    await tester.pumpAndSettle();
+
+    // The initial load ran once.
+    expect(harness.liveTv.fetchChannelsCalls, 1);
+
+    // A VOD/series background refresh landing (build #14, SA-4 partial):
+    // the guide shows live channels only, so it must not reload.
+    LibraryContentNotifier().notifyChanged(
+      LibraryChangeEvent(
+        serverId: ServerId('server-a'),
+        itemsUpdated: true,
+        liveCatalogChanged: false,
+      ),
+    );
+    // The listener only registers a post-frame callback, which does not
+    // schedule a frame — and tester.pump() is a no-op without one — so
+    // schedule the frame explicitly, then pump. pump() flushes the
+    // broadcast delivery first, so the callback is registered in time.
+    tester.binding.scheduleFrame();
+    await tester.pump();
+    await tester.pump();
+    expect(harness.liveTv.fetchChannelsCalls, 1);
+
+    // A live refresh landing reloads the guide.
+    LibraryContentNotifier().notifyChanged(
+      LibraryChangeEvent(serverId: ServerId('server-a'), itemsUpdated: true),
+    );
+    tester.binding.scheduleFrame();
+    await tester.pump();
+    await tester.pump();
+    expect(harness.liveTv.fetchChannelsCalls, 2);
+  });
+
+  testWidgets('an event for another server does not reload the guide', (tester) async {
+    final harness = await _pumpLiveTvScreen(tester);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      harness.dispose();
+    });
+
+    harness.liveTv.favorites.complete([
+      FavoriteChannel(id: 'channel-a', source: 'server://server-a/provider-a'),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(harness.liveTv.fetchChannelsCalls, 1);
+    LibraryContentNotifier().notifyChanged(
+      LibraryChangeEvent(serverId: ServerId('server-b'), itemsUpdated: true),
+    );
+    // See the test above: the listener only registers a post-frame
+    // callback, which does not schedule a frame on its own.
+    tester.binding.scheduleFrame();
+    await tester.pump();
+    await tester.pump();
+    expect(harness.liveTv.fetchChannelsCalls, 1);
+  });
 }
 
 List<LiveTvChannel> _guideChannels(WidgetTester tester) => tester.widget<GuideTab>(find.byType(GuideTab)).channels;
@@ -411,16 +482,23 @@ class _FakeLiveTvSupport implements LiveTvSupport {
   @override
   Future<String> buildFavoriteChannelSource({String? lineup}) async => 'server://$serverId/${lineup ?? 'default'}';
 
+  /// How many times the guide (re)loaded its channels — the SA-4 test
+  /// (build #14) asserts a VOD-only catalog event does not add one.
+  int fetchChannelsCalls = 0;
+
   @override
-  Future<List<LiveTvChannel>> fetchChannels({String? lineup}) async => [
-    if (channelsFailure case final failure?) throw failure,
-    for (final key in channelKeys)
-      LiveTvChannel(
-        key: key,
-        title: key == 'channel-a' ? 'Unique Channel A' : 'Unique Channel $key',
-        serverId: serverId,
-      ),
-  ];
+  Future<List<LiveTvChannel>> fetchChannels({String? lineup}) async {
+    fetchChannelsCalls++;
+    return [
+      if (channelsFailure case final failure?) throw failure,
+      for (final key in channelKeys)
+        LiveTvChannel(
+          key: key,
+          title: key == 'channel-a' ? 'Unique Channel A' : 'Unique Channel $key',
+          serverId: serverId,
+        ),
+    ];
+  }
 
   @override
   Future<List<LiveTvProgram>> fetchSchedule({DateTime? from, DateTime? to}) async => const [];

@@ -113,15 +113,12 @@ void main() {
       // First frame with both servers bound: must build, not throw.
       await harness.pump(tester);
 
-      // Known pre-existing layout warning, NOT the crash: the overlaid
-      // app bar Row overflows by 40px at 360dp (discover_screen.dart
-      // _buildOverlaidAppBar). It paints yellow/black stripes in a debug
-      // build but does not kill the app, and build #13 never touched this
-      // file. Acknowledge exactly that error so the test still fails on
-      // any OTHER (fatal) exception, and report the overflow separately.
-      final pumpException = tester.takeException();
-      expect(pumpException, isNotNull);
-      expect(pumpException.toString(), contains('overflowed'));
+      // The overlaid app bar Row used to overflow by 40px at 360dp
+      // (discover_screen.dart _buildOverlaidAppBar) — fixed in build #14 by
+      // letting the title shrink with an ellipsis instead of pushing the
+      // actions off-screen. There must be no exception at all now, so the
+      // test fails on ANY exception, including a layout overflow.
+      expect(tester.takeException(), isNull);
 
       // Plex On Deck + Plex hubs render.
       expect(find.text('Plex Movie 1'), findsWidgets);
