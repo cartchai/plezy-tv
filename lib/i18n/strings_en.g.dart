@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2266 => [
+		'Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player',
+		'Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down',
+		'This update only changes how the app is driven on Quest — nothing else in the app changed',
+	];
 	List<String> get changelog2264 => [
 		'Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover',
 		'The first search after this update may take a few seconds — that is the repair running, not a freeze',
@@ -10129,6 +10134,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2266.0' => 'Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player',
+			'about.changelog2266.1' => 'Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down',
+			'about.changelog2266.2' => 'This update only changes how the app is driven on Quest — nothing else in the app changed',
 			'about.changelog2264.0' => 'Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover',
 			'about.changelog2264.1' => 'The first search after this update may take a few seconds — that is the repair running, not a freeze',
 			'about.changelog2264.2' => 'Version numbers change with this build: PlezTV is now 1.0.0, built on Plezy 2.25.0. The next updates will be 1.0.1, 1.0.2 and so on, and the in-app updater understands the new numbers',
@@ -10373,11 +10381,11 @@ extension on Translations {
 			'explore.creditRole.creator' => 'Creator',
 			'explore.creditRole.composer' => 'Composer',
 			'explore.relation.prequel' => 'Prequel',
+			_ => null,
+		} ?? switch (path) {
 			'explore.relation.sequel' => 'Sequel',
 			'explore.relation.sideStory' => 'Side story',
 			'explore.relation.spinOff' => 'Spin-off',
-			_ => null,
-		} ?? switch (path) {
 			'explore.relation.alternativeVersion' => 'Alternative version',
 			'explore.relation.summary' => 'Summary',
 			'explore.relation.parentStory' => 'Parent story',
@@ -10887,11 +10895,11 @@ extension on Translations {
 			'shaders.artcnnVariantNeutral' => 'Neutral',
 			'shaders.artcnnVariantDenoise' => 'Denoise',
 			'shaders.artcnnVariantDenoiseSharpen' => 'Denoise + Sharpen',
+			_ => null,
+		} ?? switch (path) {
 			'shaders.qualityFast' => 'Fast',
 			'shaders.qualityHQ' => 'High Quality',
 			'shaders.mode' => 'Mode',
-			_ => null,
-		} ?? switch (path) {
 			'shaders.importShader' => 'Import Shader',
 			'shaders.customShaderDescription' => 'Custom GLSL shader',
 			'shaders.shaderImported' => 'Shader imported',
@@ -11401,11 +11409,11 @@ extension on Translations {
 			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
 			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',
 			'iptv.lastSearchScopedSuffix' => ' · scoped',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object source, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms',
 			'iptv.channelHidden' => ({required Object name}) => '${name} hidden',
 			'iptv.hiddenChannelsTitle' => 'Hidden channels',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.hiddenChannelsNone' => 'No hidden channels on this connection. Long-press a channel in the guide to hide it.',
 			'iptv.hiddenChannelsCount' => ({required Object count}) => '${count} hidden',
 			'iptv.unhideAll' => 'Unhide all',

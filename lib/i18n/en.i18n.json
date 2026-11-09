@@ -1407,6 +1407,11 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2266": [
+      "Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player",
+      "Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down",
+      "This update only changes how the app is driven on Quest — nothing else in the app changed"
+    ],
     "changelog2264": [
       "Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover",
       "The first search after this update may take a few seconds — that is the repair running, not a freeze",
