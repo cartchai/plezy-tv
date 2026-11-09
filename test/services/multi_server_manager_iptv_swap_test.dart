@@ -47,7 +47,7 @@ void main() {
     manager.dispose();
   });
 
-  test('an IPTV filter toggle swaps only the IPTV client — the Plex client is untouched (build #15, P-1)', () async {
+  test('a filter-only IPTV toggle reuses the IPTV client and never recreates Plex (build #15, P-1; build #17 reuse)', () async {
     // First bind: Trex joins the already-registered Plex client.
     await manager.addIptvConnection(_trexConnection());
     expect(manager.getClient(ServerId('home-pc')), same(plex));
@@ -58,11 +58,14 @@ void main() {
     // exact operation the settings screen used to run as a full profile
     // rebind — which recreated Plex and could leave its libraries not
     // loading (Matt, 2026-11-08: "something is not loading anymore").
+    // Build #17 §2: a filter-only change reuses the client in place
+    // (updateConnection + notifyCatalogRefreshed, no re-warm, no probe),
+    // so the Trex client must be the SAME instance afterwards.
     await manager.addIptvConnection(_trexConnection(hiddenCategoryInitials: ['EN', 'AR', 'FR']));
     expect(manager.getClient(ServerId('home-pc')), same(plex), reason: 'Plex must never be recreated by an IPTV toggle');
     final secondTrex = manager.getClient(ServerId('trex'));
     expect(secondTrex, isNotNull);
-    expect(secondTrex, isNot(same(firstTrex)), reason: 'the IPTV client is rebuilt from the updated connection');
+    expect(secondTrex, same(firstTrex), reason: 'a filter-only toggle reuses the IPTV client (build #17)');
   });
 
   test('a toggle storm never recreates the Plex client', () async {

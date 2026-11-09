@@ -129,6 +129,15 @@ void main() {
       await searchFor(tester, 'alpha');
 
       expect(find.text('Alpha Show'), findsWidgets);
+
+      // Settle the background unfiltered-load crawl before teardown:
+      // the sweep (batch 32) now finishes in ~500 ms of fake time while
+      // the crawl fallback (batch 16, ~1000 ms of 100 ms getSeries calls)
+      // is still firing, which leaves pending fake-async timers at
+      // teardown. Build #17 fix-up: the search result is already on
+      // screen; this only lets the crawl finish.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
     });
   });
 }
