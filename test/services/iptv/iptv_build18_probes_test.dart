@@ -136,6 +136,13 @@ Map<String, List<XtreamSeries>> seriesByCategory() {
   return map;
 }
 
+/// VOD rows in a second category, so a poisoned VOD disk can be shaped
+/// like v2.25.13 wrote it when 'Movies' was hidden at crawl time.
+List<XtreamVodStream> vodFillerRows() => [
+      for (var i = 0; i < 3; i++)
+        XtreamVodStream(streamId: 100 + i, name: 'Drama Filler $i', categoryId: '2'),
+    ];
+
 /// Fake panel: unfiltered series either returns the full 46,527-row list
 /// or [] (which triggers the app's per-category crawl); per-category
 /// returns the real bucket. Movies returns the one GoT documentary and
@@ -161,8 +168,10 @@ class _Build18FakeApi extends XtreamApi {
   Future<List<XtreamCategory>> getSeriesCategories() async => seriesCategories();
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
-      [const XtreamCategory(id: '1', name: 'Movies')];
+  Future<List<XtreamCategory>> getVodCategories() async => [
+        const XtreamCategory(id: '1', name: 'Movies'),
+        const XtreamCategory(id: '2', name: 'Drama'),
+      ];
 
   @override
   Future<List<XtreamCategory>> getLiveCategories() async =>
@@ -186,12 +195,25 @@ class _Build18FakeApi extends XtreamApi {
       lastVodStreamsBody = '[]';
       return const <XtreamVodStream>[];
     }
+    if (categoryId != null) lastVodStreamsBody = null; // A per-category body is never the full catalog (xtream_api.dart:179).
+    if (categoryId != null) {
+      return categoryId == '1'
+          ? const [
+              XtreamVodStream(
+                streamId: 1,
+                name: 'NF - Game of Thrones: A Day in...',
+                categoryId: '1',
+              ),
+            ]
+          : vodFillerRows();
+    }
     return [
       const XtreamVodStream(
         streamId: 1,
         name: 'NF - Game of Thrones: A Day in...',
         categoryId: '1',
       ),
+      ...vodFillerRows(),
     ];
   }
 
@@ -479,6 +501,48 @@ void main() {
         expect(results.map((i) => i.title), contains('NF - Game of Thrones: A Day in...'));
         final diskVod = await waitForDiskVod();
         expect(diskVod, isEmpty);
+      } finally {
+        client.close();
+      }
+    });
+
+    test('D6: a poisoned VOD disk still heals via the sweep', () async {
+      // Same shape as D1, for VOD: seed the disk exactly as v2.25.13
+      // wrote it when 'Movies' was hidden at crawl time — rows from
+      // every visible category, none from 'Movies', so the documentary
+      // is missing from the list the warm search trusts. The warm-up
+      // search lands the VOD load (setting _vodStreamsLoaded), so the
+      // asserted search takes the warm branch.
+      final cache = IptvCatalogDiskCache();
+      await cache.write(
+        'conn-xt-1',
+        IptvCatalogDiskCache.vodDataset,
+        jsonEncode(vodFillerRows().map((r) => r.toJson()).toList()),
+      );
+      final client = clientWith(api: _Build18FakeApi());
+      try {
+        await warmSeries(client);
+        final results = await client.searchItems('game of thrones');
+        final diag = client.lastSearchDiagnostics!;
+        // ignore: avoid_print
+        print(
+          'BUILD18-D6: titles=${results.map((i) => i.title).toList()} '
+          'movies loadRows=${diag.movies.loadRows} '
+          'loadMatches=${diag.movies.loadMatches} sweepMatches=${diag.movies.sweepMatches}',
+        );
+        // The search read the seeded disk (3 filler rows, no documentary).
+        // (loadRows == 3 pins the disk read: a network load would return
+        // 4 rows — the documentary plus the fillers. loadSource is a
+        // build #18 diagnostics addition, so this test must not reference
+        // it — the file has to compile on base too.)
+        expect(diag.movies.loadRows, 3);
+        expect(diag.movies.loadMatches, 0);
+        // FAILING-FIRST on base: the warm VOD path trusts the disk list
+        // and never sweeps, so the documentary is unfindable. On the fix,
+        // the 0-match warm branch sweeps the categories the disk does not
+        // cover ('Movies') and the documentary comes back via the sweep.
+        expect(diag.movies.sweepMatches, greaterThan(0));
+        expect(results.map((i) => i.title), contains('NF - Game of Thrones: A Day in...'));
       } finally {
         client.close();
       }
