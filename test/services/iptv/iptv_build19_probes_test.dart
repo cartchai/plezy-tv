@@ -492,7 +492,22 @@ void main() {
   });
   tearDown(() async {
     IptvCatalogDiskCache.debugDirectoryProvider = null;
-    if (await tempDir.exists()) await tempDir.delete(recursive: true);
+    // Fix-up (build #19): fire-and-forget catalog writes (`_writeDiskText`
+    // -> unawaited `_catalogCache.write`, pre-existing) can still be in
+    // flight when a test ends, so the recursive delete can fail with
+    // "Directory not empty" (errno 39) even though every product
+    // assertion already passed. Retry the delete after a settle delay
+    // instead of failing the test on teardown.
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
   });
 
   group('build19: scoped Trex — Series search leaks a Plex movie', () {
