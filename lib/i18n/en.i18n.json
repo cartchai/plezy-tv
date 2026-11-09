@@ -1407,6 +1407,12 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2264": [
+      "Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover",
+      "The first search after this update may take a few seconds — that is the repair running, not a freeze",
+      "Version numbers change with this build: PlezTV is now 1.0.0, built on Plezy 2.25.0. The next updates will be 1.0.1, 1.0.2 and so on, and the in-app updater understands the new numbers",
+      "Settings → IPTV → Last search now shows how many matches your turned-off categories hid, and where each section's list came from (saved on the phone, fresh from the provider, or pieced together per category)"
+    ],
     "changelog2263": [
       "Live TV, Movies and Series sections on the Trex categories screen now collapse, so you can jump to a section faster",
       "Category initials now turn off every category with those initials, and turning categories off no longer reloads everything",
@@ -2839,13 +2845,13 @@
     "lastSearchNone": "No search yet — search for something, then check back here.",
     "lastSearchQuery": "“${query}” · ${totalMs} ms${scoped}",
     "lastSearchScopedSuffix": " · scoped",
-    "lastSearchSection": "${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms",
+    "lastSearchSection": "${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms",
     "channelHidden": "${name} hidden",
     "hiddenChannelsTitle": "Hidden channels",
     "hiddenChannelsNone": "No hidden channels on this connection. Long-press a channel in the guide to hide it.",
     "hiddenChannelsCount": "${count} hidden",
     "unhideAll": "Unhide all",
-    "lastSearchSectionLoadNeverLanded": "${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms",
+    "lastSearchSectionLoadNeverLanded": "${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms",
     "lastSearchSectionSkipped": "${section}: skipped",
     "miniPlayerTitle": "Mini-player",
     "miniPlayerNone": "No tune yet — play a channel in Live TV, then check back here.",

@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **412 files changed, 41872 insertions, 3278 deletions**
+- Scale of the fork vs base: **413 files changed, 42310 insertions, 3291 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-08 after the build #17 commit — was 390 files /
-  +35,678/−3,259 at build #16).
+  verified 2026-11-08 after the build #18 commit — was 412 files /
+  +41,872/−3,278 at build #17).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -673,6 +673,52 @@ not update this file.)
   `video_android_rect_test.dart`, `iptv_stage2_test.dart`.
 - Progress notes: `IPTV_BUILD17_NOTES.md`. Research:
   `~/workspace/tmp_work/plezy-tv-research17/RESEARCH_BUILD17.md`.
+
+### 16. Build #18 — Trex series search, for real (poisoned disk cache), version scheme 1.0.0-2.25.0 + updater comparison fix (v1.0.0-2.25.0)
+- Root cause (`lib/media/iptv_client.dart`): `_loadSeries()` crawls
+  per-category skipping hidden categories when unfiltered `getSeries()`
+  returns `[]`, and `_loadSeriesCached()` wrote those crawl rows to
+  disk as the catalog; the warm search then trusted the partial list
+  for the 24h TTL with no fallback.
+- Never persist a crawl (`lib/media/iptv_client.dart`):
+  `_loadSeries()` / `_loadVodStreams()` return `({rows, complete})`
+  (`complete` only when the unfiltered call returned non-empty rows);
+  `_loadSeriesCached()` / `_loadVodStreamsCached()` write to disk ONLY
+  when `complete`; refresh wrappers return `[]` for a crawl so a stale
+  refresh never overwrites a good file. Live has no crawl fallback —
+  source tracking only.
+- Heal (`lib/media/iptv_client.dart`): new
+  `_sweepMissingCategories<T>` — when a warm search returns 0 matches,
+  sweep the categories the user has NOT turned off AND that no cached
+  row belongs to (deadline-bounded, batch `_searchSweepBatchSize`,
+  unchanged) before answering []. Wired into the warm branches of
+  `_searchMovies` and `_searchSeries`; a complete disk list sweeps
+  nothing. Live: source tracking only.
+- Diagnostics (`lib/media/iptv_client.dart`,
+  `lib/screens/settings/iptv_settings_screen.dart`,
+  `lib/i18n/en.i18n.json` + slang regen): `_vodLoadSource` /
+  `_seriesLoadSource` / `_liveLoadSource` ('disk' / 'network' /
+  'crawl', '' before any load) through `_SectionTrace.loadSource` →
+  `IptvSearchSectionDiagnostics.loadSource`; Last search row renders
+  `(source)` after the load and `· hidden ${hidden}` (previously
+  carried but not rendered).
+- Version scheme: `pubspec.yaml` `1.0.0-2.25.0+171` (PlezTV 1.0.0 on
+  Plezy 2.25.0; versionCode 171); About entry `1.0.0-2.25.0` →
+  `changelog2264` (sequential key; 2.25.13 entry untouched).
+- Updater (`lib/services/update_service.dart`): `_extractVersion`
+  keeps the upstream suffix; `_isNewerVersion` is PlezTV-aware — a
+  PlezTV-scheme version is always newer than a bare version, core
+  compares first then the upstream suffix among PlezTV versions, bare
+  comparison unchanged, non-version suffixes ignored.
+- New tests: `iptv_build18_probes_test.dart` (6 — D1, D1b, D2, D3,
+  D5, D4; D3's step-1 assertion corrected from research: the crawl
+  must write NOTHING, the poisoned file is seeded for the heal step),
+  8 new cases in `test/services/update_service_test.dart`.
+  Test-only fixes: `iptv_catalog_cache_test.dart` waits for the
+  refetch's fire-and-forget writes before the test ends (tearDown
+  ENOTEMPTY race); probes tearDown takes the EPG tests' retry guard.
+- Progress notes: `IPTV_BUILD18_NOTES.md`. Research:
+  `~/workspace/tmp_work/plezy-tv-research18/RESEARCH_BUILD18.md`.
 
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).

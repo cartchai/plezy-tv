@@ -231,11 +231,14 @@ class UpdateService {
     return _performUpdateCheck(respectCooldown: false, throwOnFailure: true);
   }
 
-  /// First numeric `x.y` or `x.y.z` run inside a release tag, or null when
-  /// the tag carries no version ("v2.25.2", "2.25.2", "PlezTV v2.25.2" all
-  /// yield "2.25.2"; "nightly-build" yields null).
+  /// First version token inside a release tag, or null when the tag
+  /// carries no version ("v2.25.2", "2.25.2", "PlezTV v2.25.2" all yield
+  /// "2.25.2"; "nightly-build" yields null). Build #18: the token keeps
+  /// the upstream suffix of PlezTV's own scheme ("v1.0.0-2.25.0" yields
+  /// "1.0.0-2.25.0", not "1.0.0") — dropping it made 1.0.0 read older
+  /// than 2.25.13, so the updater would never offer the new scheme.
   static String? _extractVersion(String tag) {
-    final match = RegExp(r'\d+\.\d+(?:\.\d+)?').firstMatch(tag);
+    final match = RegExp(r'\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.+-]+)?').firstMatch(tag);
     return match?.group(0);
   }
 
@@ -279,24 +282,57 @@ class UpdateService {
     }).toList();
   }
 
+  /// A parsed release version: the core number plus, for PlezTV's own
+  /// scheme (build #18), the upstream Plezy version after the dash
+  /// ("1.0.0-2.25.0" → core [1, 0, 0], upstream [2, 25, 0]). A bare
+  /// version ("2.25.13") has no upstream. A suffix that is not a version
+  /// ("2.25.2-rc1") is ignored for comparison — a pre-release tag is not
+  /// newer than the release with the same core.
+  static ({List<int> core, List<int>? upstream}) _parseVersion(String version) {
+    final dash = version.indexOf('-');
+    final corePart = dash < 0 ? version : version.substring(0, dash);
+    List<int>? upstream;
+    if (dash >= 0) {
+      final suffixParts = version.substring(dash + 1).split('.').map(int.tryParse).toList();
+      if (suffixParts.every((p) => p != null)) {
+        upstream = suffixParts.cast<int>();
+      }
+    }
+    return (core: _parseVersionParts(corePart), upstream: upstream);
+  }
+
+  /// Numeric comparison of two version part lists: -1, 0 or 1.
+  static int _compareVersionParts(List<int> a, List<int> b) {
+    final maxLength = a.length > b.length ? a.length : b.length;
+    for (int i = 0; i < maxLength; i++) {
+      final aPart = i < a.length ? a[i] : 0;
+      final bPart = i < b.length ? b[i] : 0;
+      if (aPart > bPart) return 1;
+      if (aPart < bPart) return -1;
+    }
+    return 0;
+  }
+
   /// Compare two version strings
   /// Returns true if newVersion is newer than currentVersion
+  ///
+  /// Build #18: PlezTV moved to its own numbering (1.0.0-2.25.0) after
+  /// the last bare Plezy-numbered release (2.25.13). A PlezTV-scheme
+  /// version is therefore always newer than a bare one — without this
+  /// rule 1.0.0 compares older than 2.25.13 and the updater never offers
+  /// it. Among PlezTV-scheme versions the core compares first, then the
+  /// upstream suffix (so a 2.25.1 rebase reads newer than 2.25.0).
   static bool _isNewerVersion(String newVersion, String currentVersion) {
     try {
-      final newParts = _parseVersionParts(newVersion);
-      final currentParts = _parseVersionParts(currentVersion);
-
-      // Compare each part
-      final maxLength = newParts.length > currentParts.length ? newParts.length : currentParts.length;
-
-      for (int i = 0; i < maxLength; i++) {
-        final newPart = i < newParts.length ? newParts[i] : 0;
-        final currentPart = i < currentParts.length ? currentParts[i] : 0;
-
-        if (newPart > currentPart) return true;
-        if (newPart < currentPart) return false;
+      final next = _parseVersion(newVersion);
+      final current = _parseVersion(currentVersion);
+      if (next.upstream != null && current.upstream == null) return true;
+      if (next.upstream == null && current.upstream != null) return false;
+      final core = _compareVersionParts(next.core, current.core);
+      if (core != 0) return core > 0;
+      if (next.upstream != null && current.upstream != null) {
+        return _compareVersionParts(next.upstream!, current.upstream!) > 0;
       }
-
       return false;
     } catch (error, stackTrace) {
       appLogger.e('Error comparing versions', error: error, stackTrace: stackTrace);

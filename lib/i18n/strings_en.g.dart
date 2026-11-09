@@ -3662,6 +3662,12 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2264 => [
+		'Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover',
+		'The first search after this update may take a few seconds — that is the repair running, not a freeze',
+		'Version numbers change with this build: PlezTV is now 1.0.0, built on Plezy 2.25.0. The next updates will be 1.0.1, 1.0.2 and so on, and the in-app updater understands the new numbers',
+		'Settings → IPTV → Last search now shows how many matches your turned-off categories hid, and where each section\'s list came from (saved on the phone, fresh from the provider, or pieced together per category)',
+	];
 	List<String> get changelog2263 => [
 		'Live TV, Movies and Series sections on the Trex categories screen now collapse, so you can jump to a section faster',
 		'Category initials now turn off every category with those initials, and turning categories off no longer reloads everything',
@@ -6709,8 +6715,8 @@ class Translations$iptv$en {
 	/// en: ' · scoped'
 	String get lastSearchScopedSuffix => ' · scoped';
 
-	/// en: '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms'
-	String lastSearchSection({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms';
+	/// en: '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms'
+	String lastSearchSection({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object source, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms';
 
 	/// en: '${name} hidden'
 	String channelHidden({required Object name}) => '${name} hidden';
@@ -6727,8 +6733,8 @@ class Translations$iptv$en {
 	/// en: 'Unhide all'
 	String get unhideAll => 'Unhide all';
 
-	/// en: '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms'
-	String lastSearchSectionLoadNeverLanded({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms';
+	/// en: '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms'
+	String lastSearchSectionLoadNeverLanded({required Object section, required Object returned, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms';
 
 	/// en: '${section}: skipped'
 	String lastSearchSectionSkipped({required Object section}) => '${section}: skipped';
@@ -10123,6 +10129,10 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2264.0' => 'Series search is fixed for real this time: the app was searching a saved list that was missing whole categories — including the one Game of Thrones sits in — and it trusted that list without a second look. When a search comes up empty it now checks the categories the saved list does not cover',
+			'about.changelog2264.1' => 'The first search after this update may take a few seconds — that is the repair running, not a freeze',
+			'about.changelog2264.2' => 'Version numbers change with this build: PlezTV is now 1.0.0, built on Plezy 2.25.0. The next updates will be 1.0.1, 1.0.2 and so on, and the in-app updater understands the new numbers',
+			'about.changelog2264.3' => 'Settings → IPTV → Last search now shows how many matches your turned-off categories hid, and where each section\'s list came from (saved on the phone, fresh from the provider, or pieced together per category)',
 			'about.changelog2263.0' => 'Live TV, Movies and Series sections on the Trex categories screen now collapse, so you can jump to a section faster',
 			'about.changelog2263.1' => 'Category initials now turn off every category with those initials, and turning categories off no longer reloads everything',
 			'about.changelog2263.2' => 'Series search: “game of thrones” in Trex — Series now finds the show on a cold start, and if matches are hidden by turned-off categories the empty state says so',
@@ -10366,12 +10376,12 @@ extension on Translations {
 			'explore.relation.sequel' => 'Sequel',
 			'explore.relation.sideStory' => 'Side story',
 			'explore.relation.spinOff' => 'Spin-off',
+			_ => null,
+		} ?? switch (path) {
 			'explore.relation.alternativeVersion' => 'Alternative version',
 			'explore.relation.summary' => 'Summary',
 			'explore.relation.parentStory' => 'Parent story',
 			'explore.relation.adaptation' => 'Adaptation',
-			_ => null,
-		} ?? switch (path) {
 			'explore.relation.other' => 'Related',
 			'explore.broadcast' => ({required Object day, required Object time}) => 'Airs ${day} at ${time}',
 			'explore.broadcastWithZone' => ({required Object day, required Object time, required Object timezone}) => 'Airs ${day} at ${time} ${timezone}',
@@ -10880,12 +10890,12 @@ extension on Translations {
 			'shaders.qualityFast' => 'Fast',
 			'shaders.qualityHQ' => 'High Quality',
 			'shaders.mode' => 'Mode',
+			_ => null,
+		} ?? switch (path) {
 			'shaders.importShader' => 'Import Shader',
 			'shaders.customShaderDescription' => 'Custom GLSL shader',
 			'shaders.shaderImported' => 'Shader imported',
 			'shaders.shaderImportFailed' => 'Failed to import shader',
-			_ => null,
-		} ?? switch (path) {
 			'shaders.deleteShader' => 'Delete Shader',
 			'shaders.deleteShaderConfirm' => ({required Object name}) => 'Delete "${name}"?',
 			'companionRemote.title' => 'Companion Remote',
@@ -11391,15 +11401,15 @@ extension on Translations {
 			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
 			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',
 			'iptv.lastSearchScopedSuffix' => ' · scoped',
-			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms · sweep ${sweep} · partial ${partial} · ${ms} ms',
+			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object source, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms',
 			'iptv.channelHidden' => ({required Object name}) => '${name} hidden',
 			'iptv.hiddenChannelsTitle' => 'Hidden channels',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.hiddenChannelsNone' => 'No hidden channels on this connection. Long-press a channel in the guide to hide it.',
 			'iptv.hiddenChannelsCount' => ({required Object count}) => '${count} hidden',
 			'iptv.unhideAll' => 'Unhide all',
-			'iptv.lastSearchSectionLoadNeverLanded' => ({required Object section, required Object returned, required Object sweep, required Object partial, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · ${ms} ms',
-			_ => null,
-		} ?? switch (path) {
+			'iptv.lastSearchSectionLoadNeverLanded' => ({required Object section, required Object returned, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load never landed · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms',
 			'iptv.lastSearchSectionSkipped' => ({required Object section}) => '${section}: skipped',
 			'iptv.miniPlayerTitle' => 'Mini-player',
 			'iptv.miniPlayerNone' => 'No tune yet — play a channel in Live TV, then check back here.',

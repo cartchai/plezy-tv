@@ -218,6 +218,14 @@ class IptvClient implements MediaServerClient {
   bool _seriesListLoaded = false;
   bool _liveStreamsLoaded = false;
 
+  /// Where the last catalog load came from (build #18): 'disk', 'network'
+  /// or 'crawl'. The search diagnostics render it, so a poisoned disk is
+  /// visible on the phone: a disk list written from a per-category crawl
+  /// lacks every category hidden when it was written. '' before any load.
+  String _vodLoadSource = '';
+  String _seriesLoadSource = '';
+  String _liveLoadSource = '';
+
   /// Rows published so far by an in-flight per-category crawl (build #13):
   /// [_loadVodStreams]/[_loadSeries] append each batch as it lands, so a
   /// cold search can read rows long before the whole catalog completes —
@@ -673,10 +681,15 @@ class IptvClient implements MediaServerClient {
       XtreamApi.parseLiveStreamsBody,
     );
     if (disk != null) {
+      _liveLoadSource = 'disk';
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamLiveStream>(
           dataset: IptvCatalogDiskCache.liveDataset,
-          fetch: () => _xtreamApi.getLiveStreams(),
+          fetch: () async {
+            final rows = await _xtreamApi.getLiveStreams();
+            if (rows.isNotEmpty) _liveLoadSource = 'network';
+            return rows;
+          },
           toJson: (r) => r.toJson(),
           swap: (rows) => _liveStreamsFuture = Future.value(rows),
           rawBody: () => _xtreamApi.lastLiveStreamsBody,
@@ -685,6 +698,7 @@ class IptvClient implements MediaServerClient {
       return disk.rows;
     }
     final rows = await _xtreamApi.getLiveStreams();
+    _liveLoadSource = 'network';
     _writeCatalogRows(IptvCatalogDiskCache.liveDataset, rows, (r) => r.toJson(), _xtreamApi.lastLiveStreamsBody);
     return rows;
   }
@@ -717,16 +731,33 @@ class IptvClient implements MediaServerClient {
   /// fallback) runs only on a miss, and the merged rows are written to
   /// disk — so a panel whose unfiltered call returns [] still gets a
   /// cached catalog from the fallback sweep.
+  ///
+  /// Build #18: the disk write happens ONLY when the load came from the
+  /// unfiltered call. A crawl's rows are missing every hidden category,
+  /// so persisting them bakes the filter into storage — the exact poison
+  /// that made Trex series search return [] on the phone (the VOD loader
+  /// has the same shape). Crawl rows are served in memory, never written.
   Future<List<XtreamVodStream>> _loadVodStreamsCached() async {
     final disk = await _readDiskCatalog<XtreamVodStream>(
       IptvCatalogDiskCache.vodDataset,
       XtreamApi.parseVodStreamsBody,
     );
     if (disk != null) {
+      _vodLoadSource = 'disk';
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamVodStream>(
           dataset: IptvCatalogDiskCache.vodDataset,
-          fetch: _loadVodStreams,
+          fetch: () async {
+            final loaded = await _loadVodStreams();
+            // A crawl-shaped refresh must not overwrite the disk file:
+            // return [] so the refresh skips, and the served rows stay
+            // the disk rows (the source stays 'disk' with them).
+            if (loaded.complete) {
+              _vodLoadSource = 'network';
+              return loaded.rows;
+            }
+            return const <XtreamVodStream>[];
+          },
           toJson: (r) => r.toJson(),
           swap: (rows) {
             _vodStreamsFuture = Future.value(rows);
@@ -737,23 +768,31 @@ class IptvClient implements MediaServerClient {
       }
       return disk.rows;
     }
-    final rows = await _loadVodStreams();
-    _writeCatalogRows(IptvCatalogDiskCache.vodDataset, rows, (r) => r.toJson(), _xtreamApi.lastVodStreamsBody);
-    return rows;
+    final loaded = await _loadVodStreams();
+    _vodLoadSource = loaded.complete ? 'network' : 'crawl';
+    if (loaded.complete) {
+      _writeCatalogRows(IptvCatalogDiskCache.vodDataset, loaded.rows, (r) => r.toJson(), _xtreamApi.lastVodStreamsBody);
+    }
+    return loaded.rows;
   }
 
   /// Unfiltered first (the fast path when the panel answers); when it
   /// returns [], fall back to a per-category fetch — the panel answers
   /// per-category calls even when the unfiltered call is empty.
-  Future<List<XtreamVodStream>> _loadVodStreams() async {
+  ///
+  /// Returns whether the rows came from the unfiltered call ([complete])
+  /// or the per-category crawl: crawl rows are missing every hidden
+  /// category, so they must never be persisted as the catalog (build
+  /// #18) — see [_loadVodStreamsCached].
+  Future<({List<XtreamVodStream> rows, bool complete})> _loadVodStreams() async {
     final all = await _xtreamApi.getVodStreams();
-    if (all.isNotEmpty) return all;
+    if (all.isNotEmpty) return (rows: all, complete: true);
     final categories = await _vodCategories().catchError((Object e) {
       appLogger.w('IPTV: VOD category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
     final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
-    if (wanted.isEmpty) return const [];
+    if (wanted.isEmpty) return (rows: const <XtreamVodStream>[], complete: false);
     final out = <XtreamVodStream>[];
     final seen = <int>{};
     // Publish each batch as it lands (build #13): a cold search reads
@@ -786,7 +825,7 @@ class IptvClient implements MediaServerClient {
         _vodCrawledCategoryIds.addAll(batch.map((c) => c.id));
       }
     }
-    return out;
+    return (rows: out, complete: false);
   }
 
   Future<List<XtreamSeries>> _seriesList() async {
@@ -813,16 +852,33 @@ class IptvClient implements MediaServerClient {
   /// startup warm-up ([warmUpSeriesCatalog]) now reads the disk copy, so
   /// the second search after app start finds a warm catalog without ever
   /// touching the network when the cache is fresh.
+  ///
+  /// Build #18: the disk write happens ONLY when the load came from the
+  /// unfiltered call. A crawl's rows are missing every hidden category,
+  /// so persisting them bakes the filter into storage — the poison that
+  /// made Trex series search return [] on the phone. Crawl rows are
+  /// served in memory, never written.
   Future<List<XtreamSeries>> _loadSeriesCached() async {
     final disk = await _readDiskCatalog<XtreamSeries>(
       IptvCatalogDiskCache.seriesDataset,
       XtreamApi.parseSeriesBody,
     );
     if (disk != null) {
+      _seriesLoadSource = 'disk';
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamSeries>(
           dataset: IptvCatalogDiskCache.seriesDataset,
-          fetch: _loadSeries,
+          fetch: () async {
+            final loaded = await _loadSeries();
+            // A crawl-shaped refresh must not overwrite the disk file:
+            // return [] so the refresh skips, and the served rows stay
+            // the disk rows (the source stays 'disk' with them).
+            if (loaded.complete) {
+              _seriesLoadSource = 'network';
+              return loaded.rows;
+            }
+            return const <XtreamSeries>[];
+          },
           toJson: (r) => r.toJson(),
           swap: (rows) {
             _seriesFuture = Future.value(rows);
@@ -833,21 +889,29 @@ class IptvClient implements MediaServerClient {
       }
       return disk.rows;
     }
-    final rows = await _loadSeries();
-    _writeCatalogRows(IptvCatalogDiskCache.seriesDataset, rows, (r) => r.toJson(), _xtreamApi.lastSeriesBody);
-    return rows;
+    final loaded = await _loadSeries();
+    _seriesLoadSource = loaded.complete ? 'network' : 'crawl';
+    if (loaded.complete) {
+      _writeCatalogRows(IptvCatalogDiskCache.seriesDataset, loaded.rows, (r) => r.toJson(), _xtreamApi.lastSeriesBody);
+    }
+    return loaded.rows;
   }
 
   /// Same empty-unfiltered fallback as [_loadVodStreams], for series.
-  Future<List<XtreamSeries>> _loadSeries() async {
+  ///
+  /// Returns whether the rows came from the unfiltered call ([complete])
+  /// or the per-category crawl: crawl rows are missing every hidden
+  /// category, so they must never be persisted as the catalog (build
+  /// #18) — see [_loadSeriesCached].
+  Future<({List<XtreamSeries> rows, bool complete})> _loadSeries() async {
     final all = await _xtreamApi.getSeries();
-    if (all.isNotEmpty) return all;
+    if (all.isNotEmpty) return (rows: all, complete: true);
     final categories = await _seriesCategories().catchError((Object e) {
       appLogger.w('IPTV: series category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
     final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
-    if (wanted.isEmpty) return const [];
+    if (wanted.isEmpty) return (rows: const <XtreamSeries>[], complete: false);
     final out = <XtreamSeries>[];
     final seen = <int>{};
     // Publish each batch as it lands (build #13) — see [_loadVodStreams].
@@ -877,7 +941,7 @@ class IptvClient implements MediaServerClient {
         _seriesCrawledCategoryIds.addAll(batch.map((c) => c.id));
       }
     }
-    return out;
+    return (rows: out, complete: false);
   }
 
   Future<List<M3uEntry>> _m3uEntries() {
@@ -2191,6 +2255,42 @@ class IptvClient implements MediaServerClient {
     }
   }
 
+  /// Build #18: sweep the categories a cached list does not represent.
+  /// A disk file written from a per-category crawl (before the fix, or
+  /// from a panel that answered [] to the unfiltered call) lacks every
+  /// category hidden when it was written, so a warm search over it
+  /// returns [] for shows in those categories even though they exist.
+  /// When the warm filter found nothing, fetch the missing categories —
+  /// the ones the user has NOT turned off and that no cached row belongs
+  /// to — before answering []. A complete disk list sweeps nothing:
+  /// [wanted] is empty and this returns immediately, so a genuine
+  /// no-match costs no extra calls.
+  Future<void> _sweepMissingCategories<T>({
+    required Future<List<XtreamCategory>> Function() loadCategories,
+    required Future<List<T>> Function(String categoryId) loadCategory,
+    required void Function(List<T> rows) onRows,
+    required Set<String?> represented,
+    required bool Function() shouldStop,
+    required DateTime deadline,
+  }) async {
+    final categories = await loadCategories().catchError((Object e) {
+      appLogger.w('IPTV: category list unavailable for warm-path sweep: $e');
+      return const <XtreamCategory>[];
+    });
+    final wanted = categories
+        .where((c) => !_isHiddenCategory(c.id, c.name) && !represented.contains(c.id))
+        .toList(growable: false);
+    if (wanted.isEmpty) return;
+    await _sweepCatalogCategories<T>(
+      wanted,
+      loadCategory,
+      onRows,
+      shouldStop,
+      deadline,
+      batchSize: _searchSweepBatchSize,
+    );
+  }
+
   /// Deadline for a cold-catalog sweep, measured from the SECTION start
   /// (build #10): 90% of the section budget, so the sweep returns partial
   /// matches instead of being cut to [] by the outer timeout, with room
@@ -2211,10 +2311,30 @@ class IptvClient implements MediaServerClient {
         final rows = await _vodStreams();
         final out = <MediaItem>[];
         trace.partialOut = out;
-        _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
+        final seen = <int>{};
+        _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
         trace.loadRows = rows.length;
+        trace.loadSource = _vodLoadSource;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
+        if (out.isEmpty) {
+          // Build #18: the disk list may be crawl-shaped (written before
+          // the fix) — categories hidden when the file was written have
+          // no rows in it. Sweep the categories it does not represent
+          // before answering [].
+          await _sweepMissingCategories<XtreamVodStream>(
+            loadCategories: _vodCategories,
+            loadCategory: (id) => _xtreamApi.getVodStreams(categoryId: id),
+            onRows: (sweepRows) {
+              final before = out.length;
+              _appendMovieMatches(sweepRows, needle, limit, favorites, categoryNames, out, seen, trace);
+              trace.sweepMatches += out.length - before;
+            },
+            represented: {for (final r in rows) r.categoryId},
+            shouldStop: () => out.length >= limit,
+            deadline: _sweepDeadline(sectionStarted),
+          );
+        }
         trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
         return out;
       }
@@ -2249,6 +2369,7 @@ class IptvClient implements MediaServerClient {
           if (finished || rows.isEmpty) return;
           loadLanded = true;
           trace.loadRows = rows.length;
+          trace.loadSource = _vodLoadSource;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
           _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2308,6 +2429,7 @@ class IptvClient implements MediaServerClient {
             if (rows.isNotEmpty && !loadLanded) {
               loadLanded = true;
               trace.loadRows = rows.length;
+              trace.loadSource = _vodLoadSource;
               trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
               final before = out.length;
               _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2350,10 +2472,33 @@ class IptvClient implements MediaServerClient {
         final rows = await _seriesList();
         final out = <MediaItem>[];
         trace.partialOut = out;
-        _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
+        final seen = <int>{};
+        _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
         trace.loadRows = rows.length;
+        trace.loadSource = _seriesLoadSource;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
+        if (out.isEmpty) {
+          // Build #18: the disk list may be crawl-shaped (written before
+          // the fix, or from a panel that answered [] to the unfiltered
+          // call) — categories hidden when the file was written have no
+          // rows in it, so the show is unfindable from the cached list
+          // alone. Sweep the categories it does not represent before
+          // answering []. This is what heals Matt's phone even with the
+          // poisoned file still on disk.
+          await _sweepMissingCategories<XtreamSeries>(
+            loadCategories: _seriesCategories,
+            loadCategory: (id) => _xtreamApi.getSeries(categoryId: id),
+            onRows: (sweepRows) {
+              final before = out.length;
+              _appendSeriesMatches(sweepRows, needle, limit, favorites, categoryNames, out, seen, trace);
+              trace.sweepMatches += out.length - before;
+            },
+            represented: {for (final r in rows) r.categoryId},
+            shouldStop: () => out.length >= limit,
+            deadline: _sweepDeadline(sectionStarted),
+          );
+        }
         trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
         return out;
       }
@@ -2382,6 +2527,7 @@ class IptvClient implements MediaServerClient {
           if (finished || rows.isEmpty) return;
           loadLanded = true;
           trace.loadRows = rows.length;
+          trace.loadSource = _seriesLoadSource;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
           _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2434,6 +2580,7 @@ class IptvClient implements MediaServerClient {
             if (rows.isNotEmpty && !loadLanded) {
               loadLanded = true;
               trace.loadRows = rows.length;
+              trace.loadSource = _seriesLoadSource;
               trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
               final before = out.length;
               _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2488,6 +2635,7 @@ class IptvClient implements MediaServerClient {
         trace.partialOut = out;
         _appendLiveMatches(rows, needle, limit, categoryNames, out, <int>{}, trace);
         trace.loadRows = rows.length;
+        trace.loadSource = _liveLoadSource;
         trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
         trace.loadMatches = out.length;
         trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
@@ -2507,6 +2655,7 @@ class IptvClient implements MediaServerClient {
           if (finished || rows.isEmpty) return;
           loadLanded = true;
           trace.loadRows = rows.length;
+          trace.loadSource = _liveLoadSource;
           trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
           final before = out.length;
           _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
@@ -2539,6 +2688,7 @@ class IptvClient implements MediaServerClient {
           if (rows.isNotEmpty && !loadLanded) {
             loadLanded = true;
             trace.loadRows = rows.length;
+            trace.loadSource = _liveLoadSource;
             trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
             final before = out.length;
             _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
@@ -3317,6 +3467,11 @@ class IptvCatalogDiagnostics {
 class _SectionTrace {
   int loadRows = -1;
   int loadMs = -1;
+
+  /// Where the catalog rows came from (build #18): 'disk', 'network' or
+  /// 'crawl'. '' when the load never landed. Rendered in the Last search
+  /// row so a poisoned disk is visible on the phone.
+  String loadSource = '';
   int loadMatches = 0;
   int sweepMatches = 0;
   int partialMatches = 0;
@@ -3341,6 +3496,7 @@ class _SectionTrace {
   IptvSearchSectionDiagnostics get diagnostics => IptvSearchSectionDiagnostics(
     loadRows: loadRows,
     loadMs: loadMs,
+    loadSource: loadSource,
     loadMatches: loadMatches,
     sweepMatches: sweepMatches,
     partialMatches: partialMatches,
@@ -3356,6 +3512,7 @@ class IptvSearchSectionDiagnostics {
   const IptvSearchSectionDiagnostics({
     required this.loadRows,
     required this.loadMs,
+    this.loadSource = '',
     required this.loadMatches,
     required this.sweepMatches,
     required this.partialMatches,
@@ -3370,6 +3527,10 @@ class IptvSearchSectionDiagnostics {
 
   /// Milliseconds the load took to land (-1 when it never landed).
   final int loadMs;
+
+  /// Where the catalog rows came from (build #18): 'disk', 'network' or
+  /// 'crawl'. '' when the load never landed.
+  final String loadSource;
 
   /// Matches that came from the full catalog load.
   final int loadMatches;

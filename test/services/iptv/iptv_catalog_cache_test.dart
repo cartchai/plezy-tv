@@ -425,6 +425,15 @@ void main() {
       final page = await first.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
       expect(page.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
       expect(api.vodCalls + api.liveCalls, greaterThan(callsBefore));
+      // The refetch's disk writes are fire-and-forget (the VOD rows and
+      // the category names the page items need), and the last of them is
+      // scheduled inside _vodPageItems — after the page returns. Let them
+      // land before the test ends, or tearDown's recursive delete of the
+      // temp dir races a write still in flight and fails with
+      // "Directory not empty" (build #18: the race fires more often
+      // here than on base, same writes, same contract).
+      await waitForDataset(IptvCatalogDiskCache.vodDataset);
+      await waitForDataset(IptvCatalogDiskCache.vodCategoriesDataset);
     });
 
     test('a write in flight when the cache is cleared does not resurrect the file', () async {

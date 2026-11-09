@@ -212,6 +212,124 @@ void main() {
     expect(info['publishedAt'], '');
   });
 
+  // Build #18: PlezTV's own version scheme (1.0.0-2.25.0) and the updater
+  // comparison that must read it as newer than any bare 2.25.x. The
+  // file's mocked current version is 1.0.0 (see setUp above); each test
+  // below sets the mock it needs — setMockInitialValues replaces the
+  // mock, and fromPlatform returns it.
+  void mockCurrentVersion(String version) {
+    PackageInfo.setMockInitialValues(
+      appName: 'Plezy',
+      packageName: 'com.plezy.test',
+      version: version,
+      buildNumber: '1',
+      buildSignature: '',
+    );
+  }
+
+  test('a "v1.0.0-2.25.0" tag is an update for a 2.25.13 install', () async {
+    mockCurrentVersion('2.25.13');
+    final info = await checkRelease({
+      'tag_name': 'v1.0.0-2.25.0',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.0-2.25.0',
+      'published_at': '2026-11-08T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['hasUpdate'], isTrue);
+    expect(info['latestVersion'], '1.0.0-2.25.0');
+    expect(info['currentVersion'], '2.25.13');
+  });
+
+  test('a bare "1.0.0-2.25.0" tag (no v) is an update for a 2.25.13 install', () async {
+    mockCurrentVersion('2.25.13');
+    final info = await checkRelease({
+      'tag_name': '1.0.0-2.25.0',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.0-2.25.0',
+      'published_at': '2026-11-08T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['latestVersion'], '1.0.0-2.25.0');
+  });
+
+  test('a "PlezTV v1.0.0-2.25.0" tag is an update for a 2.25.13 install', () async {
+    mockCurrentVersion('2.25.13');
+    final info = await checkRelease({
+      'tag_name': 'PlezTV v1.0.0-2.25.0',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.0-2.25.0',
+      'published_at': '2026-11-08T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['latestVersion'], '1.0.0-2.25.0');
+  });
+
+  test('a "v2.25.13" tag is not an update for a 2.25.13 install', () async {
+    mockCurrentVersion('2.25.13');
+    final info = await checkRelease({
+      'tag_name': 'v2.25.13',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v2.25.13',
+      'published_at': '2026-11-08T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNull);
+  });
+
+  test('a "v1.0.0-2.25.0" tag is not an update for a 1.0.0-2.25.0 install', () async {
+    mockCurrentVersion('1.0.0-2.25.0');
+    final info = await checkRelease({
+      'tag_name': 'v1.0.0-2.25.0',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.0-2.25.0',
+      'published_at': '2026-11-08T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNull);
+  });
+
+  test('a "v1.0.1-2.25.0" tag is an update for a 1.0.0-2.25.0 install', () async {
+    mockCurrentVersion('1.0.0-2.25.0');
+    final info = await checkRelease({
+      'tag_name': 'v1.0.1-2.25.0',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.1-2.25.0',
+      'published_at': '2026-11-09T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['latestVersion'], '1.0.1-2.25.0');
+  });
+
+  test('a "v1.0.0-2.25.1" tag (upstream rebase) is an update for a 1.0.0-2.25.0 install', () async {
+    mockCurrentVersion('1.0.0-2.25.0');
+    final info = await checkRelease({
+      'tag_name': 'v1.0.0-2.25.1',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v1.0.0-2.25.1',
+      'published_at': '2026-11-09T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNotNull);
+    expect(info!['latestVersion'], '1.0.0-2.25.1');
+  });
+
+  test('a bare "v2.25.14" tag is not an update for a 1.0.0-2.25.0 install', () async {
+    mockCurrentVersion('1.0.0-2.25.0');
+    final info = await checkRelease({
+      'tag_name': 'v2.25.14',
+      'html_url': 'https://github.com/cartchai/plezy-tv/releases/tag/v2.25.14',
+      'published_at': '2026-11-09T00:00:00Z',
+      'assets': [],
+    });
+
+    expect(info, isNull);
+  });
+
   for (final failure in failedResponses.entries) {
     test('startup ${failure.key} records cooldown before request and manual check bypasses it', () async {
       final prefs = await BaseSharedPreferencesService.sharedCache();

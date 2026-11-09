@@ -702,6 +702,7 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
         returned: s.returned,
         sweep: s.sweepMatches,
         partial: s.partialMatches,
+        hidden: s.hiddenMatches,
         ms: s.ms,
       );
     }
@@ -710,8 +711,10 @@ class _IptvCatalogDiagnosticsState extends State<_IptvCatalogDiagnostics> {
       returned: s.returned,
       loadRows: s.loadRows,
       loadMs: s.loadMs,
+      source: s.loadSource.isEmpty ? '?' : s.loadSource,
       sweep: s.sweepMatches,
       partial: s.partialMatches,
+      hidden: s.hiddenMatches,
       ms: s.ms,
     );
   }
