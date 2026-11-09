@@ -113,6 +113,57 @@ void main() {
 
       expect(detection.isAutomotive, isFalse);
     });
+
+    test('a Quest headset is not a TV despite having no touchscreen', () {
+      // Horizon OS reports no touchscreen, so the no_touchscreen reason
+      // fires — but the headset's controller cannot drive the TV focus UI,
+      // so the TV verdict is vetoed and the phone/tablet layout is used.
+      final detection = detectAndroidTvFromSystemFeatures([
+        'horizonos.software.horizon_os',
+        'android.hardware.faketouch',
+      ]);
+
+      expect(detection.isHorizonOs, isTrue);
+      expect(detection.isTv, isFalse);
+      expect(detection.reasons, contains('no_touchscreen'));
+      expect(detection.reasons, contains('horizon_os'));
+    });
+
+    test('Horizon OS vetoes a stray leanback flag, like the automotive veto', () {
+      final detection = detectAndroidTvFromSystemFeatures([
+        'horizonos.software.horizon_os',
+        'android.software.leanback',
+        'android.hardware.touchscreen',
+      ]);
+
+      expect(detection.isHorizonOs, isTrue);
+      expect(detection.isTv, isFalse);
+      expect(detection.reasons, contains('horizon_os'));
+    });
+
+    test('Horizon OS alone, with a touchscreen, is still not a TV', () {
+      final detection = detectAndroidTvFromSystemFeatures([
+        'horizonos.software.horizon_os',
+        'android.hardware.touchscreen',
+      ]);
+
+      expect(detection.isHorizonOs, isTrue);
+      expect(detection.isTv, isFalse);
+      expect(detection.reasons, contains('horizon_os'));
+      expect(detection.reasons, isNot(contains('no_touchscreen')));
+    });
+
+    test('ordinary devices are not Horizon OS', () {
+      final detection = detectAndroidTvFromSystemFeatures(['android.hardware.touchscreen']);
+
+      expect(detection.isHorizonOs, isFalse);
+    });
+  });
+
+  group('isHorizonOs', () {
+    test('is false before TV detection has run', () {
+      expect(PlatformDetector.isHorizonOs(), isFalse);
+    });
   });
 
   group('pictureInPictureAllowed', () {

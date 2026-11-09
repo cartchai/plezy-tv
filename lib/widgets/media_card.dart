@@ -329,6 +329,11 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
   int? _cachedSemanticViewOffsetMs;
   int? _cachedSemanticDurationMs;
 
+  /// Whether the pointer is over the card. Drives the hover-revealed •••
+  /// menu button (Quest fix): a laser pointer hovers, a finger never does,
+  /// so touch users never see the button and their long-press is unchanged.
+  bool _hovered = false;
+
   CatalogItem? get _catalogItem => _cachedCatalogItem;
 
   @override
@@ -496,6 +501,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
             onLongPress: showContextMenuFromTap,
             onSecondaryTapDown: storeTapPosition,
             onSecondaryTap: showContextMenuFromTap,
+            onMenuTap: showContextMenu,
             density: SettingsService.instance.read(SettingsService.libraryDensity),
             isOffline: widget.isOffline,
             localPosterPath: localPosterPath,
@@ -609,14 +615,18 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
   }
 
   /// Activation plus the long-press / right-click context-menu seams.
-  Widget _buildTapRegion(BuildContext context, Object item, {required Widget child}) => _CardTapRegion(
-    onTap: () => _handleTap(context, item),
-    onTapDown: storeTapPosition,
-    onLongPress: showContextMenuFromTap,
-    onSecondaryTapDown: storeTapPosition,
-    onSecondaryTap: showContextMenuFromTap,
-    borderRadius: BorderRadius.circular(tokens(context).radiusSm),
-    child: child,
+  Widget _buildTapRegion(BuildContext context, Object item, {required Widget child}) => MouseRegion(
+    onEnter: (_) => setState(() => _hovered = true),
+    onExit: (_) => setState(() => _hovered = false),
+    child: _CardTapRegion(
+      onTap: () => _handleTap(context, item),
+      onTapDown: storeTapPosition,
+      onLongPress: showContextMenuFromTap,
+      onSecondaryTapDown: storeTapPosition,
+      onSecondaryTap: showContextMenuFromTap,
+      borderRadius: BorderRadius.circular(tokens(context).radiusSm),
+      child: child,
+    ),
   );
 
   /// Focus-bordered artwork with the watched indicator and catalog badges on
@@ -648,6 +658,17 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
     final overlays = <Widget>[
       if (item is MediaItem && _showsWatchedIndicator(item)) WatchedIndicator(item: item),
       if (badgeLabels.isNotEmpty) _CatalogBadges(labels: badgeLabels),
+      // Quest fix: a ••• button over the poster, revealed on hover, that
+      // opens the same context menu as a long-press — a controller cannot
+      // long-press reliably. Bottom-right clears the top-right watched
+      // checkmark and the top-left catalog badges; it sits just above the
+      // bottom progress bar. Touch users never hover, so they never see it.
+      if (_hovered)
+        Positioned(
+          right: 6,
+          bottom: 6,
+          child: _CardMenuButton(onTap: showContextMenu),
+        ),
     ];
     return ExcludeSemantics(
       child: _CatalogFocusBorder(
@@ -753,6 +774,9 @@ class _MediaCardList extends StatelessWidget {
   final void Function(TapDownDetails)? onTapDown;
   final VoidCallback? onSecondaryTap;
   final void Function(TapDownDetails)? onSecondaryTapDown;
+  /// Opens the same context menu as a long-press. Quest fix: the trailing
+  /// ••• is the pointer path to the menu on list rows.
+  final VoidCallback onMenuTap;
   final int density;
   final bool isOffline;
   final String? localPosterPath;
@@ -770,6 +794,7 @@ class _MediaCardList extends StatelessWidget {
     this.onTapDown,
     this.onSecondaryTap,
     this.onSecondaryTapDown,
+    required this.onMenuTap,
     required this.density,
     this.isOffline = false,
     this.localPosterPath,
@@ -1045,6 +1070,11 @@ class _MediaCardList extends StatelessWidget {
                   ],
                 ),
               ),
+              // Quest fix: trailing ••• opens the same context menu as a
+              // long-press. Always visible on list rows (the track-row
+              // precedent) — list rows have no hover state to reveal it.
+              const SizedBox(width: 4),
+              _CardMenuButton(onTap: onMenuTap),
             ],
           ),
         ),
@@ -1434,6 +1464,40 @@ List<String> _buildCatalogBadgeLabels(CatalogItem? item, DateTime? now) {
 
   add(_catalogEpisodeBadge(item));
   return labels;
+}
+
+/// Small ••• button over a poster / at the end of a row, opening the same
+/// context menu as a long-press. Quest fix: a controller cannot long-press
+/// reliably, and it has no right-click — this is the pointer path to the
+/// menu. The poster variant is hover-revealed (see [MediaCardState]); the
+/// row variant is always visible, matching the track-row trailing icon.
+/// The poster variant sits inside the poster's [ExcludeSemantics] zone, so
+/// the card's own long-press semantics still expose the menu to assistive
+/// tech; the row variant's tap merges into the card's [MergeSemantics] node.
+class _CardMenuButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _CardMenuButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // A plain GestureDetector + Container on purpose, not Material + InkWell:
+    // the latter splits a surrounding MergeSemantics node (proven on
+    // EpisodeCard, where it dropped the summary out of the card's accessible
+    // label). No ink ripple on a 30px overlay button is a fair trade.
+    return Tooltip(
+      message: t.common.options,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), shape: BoxShape.circle),
+          child: const Center(child: AppIcon(Symbols.more_vert_rounded, size: 18, color: Colors.white)),
+        ),
+      ),
+    );
+  }
 }
 
 class _CatalogBadges extends StatelessWidget {

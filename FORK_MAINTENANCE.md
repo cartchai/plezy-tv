@@ -720,6 +720,54 @@ not update this file.)
 - Progress notes: `IPTV_BUILD18_NOTES.md`. Research:
   `~/workspace/tmp_work/plezy-tv-research18/RESEARCH_BUILD18.md`.
 
+### 17. Quest fix — Horizon OS TV veto, mouse-drag scrolling, pointer menu buttons, player mouse gestures, Oculus manifest (unversioned; rebased onto build #19 before release)
+- Root cause: Quest has no touchscreen, and the app's TV detection treats
+  "no touchscreen" as a TV, so Quest gets the focus-driven TV interface —
+  but a Quest controller sends zero D-pad keys (laser pointer = mouse
+  hover/click/drag, thumbstick = scroll events, B/Y = back). Upstream-identical
+  behaviour (verified in upstream Plezy on Quest) — inherited, not
+  fork-introduced. Discover's failure is structural: TV mode renders
+  `TvSpotlightScaffold` with no vertical Scrollable; the library grid DOES
+  scroll, so scroll input reaches the app.
+- Horizon OS TV veto (`android/app/src/main/kotlin/com/matt/plezytv/PlezyActivity.kt`,
+  `lib/utils/platform_detector.dart`): Kotlin `getAndroidTvDetection()`
+  returns `isHorizonOs` from `pm.hasSystemFeature("horizonos.software.horizon_os")`
+  (NOT `Build.MANUFACTURER`), reason `'horizon_os'` added,
+  `isTv = !isAutomotive && !isHorizonOs && reasons.isNotEmpty()`; the Dart
+  fallback mirrors it (`AndroidTvFeatureDetection.isHorizonOs`,
+  `TvDetectionService.isHorizonOsSync()`, `PlatformDetector.isHorizonOs()`).
+  Force-TV override can still force TV on (same as the automotive precedent).
+  New divergence in otherwise upstream-identical files — keep the veto on a
+  rebase.
+- Mouse-drag scrolling (`lib/utils/app_scroll_behavior.dart` — NEW,
+  `lib/main.dart`): `AppScrollBehavior` adds `PointerDeviceKind.mouse` to
+  `dragDevices`; applied on both `MaterialApp`s (live :2003, bootstrap :881).
+- Pointer menu buttons (`lib/widgets/media_card.dart`,
+  `lib/widgets/episode_card.dart`,
+  `lib/screens/playlist/playlist_item_card.dart`,
+  `lib/screens/libraries/folder_tree_item.dart`): a ••• opens the same
+  context menu as a long-press — hover-revealed on grid posters
+  (bottom-right), always-visible trailing button on list/episode/playlist/
+  folder-media rows; plain folders get none (their menu is just
+  Play/Shuffle, already buttons). Tooltip `t.common.options`.
+- Player mouse gestures (`lib/widgets/video_controls/parts/playback_input.dart`):
+  edge-adjustment handlers accept mouse alongside touch; two-finger tap
+  stays touch-only. The `!isTV()` gates lift on Quest via the veto.
+- Manifest (`android/app/src/main/AndroidManifest.xml`):
+  `resizeableActivity="true"`, `<layout defaultWidth 1024dp /
+  defaultHeight 640dp>`, `com.oculus.supportedDevices =
+  quest2|questpro|quest3|quest3s`, `com.oculus.application_type = panel`.
+  Leanback declarations KEPT; minSdk unchanged (25).
+- Guide is OUT of scope for this build (Matt): no guide scroll/menu work;
+  the "No program data" guide is his Plex server's guide data, not an app
+  bug. Refresh buttons verified already present on every RefreshIndicator
+  screen — no code. Thumbstick scroll UNPROVEN (headset-only).
+- New tests: `test/utils/app_scroll_behavior_test.dart`,
+  `test/utils/platform_detector_test.dart` additions,
+  `test/widgets/quest_card_menu_buttons_test.dart` (5).
+- Progress notes: `IPTV_BUILD_QUEST_NOTES.md`. Research:
+  `~/workspace/tmp_work/plezy-tv-research-quest/RESEARCH_QUEST.md`.
+
 ## Deliberately NOT renamed (do not rename during a repatch)
 - Dart package name stays `plezy` (~1,000 imports).
 - libass module keeps `com.edde746.plezy.libass` (its JNI names match).

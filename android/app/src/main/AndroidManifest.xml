@@ -48,6 +48,17 @@
         <!-- Driver-distraction state on Android Automotive OS. Optional: the platform library is
              absent on every other form factor, and CarRestrictionsMonitor falls back silently. -->
         <uses-library android:name="android.car" android:required="false" />
+        <!-- Meta Quest 2D panel (Quest fix): declare the supported headsets
+             and the panel application type so Horizon OS runs the app as a
+             resizable 2D panel instead of in compatibility mode. Quest
+             ignores the leanback declarations below; Android TV still needs
+             them, so they stay. -->
+        <meta-data
+            android:name="com.oculus.supportedDevices"
+            android:value="quest2|questpro|quest3|quest3s" />
+        <meta-data
+            android:name="com.oculus.application_type"
+            android:value="panel" />
         <!-- The activity itself has no launcher entry: the launcher components are the aliases
              below, so the app icon can be switched by enabling one alias and disabling the rest.
              Deep links stay here so they resolve whichever alias is enabled.
@@ -62,9 +73,17 @@
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:configChanges="orientation|keyboardHidden|keyboard|navigation|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
+            <!-- Meta Quest 2D panel: default window size when the app opens
+                 on Horizon OS instead of the fixed phone-sized panel that
+                 compatibility mode would give it. (Quest fix; aapt2 accepts
+                 this element — verified by linking a test manifest.) -->
+            <layout
+                android:defaultWidth="1024dp"
+                android:defaultHeight="640dp" />
             <meta-data
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"

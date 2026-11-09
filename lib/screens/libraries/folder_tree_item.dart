@@ -476,6 +476,29 @@ class _FolderTreeItemState extends State<FolderTreeItem> with ContextMenuTapMixi
             ),
           ),
         ],
+        // Quest fix: ••• opens the same row menu as a long-press, which a
+        // controller cannot perform reliably. Media rows only — a plain
+        // folder's menu holds just Play/Shuffle, which are already
+        // trailing buttons on the row.
+        if (_isMediaRow)
+          FocusableButton(
+            useBackgroundFocus: true,
+            onPressed: _showRowMenu,
+            child: IconButton(
+              onPressed: _showRowMenu,
+              icon: AppIcon(
+                Symbols.more_vert_rounded,
+                fill: 1,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+              tooltip: t.common.options,
+              iconSize: 18,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              padding: .zero,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
       ],
     );
   }

@@ -303,6 +303,12 @@ class PlezyActivity : FlutterActivity() {
     val hasTouchscreen = pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
     val hasFakeTouch = pm.hasSystemFeature(PackageManager.FEATURE_FAKETOUCH)
     val isAutomotive = pm.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)
+    // Meta Horizon OS (Quest headsets), via the supported system-feature
+    // check — never Build.MANUFACTURER (Meta's compatibility requirements
+    // forbid inferring the platform from it). A Quest has no touchscreen,
+    // which would otherwise read as a TV, but its laser-pointer controller
+    // sends no D-pad keys, so the TV focus UI is undrivable there.
+    val isHorizonOs = pm.hasSystemFeature("horizonos.software.horizon_os")
 
     val reasons = mutableListOf<String>()
     if (isTelevisionUiMode) reasons.add("ui_mode_television")
@@ -310,13 +316,17 @@ class PlezyActivity : FlutterActivity() {
     if (hasLeanback) reasons.add("leanback")
     if (hasFireTvFeature) reasons.add("fire_tv")
     if (!hasTouchscreen) reasons.add("no_touchscreen")
+    if (isHorizonOs) reasons.add("horizon_os")
 
     return mapOf(
       // A car is never a TV: rotary-only head units report no touchscreen, and
       // an OEM image can carry a stray leanback flag. Keep the raw reasons for
       // diagnostics, but never let them promote a vehicle to the TV experience.
-      "isTv" to (!isAutomotive && reasons.isNotEmpty()),
+      // A Quest headset is never a TV either, for the same no-touchscreen
+      // reason: its controller cannot drive the TV focus UI.
+      "isTv" to (!isAutomotive && !isHorizonOs && reasons.isNotEmpty()),
       "isAutomotive" to isAutomotive,
+      "isHorizonOs" to isHorizonOs,
       "reasons" to reasons,
       "isTelevisionUiMode" to isTelevisionUiMode,
       "hasTelevisionFeature" to hasTelevisionFeature,

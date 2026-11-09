@@ -160,6 +160,17 @@ class PlaylistItemCardState extends State<PlaylistItemCard> with ContextMenuTapM
 
                 const SizedBox(width: 8),
 
+                // Quest fix: ••• opens the same context menu as a
+                // long-press, which a controller cannot perform reliably.
+                IconButton(
+                  icon: const AppIcon(Symbols.more_vert_rounded, fill: 1, size: 20),
+                  onPressed: showContextMenu,
+                  tooltip: t.common.options,
+                  color: textMuted,
+                ),
+
+                const SizedBox(width: 4),
+
                 Container(
                   decoration: isRemoveButtonFocused
                       ? BoxDecoration(

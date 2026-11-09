@@ -46,6 +46,7 @@ import 'services/agent_control_service.dart';
 import 'widgets/agent_control_scope.dart';
 import 'widgets/settings_builder.dart';
 import 'utils/platform_detector.dart';
+import 'utils/app_scroll_behavior.dart';
 import 'utils/pointer_scroll_axis.dart';
 import 'services/apple_tv_remote_touch_service.dart';
 import 'services/discord_rpc_service.dart';
@@ -880,6 +881,8 @@ class _StartupBootstrapState<T> extends State<StartupBootstrap<T>> {
         builder: (context) => InputModeTracker(
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
+            // Quest laser pointer (mouse-kind) drags scroll, like touch.
+            scrollBehavior: const AppScrollBehavior(),
             locale: TranslationProvider.of(context).locale.localizationsLocale,
             supportedLocales: supportedLocalizationsLocales,
             localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -2003,6 +2006,8 @@ class _AppShell extends StatelessWidget {
                   child: MaterialApp(
                     title: t.app.title,
                     debugShowCheckedModeBanner: false,
+                    // Quest laser pointer (mouse-kind) drags scroll, like touch.
+                    scrollBehavior: const AppScrollBehavior(),
                     // The app language, not Flutter's en-US default: every
                     // Text inherits it as the locale that selects CJK glyph
                     // forms, and Material's own strings follow it.

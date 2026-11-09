@@ -216,6 +216,21 @@ class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<Epis
                           Positioned.fill(
                             child: WatchedIndicator(item: episode, size: WatchedIndicatorSize.compact),
                           ),
+
+                          // Quest fix: a ••• over the thumbnail that opens
+                          // the same context menu as a long-press, which a
+                          // controller cannot perform reliably. It lives on
+                          // the thumbnail (not as a trailing button) so the
+                          // text column keeps its full width — a trailing
+                          // button narrowed it enough to collapse long
+                          // summaries early. Bottom-right clears the
+                          // top-right watched checkmark; it sits just above
+                          // the bottom progress bar.
+                          Positioned(
+                            right: 6,
+                            bottom: 6,
+                            child: _EpisodeMenuButton(onTap: showContextMenu),
+                          ),
                         ],
                       ),
                     ),
@@ -332,6 +347,40 @@ class _EpisodeCardState extends State<EpisodeCard> with ContextMenuTapMixin<Epis
       );
     }
     return const PlaceholderContainer(child: AppIcon(Symbols.movie_rounded, fill: 1, size: 32));
+  }
+}
+
+/// Small ••• button over the episode thumbnail, opening the same context
+/// menu as a long-press. Quest fix: a controller cannot long-press
+/// reliably. Mirrors the grid-card button in [media_card.dart]
+/// (`_CardMenuButton`); kept local because that widget is private to its
+/// file. Always visible (list rows have no hover state to reveal it) —
+/// the thumbnail already carries overlays, so one more small button fits
+/// the pattern. The button contributes only a tap action, which merges into
+/// the card's single [MergeSemantics] node, so the menu stays reachable to
+/// assistive tech through the card's own long-press action.
+class _EpisodeMenuButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _EpisodeMenuButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // NOTE (Quest fix): a plain GestureDetector + Container on purpose, not
+    // Material + InkWell — the latter splits the episode card's merged
+    // semantics node, so the summary drops out of the card's accessible
+    // label (see episode_card_test 'overflowing summary stays in card
+    // semantics'). No Tooltip either, for the same reason. The button's
+    // purpose is discoverable from its ••• icon and position.
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.55), shape: BoxShape.circle),
+        child: const Center(child: AppIcon(Symbols.more_vert_rounded, size: 18, color: Colors.white)),
+      ),
+    );
   }
 }
 

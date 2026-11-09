@@ -14,6 +14,10 @@ const _androidFeatureLeanback = 'android.software.leanback';
 const _androidFeatureFireTv = 'amazon.hardware.fire_tv';
 const _androidFeatureTouchscreen = 'android.hardware.touchscreen';
 const _androidFeatureAutomotive = 'android.hardware.type.automotive';
+// Meta Horizon OS (Quest headsets), via the supported system-feature check —
+// never Build.MANUFACTURER (Meta's compatibility requirements forbid
+// inferring the platform from it).
+const _androidFeatureHorizonOs = 'horizonos.software.horizon_os';
 
 class AndroidTvFeatureDetection {
   final bool isTv;
@@ -22,11 +26,22 @@ class AndroidTvFeatureDetection {
   /// [isTv]: `FEATURE_AUTOMOTIVE` is authoritative for the car form factor.
   final bool isAutomotive;
 
+  /// True on Meta Horizon OS (Quest headsets). Never true together with
+  /// [isTv]: a Quest has no touchscreen, which would otherwise read as a
+  /// TV, but its laser-pointer controller sends no D-pad keys, so the TV
+  /// focus UI is undrivable there.
+  final bool isHorizonOs;
+
   /// Diagnostic TV signals, surfaced in the log export only while TV mode is
   /// active. Non-empty with [isTv] false when automotive vetoed the verdict.
   final List<String> reasons;
 
-  const AndroidTvFeatureDetection({required this.isTv, required this.isAutomotive, required this.reasons});
+  const AndroidTvFeatureDetection({
+    required this.isTv,
+    required this.isAutomotive,
+    required this.isHorizonOs,
+    required this.reasons,
+  });
 }
 
 AndroidTvFeatureDetection detectAndroidTvFromSystemFeatures(Iterable<String> features) {
@@ -42,9 +57,18 @@ AndroidTvFeatureDetection detectAndroidTvFromSystemFeatures(Iterable<String> fea
   // either would otherwise route a vehicle through the leanback experience.
   final isAutomotive = featureSet.contains(_androidFeatureAutomotive);
 
+  // A Quest is never a TV either. Horizon OS reports no touchscreen, so the
+  // no_touchscreen reason fires — but the headset's controller is a
+  // laser-pointer mouse (no D-pad keys), and the TV interface navigates by
+  // focus + D-pad only. Veto the TV verdict (like the automotive veto) so
+  // Quest gets the phone/tablet layout its controller can drive.
+  final isHorizonOs = featureSet.contains(_androidFeatureHorizonOs);
+  if (isHorizonOs) reasons.add('horizon_os');
+
   return AndroidTvFeatureDetection(
-    isTv: !isAutomotive && reasons.isNotEmpty,
+    isTv: !isAutomotive && !isHorizonOs && reasons.isNotEmpty,
     isAutomotive: isAutomotive,
+    isHorizonOs: isHorizonOs,
     reasons: reasons,
   );
 }
@@ -79,6 +103,7 @@ class TvDetectionService {
   bool _forceTv = false;
   bool _isAppleTV = false;
   bool _isAutomotive = false;
+  bool _isHorizonOs = false;
   bool _initialized = false;
   List<String> _detectionReasons = const [];
 
@@ -101,6 +126,7 @@ class TvDetectionService {
           nativeDetection ?? detectAndroidTvFromSystemFeatures((await deviceInfo.androidInfo).systemFeatures);
       _detected = detection.isTv;
       _isAutomotive = detection.isAutomotive;
+      _isHorizonOs = detection.isHorizonOs;
       _detectionReasons = detection.reasons;
     } else if (Platform.isIOS) {
       if (_tvosBuild) {
@@ -147,8 +173,14 @@ class TvDetectionService {
       final reasons = reasonsValue is Iterable ? reasonsValue.whereType<String>().toList() : <String>[];
       final isTv = result['isTv'] == true;
       final isAutomotive = result['isAutomotive'] == true;
+      final isHorizonOs = result['isHorizonOs'] == true;
       if (isTv && reasons.isEmpty) reasons.add('native');
-      return AndroidTvFeatureDetection(isTv: isTv && !isAutomotive, isAutomotive: isAutomotive, reasons: reasons);
+      return AndroidTvFeatureDetection(
+        isTv: isTv && !isAutomotive && !isHorizonOs,
+        isAutomotive: isAutomotive,
+        isHorizonOs: isHorizonOs,
+        reasons: reasons,
+      );
     } on MissingPluginException {
       return null;
     } on PlatformException {
@@ -190,6 +222,11 @@ class TvDetectionService {
 
   /// Synchronous Android Automotive OS check (false before initialization).
   static bool isAutomotiveSync() => _debugAutomotiveOverride ?? _singleton.instance?._isAutomotive ?? false;
+
+  /// Synchronous Meta Horizon OS (Quest) check (false before initialization).
+  /// The TV veto: Quest reports no touchscreen, so without this the app
+  /// would take the TV layout, which the headset's controller cannot drive.
+  static bool isHorizonOsSync() => _singleton.instance?._isHorizonOs ?? false;
 
   @visibleForTesting
   static void debugSetAppleTVOverride(bool? value) {
@@ -233,6 +270,13 @@ class PlatformDetector {
   /// True on Android Automotive OS head units.
   static bool isAutomotive() {
     return TvDetectionService.isAutomotiveSync();
+  }
+
+  /// True on Meta Horizon OS (Quest headsets). The TV veto lives here: a
+  /// Quest has no touchscreen, so without it the app would take the TV
+  /// layout, which its laser-pointer controller cannot drive.
+  static bool isHorizonOs() {
+    return TvDetectionService.isHorizonOsSync();
   }
 
   /// Detects if the app should use side navigation (Desktop or TV).

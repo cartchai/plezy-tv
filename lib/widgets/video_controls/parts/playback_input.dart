@@ -289,9 +289,18 @@ extension _PlexVideoControlsPlaybackInputMethods on _PlexVideoControlsState {
     _suppressTouchTapUntil = DateTime.now().add(kDoubleTapTimeout + _touchTapSuppressionPadding);
   }
 
+  /// Edge gestures (seek / volume / brightness) accept the Quest laser
+  /// pointer as well as touch: the pointer arrives as a mouse-kind pointer,
+  /// and a mouse drag is the only drag a controller can make. The
+  /// two-finger tap chord stays touch-only — it has no pointer equivalent.
+  bool _isEdgeGesturePointer(PointerEvent event) =>
+      event.kind == PointerDeviceKind.touch || event.kind == PointerDeviceKind.mouse;
+
   void _handleTouchPointerDown(PointerDownEvent event) {
-    if (event.kind != PointerDeviceKind.touch) return;
-    _twoFingerTapTracker.pointerDown(event.pointer, event.position);
+    if (!_isEdgeGesturePointer(event)) return;
+    if (event.kind == PointerDeviceKind.touch) {
+      _twoFingerTapTracker.pointerDown(event.pointer, event.position);
+    }
     if (_twoFingerTapTracker.isChordActive) {
       _suppressTouchTaps();
       _cancelEdgeAdjustmentGesture();
@@ -319,8 +328,10 @@ extension _PlexVideoControlsPlaybackInputMethods on _PlexVideoControlsState {
   /// tree and never reaches a disposed State, so the down handler needs no
   /// such guard.
   void _handleTouchPointerMove(PointerMoveEvent event) {
-    if (!mounted || event.kind != PointerDeviceKind.touch) return;
-    _twoFingerTapTracker.pointerMove(event.pointer, event.position);
+    if (!mounted || !_isEdgeGesturePointer(event)) return;
+    if (event.kind == PointerDeviceKind.touch) {
+      _twoFingerTapTracker.pointerMove(event.pointer, event.position);
+    }
     if (_twoFingerTapTracker.isChordActive) {
       _suppressTouchTaps();
       _cancelEdgeAdjustmentGesture();
@@ -340,8 +351,9 @@ extension _PlexVideoControlsPlaybackInputMethods on _PlexVideoControlsState {
 
   void _handleTouchPointerUp(PointerUpEvent event) {
     // Can arrive after unmount; see [_handleTouchPointerMove].
-    if (!mounted || event.kind != PointerDeviceKind.touch) return;
-    final isTwoFingerTap = _twoFingerTapTracker.pointerUp(event.pointer, event.position);
+    if (!mounted || !_isEdgeGesturePointer(event)) return;
+    final isTwoFingerTap =
+        event.kind == PointerDeviceKind.touch && _twoFingerTapTracker.pointerUp(event.pointer, event.position);
     final hit = _edgeAdjustmentSurfaceHit(event.position);
     _handleEdgeAdjustmentEvent(_edgeAdjustmentTracker.pointerUp(event.pointer, hit?.position ?? event.localPosition));
     if (_isTouchTapSuppressed || isTwoFingerTap) _suppressTouchTaps();
@@ -363,8 +375,10 @@ extension _PlexVideoControlsPlaybackInputMethods on _PlexVideoControlsState {
 
   void _handleTouchPointerCancel(PointerCancelEvent event) {
     // Can arrive after unmount; see [_handleTouchPointerMove].
-    if (!mounted || event.kind != PointerDeviceKind.touch) return;
-    _twoFingerTapTracker.pointerCancel(event.pointer);
+    if (!mounted || !_isEdgeGesturePointer(event)) return;
+    if (event.kind == PointerDeviceKind.touch) {
+      _twoFingerTapTracker.pointerCancel(event.pointer);
+    }
     _handleEdgeAdjustmentEvent(_edgeAdjustmentTracker.pointerCancel(event.pointer));
     if (_twoFingerTapTracker.isChordActive) _suppressTouchTaps();
   }
