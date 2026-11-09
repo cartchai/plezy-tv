@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **418 files changed, 44421 insertions, 3296 deletions**
+- Scale of the fork vs base: **436 files changed, 47017 insertions, 3327 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-09 after the build #19 commit — was 413 files /
-  +42,310/−3,291 at build #18).
+  verified 2026-11-09 after the build #19 commit — was 432 files /
+  +45,201/−3,322 at the Quest release (v1.0.1-2.25.0)).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -720,7 +720,7 @@ not update this file.)
 - Progress notes: `IPTV_BUILD18_NOTES.md`. Research:
   `~/workspace/tmp_work/plezy-tv-research18/RESEARCH_BUILD18.md`.
 
-### 17. Build #19 — Scoped search leaks a Plex movie + series-leg repair (v1.0.0-2.25.0, versionCode 172)
+### 17. Build #19 — Scoped search leaks a Plex movie + series-leg repair (v1.0.2-2.25.0, versionCode 174)
 - Scope leak (`lib/services/data_aggregation_service.dart`,
   `lib/screens/search_screen.dart`): `searchAcrossServers` gains
   `scopedLibraryKey`; new `_inScopedLibrary` drops every title row
