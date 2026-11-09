@@ -114,22 +114,23 @@ void main() {
       expect(detection.isAutomotive, isFalse);
     });
 
-    test('a Quest headset is not a TV despite having no touchscreen', () {
+    test('a Quest headset is a TV and is detected as Horizon OS', () {
       // Horizon OS reports no touchscreen, so the no_touchscreen reason
-      // fires — but the headset's controller cannot drive the TV focus UI,
-      // so the TV verdict is vetoed and the phone/tablet layout is used.
+      // fires — and the TV verdict follows the normal reasons: a Quest runs
+      // the TV interface, driven by pointer + thumbstick. The detection is
+      // kept for diagnostics and pointer exceptions, not as a layout veto.
       final detection = detectAndroidTvFromSystemFeatures([
         'horizonos.software.horizon_os',
         'android.hardware.faketouch',
       ]);
 
       expect(detection.isHorizonOs, isTrue);
-      expect(detection.isTv, isFalse);
+      expect(detection.isTv, isTrue);
       expect(detection.reasons, contains('no_touchscreen'));
       expect(detection.reasons, contains('horizon_os'));
     });
 
-    test('Horizon OS vetoes a stray leanback flag, like the automotive veto', () {
+    test('Horizon OS with a leanback flag is a TV', () {
       final detection = detectAndroidTvFromSystemFeatures([
         'horizonos.software.horizon_os',
         'android.software.leanback',
@@ -137,11 +138,11 @@ void main() {
       ]);
 
       expect(detection.isHorizonOs, isTrue);
-      expect(detection.isTv, isFalse);
+      expect(detection.isTv, isTrue);
       expect(detection.reasons, contains('horizon_os'));
     });
 
-    test('Horizon OS alone, with a touchscreen, is still not a TV', () {
+    test('Horizon OS alone, with a touchscreen, has no TV signal', () {
       final detection = detectAndroidTvFromSystemFeatures([
         'horizonos.software.horizon_os',
         'android.hardware.touchscreen',

@@ -384,8 +384,15 @@ extension _PlexVideoControlsPlaybackInputMethods on _PlexVideoControlsState {
   }
 
   bool get _mobileTouchGesturesAllowed {
-    return PlatformDetector.isMobile(context) &&
-        !PlatformDetector.isTV() &&
+    // Horizon OS exception: Quest runs the TV layout, so isMobile() is
+    // false there (it excludes TV) — the plain `isMobile &&
+    // (!isTV() || isHorizonOs())` form would stay inert on Quest. The
+    // laser pointer is the only drag a Quest controller can make, so the
+    // edge gestures are allowed on Horizon OS TV as well. This gate alone
+    // is not enough: the root Listener in video_controls.dart attaches
+    // these handlers on the same condition, or the events never arrive.
+    return (PlatformDetector.isMobile(context) || PlatformDetector.isHorizonOs()) &&
+        (!PlatformDetector.isTV() || PlatformDetector.isHorizonOs()) &&
         !_isScreenLocked &&
         !_pipService.isPipActive.value &&
         !widget.chromeController.contentStripVisible;

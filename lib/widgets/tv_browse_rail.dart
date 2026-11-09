@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -39,6 +40,7 @@ import 'optimized_media_image.dart';
 import 'rasterized_gradient.dart';
 import 'settings_builder.dart';
 import 'sliver_child_memo.dart';
+import 'tv_rail_scroll_bridge.dart';
 
 const _inactiveArtworkDimAlpha = 0.3;
 
@@ -453,6 +455,21 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   late final FocusNode _focusNode = LockedFocusRowNode(debugLabel: 'tv_browse_rail', focusedItemRect: _focusedCardRect);
   final Map<String, ScrollController> _scrollControllers = {};
   final ScrollController _verticalController = ScrollController();
+
+  /// Converts thumbstick/mouse-wheel scroll events over the rail into
+  /// selection moves (see [TvRailScrollBridge]). The vertical list is
+  /// NeverScrollable and moves only with the selection, so without this
+  /// bridge a scroll event over Discover has no consumer at all.
+  /// Constructed in initState (it calls back into [_moveHub]/[_moveItem]).
+  late final TvRailScrollBridge _scrollBridge;
+
+  // Scroll-bridge step travel (see [TvRailScrollBridge] and
+  // [_railStepThresholds]): a thumbstick tick is not a pixel distance, so
+  // thresholds are priced by geometry and only clamped/fallback here.
+  static const double _bridgeMinStepTravel = 120;
+  static const double _bridgeMaxStepTravel = 480;
+  static const double _bridgeFallbackCardWidth = 240;
+  static const double _bridgeFallbackSectionHeight = 320;
   final SnapshotController _verticalScrollSnapshotController = SnapshotController();
   final Map<int, GlobalKey> _hubSectionKeys = {};
   final Map<String, GlobalKey<MediaCardState>> _mediaCardKeys = {};
@@ -510,6 +527,11 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   @override
   void initState() {
     super.initState();
+    _scrollBridge = TvRailScrollBridge(
+      onMoveHub: _moveHub,
+      onMoveItem: _moveItem,
+      stepThresholds: _railStepThresholds,
+    );
     _focusNode.addListener(_handleFocusChange);
     final startHub = _activeHub;
     if (startHub != null) _itemIndex = _defaultSlotFor(startHub);
@@ -874,6 +896,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   }
 
   void _moveItem(int delta) {
+    _scrollBridge.discardPendingProgress();
     final hub = _activeHub;
     if (hub == null) return;
     _hasUserInteracted = true;
@@ -893,6 +916,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   }
 
   void _moveHub(int delta) {
+    _scrollBridge.discardPendingProgress();
     if (widget.hubs.isEmpty) return;
     _hasUserInteracted = true;
     final next = (_hubIndex + delta).clamp(0, widget.hubs.length - 1);
@@ -1015,6 +1039,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   }
 
   void _setHoveredItem(MediaHub hub, int index) {
+    _scrollBridge.discardPendingProgress();
     final active = _activeHub;
     if (active == null || _hubKey(active) != _hubKey(hub) || _itemAtSlot(hub, index) == null || _itemIndex == index) {
       return;
@@ -1030,6 +1055,7 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
   }
 
   void _selectHubItem(MediaHub hub, int hubIndex, int itemIndex) {
+    _scrollBridge.discardPendingProgress();
     final totalCount = _totalItemCount(hub);
     if (totalCount == 0) return;
     _hasUserInteracted = true;
@@ -1147,6 +1173,25 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
     final box = context?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return null;
     return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  /// Step travel for the scroll bridge, priced by the focused item's
+  /// geometry: the active section's height for a hub step (the distance
+  /// the list glides per hub move), the focused card's width for an item
+  /// step. Clamped to sane bounds — a thumbstick tick is not a pixel
+  /// distance, so a fixed pixel threshold would feel different on
+  /// different panel sizes.
+  ({double horizontal, double vertical}) _railStepThresholds() {
+    final cardWidth = _focusedCardRect()?.width;
+    final sectionHeight = _hubIndex >= 0 && _hubIndex < _sectionHeights.length ? _sectionHeights[_hubIndex] : null;
+    return (
+      horizontal: (cardWidth ?? _bridgeFallbackCardWidth).clamp(_bridgeMinStepTravel, _bridgeMaxStepTravel),
+      vertical: (sectionHeight ?? _bridgeFallbackSectionHeight).clamp(_bridgeMinStepTravel, _bridgeMaxStepTravel),
+    );
+  }
+
+  void _handleRailPointerSignal(PointerSignalEvent event) {
+    _scrollBridge.handlePointerSignal(event);
   }
 
   bool _isContinueWatchingHub(MediaHub hub) => widget.isContinueWatchingHub?.call(hub) ?? false;
@@ -1304,10 +1349,17 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
               TvBrowseRailLayout.railTopPaddingForScale(scale) +
               viewportHeight +
               TvBrowseRailLayout.railBottomPaddingForScale(scale);
-          return Focus(
-            focusNode: _focusNode,
-            onKeyEvent: _handleKeyEvent,
-            child: Align(
+          return Listener(
+            // The thumbstick bridge (see [TvRailScrollBridge]): scroll
+            // events over the rail become selection moves. Translucent so
+            // the bridge also sees events over gaps between rows; the
+            // Listener only observes, it never consumes.
+            behavior: HitTestBehavior.translucent,
+            onPointerSignal: _handleRailPointerSignal,
+            child: Focus(
+              focusNode: _focusNode,
+              onKeyEvent: _handleKeyEvent,
+              child: Align(
               alignment: .bottomCenter,
               heightFactor: 1,
               child: SizedBox(
@@ -1391,7 +1443,8 @@ class TvBrowseRailState extends State<TvBrowseRail> with TickerProviderStateMixi
                 ),
               ),
             ),
-          );
+          ),
+        );
         },
       ),
     );

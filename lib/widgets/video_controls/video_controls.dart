@@ -1204,6 +1204,13 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
   @override
   Widget build(BuildContext context) {
     final isMobile = PlatformDetector.isMobile(context) && !PlatformDetector.isTV();
+    // The touch-pointer handlers accept the Quest laser pointer too: Quest
+    // runs the TV layout, so `isMobile` is false there, but the edge
+    // gestures are open to mouse drags on Horizon OS (see
+    // [_mobileTouchGesturesAllowed]). Everything else in these handlers
+    // stays inert for a mouse pointer — the two-finger tap chord is
+    // touch-only — so attaching them here only opens the edge path.
+    final touchPointerHandlersAllowed = isMobile || PlatformDetector.isHorizonOs();
     // Auto-hide only fades the performance card out; the same flag also has to
     // stop its 500 ms native stats poll, which would otherwise keep running
     // behind a fully transparent widget.
@@ -1227,12 +1234,12 @@ class _PlexVideoControlsState extends State<PlexVideoControls>
             // _handleGlobalKeyEvent.
             onPointerDown: (event) {
               _cancelAutoSkipFromUserInteraction();
-              if (isMobile) _handleTouchPointerDown(event);
+              if (touchPointerHandlersAllowed) _handleTouchPointerDown(event);
             },
             onPointerHover: (_) => _cancelAutoSkipFromUserInteraction(),
-            onPointerMove: isMobile ? _handleTouchPointerMove : null,
-            onPointerUp: isMobile ? _handleTouchPointerUp : null,
-            onPointerCancel: isMobile ? _handleTouchPointerCancel : null,
+            onPointerMove: touchPointerHandlersAllowed ? _handleTouchPointerMove : null,
+            onPointerUp: touchPointerHandlersAllowed ? _handleTouchPointerUp : null,
+            onPointerCancel: touchPointerHandlersAllowed ? _handleTouchPointerCancel : null,
             onPointerSignal: _handlePointerSignal,
             onPointerPanZoomStart: (_) => _cancelAutoSkipFromUserInteraction(),
             child: MouseRegion(

@@ -305,9 +305,10 @@ class PlezyActivity : FlutterActivity() {
     val isAutomotive = pm.hasSystemFeature(PackageManager.FEATURE_AUTOMOTIVE)
     // Meta Horizon OS (Quest headsets), via the supported system-feature
     // check — never Build.MANUFACTURER (Meta's compatibility requirements
-    // forbid inferring the platform from it). A Quest has no touchscreen,
-    // which would otherwise read as a TV, but its laser-pointer controller
-    // sends no D-pad keys, so the TV focus UI is undrivable there.
+    // forbid inferring the platform from it). Kept for diagnostics and for
+    // targeted pointer exceptions (e.g. the player edge gestures): a Quest
+    // runs the TV interface, and the 'horizon_os' reason in the log explains
+    // why TV mode is active there.
     val isHorizonOs = pm.hasSystemFeature("horizonos.software.horizon_os")
 
     val reasons = mutableListOf<String>()
@@ -316,15 +317,22 @@ class PlezyActivity : FlutterActivity() {
     if (hasLeanback) reasons.add("leanback")
     if (hasFireTvFeature) reasons.add("fire_tv")
     if (!hasTouchscreen) reasons.add("no_touchscreen")
+    // 'horizon_os' is diagnostic only: it must not itself count as a TV
+    // signal — compute the verdict before adding it, or a Horizon OS
+    // device with a touchscreen would read as a TV on the strength of the
+    // diagnostic reason alone.
+    val isTv = !isAutomotive && reasons.isNotEmpty()
     if (isHorizonOs) reasons.add("horizon_os")
 
     return mapOf(
       // A car is never a TV: rotary-only head units report no touchscreen, and
       // an OEM image can carry a stray leanback flag. Keep the raw reasons for
       // diagnostics, but never let them promote a vehicle to the TV experience.
-      // A Quest headset is never a TV either, for the same no-touchscreen
-      // reason: its controller cannot drive the TV focus UI.
-      "isTv" to (!isAutomotive && !isHorizonOs && reasons.isNotEmpty()),
+      // Horizon OS is NOT vetoed the same way: a Quest runs the TV interface
+      // (its controller drives it via pointer + thumbstick), so the TV
+      // verdict follows the normal reasons. The detection only feeds
+      // diagnostics and targeted pointer exceptions.
+      "isTv" to isTv,
       "isAutomotive" to isAutomotive,
       "isHorizonOs" to isHorizonOs,
       "reasons" to reasons,
