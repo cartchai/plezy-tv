@@ -118,6 +118,27 @@ List<MediaItem> _withoutHiddenLibraries(List<MediaItem> items, Set<String>? hidd
   }).toList();
 }
 
+/// Drop title rows that do not belong to the scoped library.
+///
+/// A scope ("only this library") is stronger than a hide ("everything
+/// except these"): hidden-library filtering keeps rows the backend could
+/// not attribute to a library ([MediaItem.libraryGlobalKey] is null —
+/// Plex external / shared rows), because a hide says nothing about them.
+/// A scope DOES say something about them: a row that cannot be attributed
+/// to the scoped library is not in it, so it dies — including unattributed
+/// rows from OTHER servers. Without this, a Plex row with no section id
+/// survives a Trex scope (build #19: Sherlock Holmes under "Trex —
+/// Series"), and so does an attributed row from a server whose libraries
+/// were never in the hidden set because the provider list was incomplete.
+///
+/// This intentionally does NOT subsume the hide path: hiding ONE library
+/// still keeps unattributed rows (bridge test :724). Hide-one is not
+/// scope-all-but-one.
+List<MediaItem> _inScopedLibrary(List<MediaItem> items, String? scopedLibraryKey) {
+  if (scopedLibraryKey == null) return items;
+  return items.where((item) => item.libraryGlobalKey == scopedLibraryKey).toList();
+}
+
 /// The server-local library ids [serverId] owns within [hiddenLibraryKeys],
 /// which hold cross-server `serverId:libraryId` global keys. Backends that
 /// cannot attribute a search hit to a library need these to scope the request.
@@ -787,6 +808,15 @@ class DataAggregationService {
   /// People always span libraries, so each backend drops hidden-only people
   /// itself.
   ///
+  /// [scopedLibraryKey] is the library a scoped search is restricted to
+  /// (build #19): when set, only title rows attributable to that library
+  /// survive — including dropping unattributed rows from other servers,
+  /// which the hidden-library filter keeps by design. The hidden set alone
+  /// cannot enforce a scope: it is only as complete as the loaded library
+  /// list, and unattributed rows survive a hide. People are NOT filtered
+  /// by the scope key — they span libraries and backends filter them by
+  /// [excludedLibraryIds].
+  ///
   /// Each server's titles and people run under their own
   /// [MediaServerTimeouts.searchServerDeadline]: a server that stops
   /// answering fails on its own instead of holding back everyone's results.
@@ -794,6 +824,7 @@ class DataAggregationService {
     String query, {
     int? limit,
     Set<String>? hiddenLibraryKeys,
+    String? scopedLibraryKey,
     AbortController? abort,
   }) async {
     if (query.trim().isEmpty) return _emptySearchResult;
@@ -856,7 +887,10 @@ class DataAggregationService {
     }
     // Before ranking, so hidden results cannot spend the `resultLimit` budget
     // and silently shrink what the user sees.
-    final visible = _withoutHiddenLibraries(titles, hiddenLibraryKeys);
+    final hiddenFiltered = _withoutHiddenLibraries(titles, hiddenLibraryKeys);
+    // A scope is stronger than a hide (build #19): only rows attributable
+    // to the scoped library survive it.
+    final visible = _inScopedLibrary(hiddenFiltered, scopedLibraryKey);
     // Titles first: equal scores keep input order, so a tie goes to the title.
     final hits = rankSearchHits(
       [for (final item in visible) MediaSearchHit(item), for (final person in people) PersonSearchHit(person)],

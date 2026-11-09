@@ -169,6 +169,13 @@ class _SearchScreenState extends State<SearchScreen>
         if (library.globalKey != scope) hiddenKeys.add(library.globalKey);
       }
     }
+    // The scope is ALSO conveyed explicitly (build #19): the hidden set
+    // alone cannot enforce it — it is only as complete as the loaded
+    // library list (a server whose libraries are missing from it leaks
+    // attributed rows), and unattributed rows survive a hide by design.
+    // The aggregation drops every title row not attributable to this key.
+    final scopedKey =
+        scope != null && libraries.any((library) => library.globalKey == scope) ? scope : null;
 
     final abort = AbortController();
     _activeSearchAbort = abort;
@@ -176,6 +183,7 @@ class _SearchScreenState extends State<SearchScreen>
       final result = await multiServerProvider.aggregationService.searchAcrossServers(
         query,
         hiddenLibraryKeys: hiddenKeys,
+        scopedLibraryKey: scopedKey,
         abort: abort,
       );
       abort.throwIfAborted();

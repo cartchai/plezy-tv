@@ -13,10 +13,10 @@ from memory.
 - License: **GPL-3.0** — the fork stays GPL-3.0, keep `LICENSE` untouched.
 - Our repo: https://github.com/cartchai/plezy-tv (branch `main`)
 - Local clone: `~/workspace/plezy-tv/`, remote `upstream` = edde746/plezy
-- Scale of the fork vs base: **413 files changed, 42310 insertions, 3291 deletions**
+- Scale of the fork vs base: **418 files changed, 44379 insertions, 3296 deletions**
   (most of the churn is the rename commit sweeping Kotlin package paths;
-  verified 2026-11-08 after the build #18 commit — was 412 files /
-  +41,872/−3,278 at build #17).
+  verified 2026-11-09 after the build #19 commit — was 413 files /
+  +42,310/−3,291 at build #18).
 
 ## Branch model (researched, 2026-11-06 — see report in
 `~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`)
@@ -720,7 +720,199 @@ not update this file.)
 - Progress notes: `IPTV_BUILD18_NOTES.md`. Research:
   `~/workspace/tmp_work/plezy-tv-research18/RESEARCH_BUILD18.md`.
 
-### 17. Quest fix v2 — keep the TV interface, make it drivable with mouse + thumbstick (unversioned; rebased onto build #19 before release)
+### 17. Build #19 — Scoped search leaks a Plex movie + series-leg repair (v1.0.0-2.25.0, versionCode 172)
+- Scope leak (`lib/services/data_aggregation_service.dart`,
+  `lib/screens/search_screen.dart`): `searchAcrossServers` gains
+  `scopedLibraryKey`; new `_inScopedLibrary` drops every title row
+  whose `libraryGlobalKey != scopedLibraryKey`, including unattributed
+  rows from other servers. `performSearchQuery` passes
+  `_selectedLibraryKey` when the scope library is loaded (same condition
+  as the hiddenKeys block); a stale scope still behaves as All. People
+  are NOT filtered by the scope key. `_withoutHiddenLibraries` untouched
+  — hide-one still keeps unattributed rows (bridge test :724 passes).
+  Why a key, not hiddenKeys: P3 is unsatisfiable from hiddenKeys alone
+  (structurally identical to a two-server unscoped hide; :724 pins the
+  single-hide behaviour), so the scope must be conveyed explicitly.
+- Plex defense in depth (`lib/services/plex_client.dart`):
+  `searchItems` now filters client-side by section id like
+  `searchPeople` does, and drops unattributed rows ONLY when
+  `excludedLibraryIds` covers every library on the server (memoized
+  `fetchLibraries()`, fail-open on error).
+- Series leg (`lib/media/iptv_client.dart`): (a) P5a — the stale-disk
+  refresh refuses to overwrite the disk file when a partial unfiltered
+  list is under half the file's row count (series + VOD; live not
+  changed); (b) P5b — new `_repairDiskCatalogAfterHeal<T>`: after a
+  warm 0-match search heals, the swept categories' rows are merged
+  into the cached list, written to disk (awaited), and the in-memory
+  memoized list swapped; (c) P4 — `_sweepCatalogCategories` is now a
+  sliding window (up to `batchSize`, unchanged at 32, concurrent; a
+  finished call frees its slot at once) and `_sweepDeadline` moved
+  from 90% (45 s) to 98% (49 s) of the section budget — at uniform
+  6 s/call the 8-batch x 6 s packing minimum lands the last batch at
+  ~48 s, past 45 s no matter the scheduling.
+- Version: `pubspec.yaml` `1.0.0-2.25.0+172` (versionName unchanged);
+  About entry `1.0.0-2.25.0` → `changelog2265` (sequential key; the
+  build #18 entry is relabelled `1.0.0-2.25.0 (build 171)` so two
+  builds sharing a versionName stay distinguishable).
+- New tests: `iptv_build19_probes_test.dart` (10 — P1, P2, P2b, P3,
+  P4-fast, P4-slow, P5a, P5b, P6, P7; the scoped probes pass
+  `scopedLibraryKey` exactly as `performSearchQuery` does — the
+  original hiddenKeys-only probe was run failing-first on base, 4 pass
+  / 6 fail, and is preserved in the research worktree).
+- Progress notes: `IPTV_BUILD19_NOTES.md`. Research:
+  `~/workspace/tmp_work/plezy-tv-research19/RESEARCH_BUILD19.md`.
+
+## Deliberately NOT renamed (do not rename during a repatch)
+- Dart package name stays `plezy` (~1,000 imports).
+- libass module keeps `com.edde746.plezy.libass` (its JNI names match).
+- Deep-link scheme stays `plezy://` (follow-up: `pleztv://`).
+- Wire-protocol client identifiers (X-Plex-Product, Jellyfin client name,
+  User-Agent) still say "Plezy".
+- Repo / Codemagic app names, class names, comments.
+
+## Repatch procedure (when upstream ships a new version)
+
+Researched workflow (rebase a clean patch stack — NOT merge; merging tangles
+history and hides what is ours, cherry-picking doesn't scale to a whole
+release). Full procedure with sources:
+`~/workspace/research_notes/git-fork-maintenance-repatch-20261106-0706/report.md`.
+
+**0. Prepare & baseline (before touching anything).**
+```bash
+git checkout main && git status --short --branch   # clean tree required
+git branch archive/main-2.25.0 main                # backup
+git format-patch --full-index 2.25.0..HEAD -o patches/2.25.0/  # export the stack
+flutter analyze && flutter test                     # known-good baseline on the OLD base
+OLD_BASE=$(git rev-parse 2.25.0)                   # the old upstream base tag
+```
+
+**1. Fetch the new upstream and create a trial branch.**
+```bash
+git fetch upstream --tags
+NEW_TAG=2.26.0                                     # example; use the real new tag
+git log --oneline $OLD_BASE..upstream/$NEW_TAG | head -50   # what upstream changed
+git checkout -b sync/$NEW_TAG-$(date +%Y%m%d) main
+```
+
+**2. Rebase the stack onto the new tag.**
+```bash
+git rebase --onto upstream/$NEW_TAG $OLD_BASE
+# If a commit is skipped as "already applied upstream", note it — that patch
+# is now redundant; drop it deliberately.
+# On conflict: favour the upstream shape, re-apply only the fork hook.
+# For generated files, take upstream's version now and regenerate in step 4.
+# git rebase --abort at any point returns to the trial branch's starting state.
+```
+
+**3. Audit the rebase itself — a clean rebase is NOT proof.**
+```bash
+git log --oneline upstream/$NEW_TAG..HEAD
+git diff --stat upstream/$NEW_TAG..HEAD
+git range-diff $OLD_BASE..main@{1} upstream/$NEW_TAG..HEAD
+git diff --check
+# Compare against upstream's own diff ($OLD_BASE..upstream/$NEW_TAG) for
+# files you touched that upstream also changed. A stale patch can SILENTLY
+# revert an upstream fix with no conflict — review the full diff, not just
+# conflicted files.
+```
+
+**4. Regenerate, don't hand-merge.**
+```bash
+bash scripts/codegen.sh        # freezed + slang — generated files are
+                               # NEVER hand-edited (media_item.freezed.dart,
+                               # media_item.g.dart, strings*.g.dart)
+flutter pub get                # re-resolve pubspec.lock if it conflicted;
+                               # do not hand-merge it
+git add -A && git commit -m "chore: regenerate codegen on $NEW_TAG"
+```
+
+**5. Verify (the gate).**
+```bash
+flutter analyze --no-pub   # 0 errors outside pre-existing wakelock_plus noise
+flutter test               # include test/services/iptv/, test/screens/iptv/,
+                           # test/screens/livetv/, test/screens/libraries/,
+                           # test/screens/settings/
+# Release build + smoke test: M3U import, Xtream import, playback, settings.
+```
+
+**6. Publish — only after step 5 is green.**
+```bash
+git checkout main
+git reset --hard sync/<trial-branch>   # move main onto the verified trial
+git push --force-with-lease origin main   # NEVER bare --force
+git checkout -b release/$NEW_TAG-1 sync/<trial-branch>
+git tag v$NEW_TAG-fork.1 release/$NEW_TAG-1
+git push origin release/$NEW_TAG-1 v$NEW_TAG-fork.1
+# Update this file: new base, new tag, patch inventory, conflicts, test results.
+# Release notes must link the exact source tag (GPL §6) and state the
+# modification + date (GPL §5a).
+```
+
+**Between releases (small upstream fixes only):** do NOT do a full rebase.
+Cherry-pick the single fix onto a `backport/upstream-<sha>-…` branch with
+`git cherry-pick -x`, test, and merge that branch into `main`. Rebase `main`
+only when you move the base.
+
+## GPL-3.0 obligations for the fork (official text: gnu.org/licenses/gpl-3.0)
+
+- §5(a): mark modified files with a prominent "modified it + relevant date"
+  notice. §5(b): keep the GPL notice. §5(c): the whole work stays GPL-3.0.
+- §4: preserve copyright/warranty notices + include LICENSE.
+- §6: Corresponding Source with every binary — link the exact source tag
+  in every release (GitHub Releases / README).
+- §10: no further restrictions on recipients.
+- Private/unpublished use triggers nothing (§2).
+- App stores: Google Play / F-Droid / GitHub releases are fine if the exact
+  source tag is linked. **Apple App Store is contested, not settled** —
+  GPL §6 Installation Information vs App Store code-signing is an open
+  legal question (some projects use a §7 additional permission). Do not
+  submit a GPL-3.0 fork to the Apple App Store without checking first.
+  (Not legal advice.)
+
+## Pitfalls to avoid
+
+1. Committing custom work onto the `upstream-main` mirror — then the clean
+   delta is gone. Keep the mirror pristine.
+2. Merging upstream into `main` "just this once" — it permanently tangles
+   the history; every later rebase inherits the merge. Use a trial branch.
+3. Rebasing the branch users build from without a trial branch — one bad
+   rebase + force-push breaks every clone.
+4. Bare `git push --force` — use `--force-with-lease`.
+5. Naming `<old-base>` by reflog/`--fork-point` instead of explicitly in
+   `rebase --onto` — it can drop your own pushed commits after a force-push.
+6. **Branding position — known imperfection in OUR stack:** research says
+   branding/mechanical changes belong at the TOP of the stack (last), so
+   branding conflicts don't block every feature patch. Our stack has the
+   rename FIRST (commit 845dfed, historical). At the first repatch, if the
+   rename conflicts block everything, consider moving it to the top with an
+   interactive rebase — do not reorder blindly.
+7. Hand-editing `*.freezed.dart`, `*.g.dart`, slang output, or
+   `pubspec.lock` — take upstream's version, finish the rebase, regenerate,
+   commit separately. Never use `.gitattributes merge=ours` on lockfiles —
+   it silently drops upstream dependency bumps.
+8. Trusting a clean rebase — see step 3: stale patches can silently revert
+   upstream fixes. Always `range-diff` + `diff --stat`.
+9. Skipping the baseline test run on the old base — without it you cannot
+   tell a rebase regression from a pre-existing failure.
+10. Dropping the GPL notice / copyright headers in a rename, shipping a
+    binary without a source link, or re-using the upstream name/icon —
+    GPL §5/§6 violations and trademark confusion. Keep LICENSE, add a
+    "modified <date>" notice, link the exact source tag in every release,
+    ship under our own branding.
+11. Letting the custom delta grow unchecked — every release, drop patches
+    upstream has absorbed and upstream anything generic. A fork whose delta
+    only grows eventually becomes un-rebaseable.
+
+## Rules for future changes (so repatching stays possible)
+- Keep changes in small atomic commits, one feature per commit. Never mix
+  a rename/branding sweep with a feature in the same commit.
+- New features go in NEW files where possible; touch upstream files only
+  where integration requires it, and keep those touch-points minimal.
+- Never hand-edit generated files (`.freezed.dart`, `.g.dart`,
+  `strings*.g.dart`) — change the source and regenerate.
+- Keep this file updated with every change. If a change drops or replaces
+  an upstream behaviour, say so here with the reason.
+### 18. Quest fix v2 — keep the TV interface, make it drivable with mouse + thumbstick (v1.0.1-2.25.0, versionCode 173, shipped 2026-11-09)
 - Matt's correction (2026-11-09): he did NOT ask for the phone layout on Quest — he wants to MANEUVER the existing TV UI with the controller. The v1 Horizon OS TV veto was the wrong direction and is REMOVED in v2 (see below); everything else from v1 carries over.
 - Root cause: Quest has no touchscreen, and the app's TV detection treats "no touchscreen" as a TV, so Quest gets the focus-driven TV interface — but a Quest controller sends zero D-pad keys (laser pointer = mouse hover/click/drag, thumbstick = scroll events, B/Y = back). Upstream-identical behaviour (verified in upstream Plezy on Quest) — inherited, not fork-introduced. V1 got Discover wrong: TV Discover DOES have a vertical `ListView.builder` (`lib/widgets/tv_browse_rail.dart:1411-1414`) but `NeverScrollableScrollPhysics` — movement is selection-driven via `_moveHub`/`_moveItem`, not scrolling. Hover already moves the selection (`MouseRegion` onEnter → `_setHoveredItem`) and click already opens things. The gap was narrow: no pointer path to change the active hub / scroll Discover vertically.
 - Veto REMOVED, detection kept (`android/app/src/main/kotlin/com/matt/plezytv/PlezyActivity.kt`, `lib/utils/platform_detector.dart`): Kotlin `isTv` back to `!isAutomotive && reasons.isNotEmpty()` (only the `!isHorizonOs &&` removed); the `hasSystemFeature("horizonos.software.horizon_os")` check, the `"isHorizonOs"` map entry, and the `'horizon_os'` reason are KEPT for diagnostics and targeted pointer exceptions. Dart fallback mirrors it (`isTv: !isAutomotive && reasons.isNotEmpty` in both `detectAndroidTvFromSystemFeatures` and `_fromNativeMap`); `AndroidTvFeatureDetection.isHorizonOs`, `TvDetectionService.isHorizonOsSync()`, `PlatformDetector.isHorizonOs()` all kept. A Quest IS a TV now (`isHorizonOs` true AND `isTv` true together). Test seam added: `TvDetectionService.debugSetHorizonOsOverride` (mirrors the Apple TV / automotive overrides; cleared by `debugReset`). Diagnostic-reason fix (found by the re-scoped test): `'horizon_os'` was added to `reasons` before the `isTv` verdict, and `isTv` is `reasons.isNotEmpty` — with the veto gone, Horizon OS alone read as a TV on the diagnostic reason's strength. Fixed in both Dart and Kotlin: the verdict is computed BEFORE `'horizon_os'` is added (never mattered on a real Quest — `no_touchscreen` fires anyway — but a diagnostic reason must not vote).

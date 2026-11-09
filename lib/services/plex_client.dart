@@ -430,6 +430,12 @@ class PlexClient
 
   Object _authenticationSessionId = Object();
 
+  /// Memoized library-section ids for [searchItems]' all-excluded check
+  /// (build #19): fetched once, only on searches that actually exclude
+  /// something and returned an unattributed row. Reset on failure so a
+  /// later search retries instead of failing open forever.
+  Future<Set<String>>? _libraryIdsFuture;
+
   @override
   Object get authenticationSessionId => _authenticationSessionId;
 
@@ -4377,9 +4383,18 @@ class PlexClient
     return LibraryPage<MediaItem>(items: result.items, totalCount: result.totalSize, offset: query.offset);
   }
 
-  /// [excludedLibraryIds] is unused: `/library/search` has no section-scoping
-  /// parameter, and every row carries its `librarySectionID`, so the caller
-  /// filters hidden libraries out of the mapped results.
+  /// Rows in [excludedLibraryIds] are dropped client-side, like
+  /// [searchPeople] already does (build #19). The old comment claimed
+  /// every row carries its `librarySectionID` and the caller filters
+  /// hidden libraries out — but `/library/search` with
+  /// `includeExternalMedia: 1` returns external / shared rows that carry
+  /// NO section id, and the caller keeps unattributed rows by design, so
+  /// those rows were filtered by NOBODY. Unattributed rows are dropped
+  /// too, but ONLY when [excludedLibraryIds] covers every library on
+  /// this server: hiding one library must keep them (a user who hid one
+  /// section did not hide the shared rows), while excluding all of them
+  /// means nothing on this server is visible. A fetch failure fails OPEN
+  /// (keeps the unattributed rows) rather than failing the search.
   @override
   Future<List<MediaItem>> searchItems(
     String query, {
@@ -4388,7 +4403,35 @@ class PlexClient
     Set<String> excludedLibraryIds = const {},
   }) async {
     final results = await _search(query, limit: limit, abort: abort);
-    return results.map((m) => PlexMappers.mediaItem(m)).toList();
+    final items = results.map((m) => PlexMappers.mediaItem(m)).toList();
+    if (excludedLibraryIds.isEmpty) return items;
+    final hasUnattributed = items.any((item) => item.libraryId == null);
+    final dropUnattributed =
+        hasUnattributed && await _allLibrariesExcluded(excludedLibraryIds);
+    return items.where((item) {
+      final sectionId = item.libraryId;
+      if (sectionId != null) return !excludedLibraryIds.contains(sectionId);
+      return !dropUnattributed;
+    }).toList();
+  }
+
+  /// Whether [excludedLibraryIds] covers every library section on this
+  /// server (build #19). The section list is fetched once per client and
+  /// memoized; any failure fails OPEN (returns false) so a flaky
+  /// `/library/sections` never costs search results. The ids compared are
+  /// the same [MediaLibrary.id] space the hidden keys are built from, so
+  /// a shared virtual library counts exactly like a section.
+  Future<bool> _allLibrariesExcluded(Set<String> excludedLibraryIds) async {
+    try {
+      final libraryIds = await (_libraryIdsFuture ??= fetchLibraries().then(
+        (libraries) => libraries.map((library) => library.id).toSet(),
+      ));
+      return libraryIds.isNotEmpty && libraryIds.every(excludedLibraryIds.contains);
+    } catch (e) {
+      _libraryIdsFuture = null;
+      appLogger.w('Plex: library list unavailable for search exclusion check', error: e);
+      return false;
+    }
   }
 
   /// `/library/search?searchTypes=people` answers actors and directors only,

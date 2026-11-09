@@ -3662,6 +3662,12 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2265 => [
+		'Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters',
+		'Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again',
+		'A half-empty list from the provider can no longer overwrite the good saved list on the phone',
+		'Game of Thrones in Trex series still depends on the provider fixing its series list — it is currently returning only a few hundred shows, and no app can find one it does not list',
+	];
 	List<String> get changelog2266 => [
 		'Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player',
 		'Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down',
@@ -10134,6 +10140,10 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2265.0' => 'Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters',
+			'about.changelog2265.1' => 'Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again',
+			'about.changelog2265.2' => 'A half-empty list from the provider can no longer overwrite the good saved list on the phone',
+			'about.changelog2265.3' => 'Game of Thrones in Trex series still depends on the provider fixing its series list — it is currently returning only a few hundred shows, and no app can find one it does not list',
 			'about.changelog2266.0' => 'Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player',
 			'about.changelog2266.1' => 'Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down',
 			'about.changelog2266.2' => 'This update only changes how the app is driven on Quest — nothing else in the app changed',
@@ -10377,12 +10387,12 @@ extension on Translations {
 			'explore.creditRole.actor' => 'Actor',
 			'explore.creditRole.director' => 'Director',
 			'explore.creditRole.writer' => 'Writer',
+			_ => null,
+		} ?? switch (path) {
 			'explore.creditRole.producer' => 'Producer',
 			'explore.creditRole.creator' => 'Creator',
 			'explore.creditRole.composer' => 'Composer',
 			'explore.relation.prequel' => 'Prequel',
-			_ => null,
-		} ?? switch (path) {
 			'explore.relation.sequel' => 'Sequel',
 			'explore.relation.sideStory' => 'Side story',
 			'explore.relation.spinOff' => 'Spin-off',
@@ -10891,12 +10901,12 @@ extension on Translations {
 			'downloads.notificationPaused' => 'Download paused',
 			'shaders.title' => 'Shaders',
 			'shaders.noShaderDescription' => 'No video enhancement',
+			_ => null,
+		} ?? switch (path) {
 			'shaders.nvscalerDescription' => 'NVIDIA image scaling for sharper video',
 			'shaders.artcnnVariantNeutral' => 'Neutral',
 			'shaders.artcnnVariantDenoise' => 'Denoise',
 			'shaders.artcnnVariantDenoiseSharpen' => 'Denoise + Sharpen',
-			_ => null,
-		} ?? switch (path) {
 			'shaders.qualityFast' => 'Fast',
 			'shaders.qualityHQ' => 'High Quality',
 			'shaders.mode' => 'Mode',
@@ -11405,12 +11415,12 @@ extension on Translations {
 			'iptv.guideCoverageSplit' => ({required Object byId, required Object byName, required Object shortEpg, required Object none}) => 'From feed by channel id: ${byId} · by name: ${byName} · short guide: ${shortEpg} · no data: ${none}',
 			'iptv.guideCoverageUnknown' => ({required Object count}) => '${count} from an older cache (source unknown)',
 			'iptv.guideCoverageFeedIds' => ({required Object count}) => 'Feed lists ${count} channel ids',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.lastSearchTitle' => 'Last search',
 			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
 			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',
 			'iptv.lastSearchScopedSuffix' => ' · scoped',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.lastSearchSection' => ({required Object section, required Object returned, required Object loadRows, required Object loadMs, required Object source, required Object sweep, required Object partial, required Object hidden, required Object ms}) => '${section}: ${returned} found · load ${loadRows} rows in ${loadMs} ms (${source}) · sweep ${sweep} · partial ${partial} · hidden ${hidden} · ${ms} ms',
 			'iptv.channelHidden' => ({required Object name}) => '${name} hidden',
 			'iptv.hiddenChannelsTitle' => 'Hidden channels',

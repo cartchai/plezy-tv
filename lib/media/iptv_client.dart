@@ -745,6 +745,10 @@ class IptvClient implements MediaServerClient {
     if (disk != null) {
       _vodLoadSource = 'disk';
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        // Build #19: the P5a guard needs the file's row count inside
+        // the refresh closure (captured before the call so the null
+        // promotion survives into the closure).
+        final diskRowCount = disk.rows.length;
         _refreshCatalogInBackground<XtreamVodStream>(
           dataset: IptvCatalogDiskCache.vodDataset,
           fetch: () async {
@@ -753,6 +757,17 @@ class IptvClient implements MediaServerClient {
             // return [] so the refresh skips, and the served rows stay
             // the disk rows (the source stays 'disk' with them).
             if (loaded.complete) {
+              // Build #19: a PARTIAL unfiltered list must not overwrite
+              // a larger good disk file — same poison as series (P5a):
+              // the panel can answer the unfiltered call with a small
+              // partial list while the file holds the full catalog, and
+              // accepting it poisons the disk for the 24 h TTL even after
+              // the panel recovers. Refuse the write when the new list
+              // is under half the file's size; the stale file keeps
+              // serving and the next warm-up retries the refresh.
+              if (loaded.rows.length * 2 < diskRowCount) {
+                return const <XtreamVodStream>[];
+              }
               _vodLoadSource = 'network';
               return loaded.rows;
             }
@@ -866,6 +881,10 @@ class IptvClient implements MediaServerClient {
     if (disk != null) {
       _seriesLoadSource = 'disk';
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
+        // Build #19: the P5a guard needs the file's row count inside
+        // the refresh closure (captured before the call so the null
+        // promotion survives into the closure).
+        final diskRowCount = disk.rows.length;
         _refreshCatalogInBackground<XtreamSeries>(
           dataset: IptvCatalogDiskCache.seriesDataset,
           fetch: () async {
@@ -874,6 +893,18 @@ class IptvClient implements MediaServerClient {
             // return [] so the refresh skips, and the served rows stay
             // the disk rows (the source stays 'disk' with them).
             if (loaded.complete) {
+              // Build #19 (P5a): a PARTIAL unfiltered list must not
+              // overwrite a larger good disk file — the panel currently
+              // answers get_series with 635 Netflix rows while the file
+              // holds 46,527, and accepting the partial list poisons the
+              // disk for the 24 h TTL even after the panel recovers.
+              // Refuse the write when the new list is under half the
+              // file's size (a genuine catalog shrink that large
+              // overnight is implausible); the stale file keeps serving
+              // and the next warm-up retries the refresh.
+              if (loaded.rows.length * 2 < diskRowCount) {
+                return const <XtreamSeries>[];
+              }
               _seriesLoadSource = 'network';
               return loaded.rows;
             }
@@ -2204,20 +2235,27 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// Sweep per-category catalog rows in parallel batches, feeding each
-  /// category's rows to [onRows] AS THEY LAND: a slow category must not
-  /// hold its batch hostage (the old batched Future.wait did exactly
-  /// that). Stops at [deadline] or when [shouldStop] says enough matches
-  /// were found; rows landing after the sweep stopped are dropped, never
+  /// Sweep per-category catalog rows with a SLIDING WINDOW (build #19),
+  /// feeding each category's rows to [onRows] AS THEY LAND: up to
+  /// [batchSize] calls run concurrently, and a finished call frees its
+  /// slot immediately — the next category starts without waiting for the
+  /// rest of its batch. The old batched Future.wait let one slow call
+  /// hold a whole batch hostage: with 232 categories, a slow call in an
+  /// early batch delayed every later batch behind it. With the window,
+  /// a fast call frees its slot at once. (At a UNIFORM 6 s/call the
+  /// window alone cannot beat the 8-batch x 6 s packing minimum — the
+  /// sweep deadline moved 45 s -> 49 s for that, see [_sweepDeadline].)
+  /// Stops at [deadline] or when [shouldStop] says enough matches were
+  /// found; rows landing after the sweep stopped are dropped, never
   /// appended to a list that was already returned.
   ///
-  /// [batchSize] is how many category calls run concurrently per batch.
-  /// The background crawl fallback uses [_catalogFallbackBatchSize]
-  /// (16); the user-initiated search sweep uses
-  /// [_searchSweepBatchSize] (32, build #17) so the whole 237-category
-  /// list is covered inside the sweep deadline — at 16 a late category
-  /// (e.g. "|EN| TOP SERIES", last in the list) is never reached before
-  /// the deadline and its shows are lost even though per-category works.
+  /// [batchSize] is how many category calls run concurrently. The
+  /// background crawl fallback uses [_catalogFallbackBatchSize] (16); the
+  /// user-initiated search sweep uses [_searchSweepBatchSize] (32, build
+  /// #17) so the whole 237-category list is covered inside the sweep
+  /// deadline — at 16 a late category (e.g. "|EN| TOP SERIES", last in
+  /// the list) is never reached before the deadline and its shows are
+  /// lost even though per-category works.
   Future<void> _sweepCatalogCategories<T>(
     List<XtreamCategory> categories,
     Future<List<T>> Function(String categoryId) loadCategory,
@@ -2227,31 +2265,44 @@ class IptvClient implements MediaServerClient {
     int batchSize = _catalogFallbackBatchSize,
   }) async {
     var stopped = false;
-    for (var i = 0; i < categories.length && !stopped; i += batchSize) {
-      if (shouldStop()) break;
+    // In-flight calls. Each task removes itself on completion, so the
+    // set's size is the live concurrency count.
+    final active = <Future<void>>{};
+    for (final category in categories) {
+      if (stopped || shouldStop()) break;
       final timeLeft = deadline.difference(DateTime.now());
       if (timeLeft <= Duration.zero) break;
-      final end = (i + batchSize).clamp(0, categories.length);
-      final batch = categories.sublist(i, end);
-      final futures = <Future<void>>[];
-      for (final category in batch) {
-        futures.add(
-          loadCategory(category.id)
-              .then((rows) {
-                if (!stopped && !shouldStop()) onRows(rows);
-              })
-              .catchError((Object e) {
-                appLogger.w('IPTV: catalog sweep category ${category.id} unavailable: $e');
-              }),
-        );
+      if (active.length >= batchSize) {
+        // Wait for ANY in-flight call to free a slot — but no longer
+        // than the deadline. On timeout the sweep ends; rows landing
+        // later are dropped by the `stopped` guard in each task.
+        await Future.any(active).timeout(timeLeft, onTimeout: () {
+          stopped = true;
+        });
+        if (stopped) break;
       }
-      // Wait for the batch, but no longer than the sweep deadline: rows
-      // that already landed are kept, the rest are dropped by `stopped`.
-      await Future.wait(futures).timeout(timeLeft, onTimeout: () {
-        stopped = true;
-        return <void>[];
+      late final Future<void> task;
+      task = loadCategory(category.id).then((rows) {
+        active.remove(task);
+        if (!stopped && !shouldStop()) onRows(rows);
+      }).catchError((Object e) {
+        active.remove(task);
+        appLogger.w('IPTV: catalog sweep category ${category.id} unavailable: $e');
       });
-      if (shouldStop()) stopped = true;
+      active.add(task);
+    }
+    // Wait for the launched calls to land, bounded by the deadline, so
+    // the caller gets every row that arrives in budget.
+    if (active.isNotEmpty) {
+      final timeLeft = deadline.difference(DateTime.now());
+      if (timeLeft > Duration.zero) {
+        await Future.wait(active).timeout(timeLeft, onTimeout: () {
+          stopped = true;
+          return <void>[];
+        });
+      } else {
+        stopped = true;
+      }
     }
   }
 
@@ -2291,15 +2342,65 @@ class IptvClient implements MediaServerClient {
     );
   }
 
+  /// Repair a disk catalog after a healing search fetched rows the cached
+  /// list lacked (build #19, P5b). Merges [sweptRows] into [cachedRows]
+  /// (deduped by id), writes the merged list to disk, and swaps the
+  /// in-memory memoized list so the next search does not heal again.
+  /// AWAITED: the caller returns its results right after this, and the
+  /// next search (or a disk-only read) must see the repaired file — a
+  /// fire-and-forget write would race it. Skipped when nothing was swept
+  /// or nothing new arrived, and when a clear landed mid-sweep
+  /// (generation guard — the file is deleted instead of resurrecting
+  /// cleared rows, mirroring [_writeDiskText]).
+  ///
+  /// Cost note: the merge re-encodes the whole catalog (build #13
+  /// measured ~1.3 s for 199k VOD rows on the UI isolate), so this runs
+  /// only on a healing search — rare, and it saves every later search
+  /// from paying the sweep again.
+  Future<void> _repairDiskCatalogAfterHeal<T>({
+    required String dataset,
+    required List<T> cachedRows,
+    required List<T> sweptRows,
+    required int Function(T row) idOf,
+    required Map<String, dynamic> Function(T row) toJson,
+    required void Function(List<T> merged) swapMemory,
+  }) async {
+    if (sweptRows.isEmpty) return;
+    final generation = _catalogGeneration;
+    final seen = <int>{for (final row in cachedRows) idOf(row)};
+    final merged = List<T>.of(cachedRows);
+    for (final row in sweptRows) {
+      if (seen.add(idOf(row))) merged.add(row);
+    }
+    if (merged.length == cachedRows.length) return;
+    await _catalogCache.write(connection.id, dataset, jsonEncode(merged.map(toJson).toList()));
+    if (generation != _catalogGeneration) {
+      await _catalogCache.delete(connection.id, dataset);
+      return;
+    }
+    swapMemory(merged);
+  }
+
   /// Deadline for a cold-catalog sweep, measured from the SECTION start
-  /// (build #10): 90% of the section budget, so the sweep returns partial
+  /// (build #10): 98% of the section budget, so the sweep returns partial
   /// matches instead of being cut to [] by the outer timeout, with room
   /// left for the merge. Measured from the section start, not the sweep
   /// start — the old version computed it when the sweep began, so a slow
   /// category-names fetch before the sweep pushed the sweep past the
   /// outer 50s timeout and its partial matches were discarded (T3).
+  ///
+  /// Build #19: was 90% (45 s). At Trex scale the heal must sweep 232
+  /// categories, and with a uniform 6 s per-category round trip the last
+  /// batch (holding "|EN| TOP SERIES", last in the list) lands at ~48 s
+  /// — past 45 s, so the heal missed it (P4-slow) even with the sliding
+  /// window: 8 batches x 6 s is the integer-packing minimum at 32
+  /// concurrent, and no scheduling inside the window can beat it. 98%
+  /// (49 s) fits inside the 50 s section budget with room for the merge
+  /// and the post-heal disk repair, and matches the 0.98 remaining-budget
+  /// factor the cold path already uses. The threshold moves to ~6.1 s/call;
+  /// beyond that the section budget itself is the binding constraint.
   DateTime _sweepDeadline(DateTime sectionStarted) =>
-      sectionStarted.add(searchSectionBudget * 0.9);
+      sectionStarted.add(searchSectionBudget * 0.98);
 
   Future<List<MediaItem>> _searchMovies(String needle, int limit, _SectionTrace trace) async {
     try {
@@ -2322,10 +2423,15 @@ class IptvClient implements MediaServerClient {
           // the fix) — categories hidden when the file was written have
           // no rows in it. Sweep the categories it does not represent
           // before answering [].
+          // Build #19: collect the swept rows so the heal can repair
+          // the disk file (P5b) — the sweep fetches whole categories,
+          // not just the matches.
+          final healedRows = <XtreamVodStream>[];
           await _sweepMissingCategories<XtreamVodStream>(
             loadCategories: _vodCategories,
             loadCategory: (id) => _xtreamApi.getVodStreams(categoryId: id),
             onRows: (sweepRows) {
+              healedRows.addAll(sweepRows);
               final before = out.length;
               _appendMovieMatches(sweepRows, needle, limit, favorites, categoryNames, out, seen, trace);
               trace.sweepMatches += out.length - before;
@@ -2333,6 +2439,21 @@ class IptvClient implements MediaServerClient {
             represented: {for (final r in rows) r.categoryId},
             shouldStop: () => out.length >= limit,
             deadline: _sweepDeadline(sectionStarted),
+          );
+          // Build #19 (P5b): the heal found rows the disk file lacked —
+          // persist them so the next search does not heal again and a
+          // disk-only read is not empty. Awaited before returning.
+          await _repairDiskCatalogAfterHeal<XtreamVodStream>(
+            dataset: IptvCatalogDiskCache.vodDataset,
+            cachedRows: rows,
+            sweptRows: healedRows,
+            idOf: (row) => row.streamId,
+            toJson: (row) => row.toJson(),
+            swapMemory: (merged) {
+              _vodStreamsFuture = Future.value(merged);
+              _vodPartialRows.clear();
+              _vodCrawledCategoryIds.clear();
+            },
           );
         }
         trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
@@ -2486,10 +2607,15 @@ class IptvClient implements MediaServerClient {
           // alone. Sweep the categories it does not represent before
           // answering []. This is what heals Matt's phone even with the
           // poisoned file still on disk.
+          // Build #19: collect the swept rows so the heal can repair
+          // the disk file (P5b) — the sweep fetches whole categories,
+          // not just the matches.
+          final healedRows = <XtreamSeries>[];
           await _sweepMissingCategories<XtreamSeries>(
             loadCategories: _seriesCategories,
             loadCategory: (id) => _xtreamApi.getSeries(categoryId: id),
             onRows: (sweepRows) {
+              healedRows.addAll(sweepRows);
               final before = out.length;
               _appendSeriesMatches(sweepRows, needle, limit, favorites, categoryNames, out, seen, trace);
               trace.sweepMatches += out.length - before;
@@ -2497,6 +2623,21 @@ class IptvClient implements MediaServerClient {
             represented: {for (final r in rows) r.categoryId},
             shouldStop: () => out.length >= limit,
             deadline: _sweepDeadline(sectionStarted),
+          );
+          // Build #19 (P5b): the heal found rows the disk file lacked —
+          // persist them so the next search does not heal again and a
+          // disk-only read is not empty. Awaited before returning.
+          await _repairDiskCatalogAfterHeal<XtreamSeries>(
+            dataset: IptvCatalogDiskCache.seriesDataset,
+            cachedRows: rows,
+            sweptRows: healedRows,
+            idOf: (row) => row.seriesId,
+            toJson: (row) => row.toJson(),
+            swapMemory: (merged) {
+              _seriesFuture = Future.value(merged);
+              _seriesPartialRows.clear();
+              _seriesCrawledCategoryIds.clear();
+            },
           );
         }
         trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;

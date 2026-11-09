@@ -1407,6 +1407,12 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2265": [
+      "Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters",
+      "Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again",
+      "A half-empty list from the provider can no longer overwrite the good saved list on the phone",
+      "Game of Thrones in Trex series still depends on the provider fixing its series list — it is currently returning only a few hundred shows, and no app can find one it does not list"
+    ],
     "changelog2266": [
       "Quest: the TV interface stays, and the controller can now drive it — the thumbstick moves through Discover and the rows, and the controller works as a mouse in the player",
       "Scrolling on Quest now follows the controller, and every menu has a button you can click instead of pulling down",
