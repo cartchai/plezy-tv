@@ -793,6 +793,14 @@ void main() {
       final first = tester.getTopLeft(find.text('Version 2.25.1')).dy;
       final second = tester.getTopLeft(find.text('Version 2.25.0')).dy;
       expect(first, lessThan(second));
+      // Build #28: every shipped version has a changelog entry — the
+      // 1.0.9 entry was missing and nothing caught it. The newest entry
+      // sits above the previous one.
+      expect(find.text('Version 1.0.9-2.25.0'), findsOneWidget);
+      expect(find.text('Version 1.0.8-2.25.0'), findsOneWidget);
+      final newest = tester.getTopLeft(find.text('Version 1.0.9-2.25.0')).dy;
+      final previous = tester.getTopLeft(find.text('Version 1.0.8-2.25.0')).dy;
+      expect(newest, lessThan(previous));
     });
   });
 }

@@ -168,8 +168,11 @@ Updated (deliberate policy change, stricter assertions — no weakening):
 `playback_failure_action_transient_test.dart` + `playback_failure_action_test.dart`
 (403 → `playbackNotAllowedDialog` immediately, no retry; the live ladder is
 still covered elsewhere: 404 → liveRetry, ladder exhaustion, in-flight retry
-owns the error with 404). Failing-first: 3 tests fail on base with the exact
-product reason (403 → `liveRetry`/`retryTransient` instead of the dialog).
+owns the error with 404). Failing-first: the 3 tests fail on base with the
+exact product reason in substance (403 → `liveRetry`/`retryTransient`
+instead of the dialog, verified via a stripped scratch copy) — but not in
+form for the file as committed: the committed file fails to LOAD on base
+because it references the new `shouldRefillLiveLadderAfterRestart`.
 
 Widget-test notes (hard-won):
 

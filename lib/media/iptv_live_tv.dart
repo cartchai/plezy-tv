@@ -1288,6 +1288,9 @@ class IptvLiveTvPlaybackSession implements LiveTvPlaybackSession {
   }
 
   @override
+  // Stays a no-op (build #28): there is no panel disconnect/logout
+  // endpoint — no peer sends one — so the session owns nothing releasable.
+  // The release IS the awaited player stop (the release gate), not this.
   Future<void> discard() async {}
 
   @override

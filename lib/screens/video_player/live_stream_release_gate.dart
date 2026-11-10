@@ -33,7 +33,10 @@ class LiveStreamReleaseGate {
 
   /// Stop the current stream (via [stop]) and wait for the release to
   /// complete, bounded by [releaseTimeout]. Releases serialize: a second
-  /// call waits for the first instead of double-stopping.
+  /// call waits for the first instead of double-stopping — within the cap.
+  /// Past the cap the wait times out and the second call runs stop() again
+  /// while the first is still in flight (benign: the player's stop is
+  /// idempotent, and the in-cap case is unit-tested).
   Future<void> release(Future<void> Function() stop) async {
     await waitForRelease();
     Future<void> stopping;
