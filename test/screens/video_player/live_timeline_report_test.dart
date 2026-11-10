@@ -265,6 +265,10 @@ class _FakeSession implements LiveTvPlaybackSession {
   @override
   LiveProgramInfo get program => const LiveProgramInfo(durationMs: 999);
 
+  /// Test fake: the default language-only headers (build #22).
+  @override
+  Map<String, String> get streamHeaders => const {'Accept-Language': 'en'};
+
   @override
   Future<LiveTvPlaybackSession?> recover({required bool directStream, required bool directStreamAudio}) async => this;
 

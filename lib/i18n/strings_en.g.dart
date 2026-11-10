@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2269 => [
+		'Live TV, movies and shows now introduce themselves to Trex with the same name as the rest of the app — VLC — instead of showing up nameless, so the provider stops refusing the video while letting the browsing through',
+		'Posters and channel logos use that same name too, so Trex sees one app everywhere, not three',
+		'If Trex still refuses a stream after this update, try a different name in Settings → IPTV → Xtream User-Agent — VLC, IPTVSmartersPro, a browser name, or your own',
+	];
 	List<String> get changelog2268 => [
 		'Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline',
 		'Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background',
@@ -10177,6 +10182,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2269.0' => 'Live TV, movies and shows now introduce themselves to Trex with the same name as the rest of the app — VLC — instead of showing up nameless, so the provider stops refusing the video while letting the browsing through',
+			'about.changelog2269.1' => 'Posters and channel logos use that same name too, so Trex sees one app everywhere, not three',
+			'about.changelog2269.2' => 'If Trex still refuses a stream after this update, try a different name in Settings → IPTV → Xtream User-Agent — VLC, IPTVSmartersPro, a browser name, or your own',
 			'about.changelog2268.0' => 'Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline',
 			'about.changelog2268.1' => 'Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background',
 			'about.changelog2268.2' => 'If Trex does go offline it now reconnects on its own, and if Trex refuses access while no server is online you will see the refusal message instead of the offline screen',

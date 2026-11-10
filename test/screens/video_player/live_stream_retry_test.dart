@@ -49,6 +49,8 @@ void main() {
 
     test('adopts the recovered session after a successful open', () async {
       final harness = _RetryHarness();
+      final session = Object();
+      harness.recoveredSession = session;
 
       expect(await harness.run(), LiveStreamRetryResult.succeeded);
 
@@ -57,6 +59,9 @@ void main() {
       expect(harness.finished, isTrue);
       expect(harness.adopted, isTrue);
       expect(harness.discarded, isFalse);
+      // Build #22: the open step receives the recovered session (not just
+      // its URL) so the caller opens with that session's headers.
+      expect(harness.openedSession, same(session));
     });
 
     test('stale operation does not report an async failure', () async {
@@ -123,11 +128,17 @@ class _RetryHarness {
   Object? activeSession;
   Object? recoveredSession;
 
+  /// The session the open step received (build #22).
+  Object? openedSession;
+
   Future<LiveStreamRetryResult> run() => runLiveStreamRetry<Object>(
     recover: () => _stage(_Stage.recover, () => recoveredSession ?? Object()),
     lookupStreamUrl: (_) => _stage(_Stage.lookup, () => 'https://example.com/live'),
     applyPlayerOptions: () => _stage<void>(_Stage.options, () {}),
-    open: (_) => _stage<void>(_Stage.open, () {}),
+    open: (url, session) {
+      openedSession = session;
+      return _stage<void>(_Stage.open, () {});
+    },
     isCurrent: () => current,
     adoptSession: (_) => adopted = true,
     currentSession: () => activeSession,

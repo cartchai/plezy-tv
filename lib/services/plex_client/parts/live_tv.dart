@@ -1049,6 +1049,12 @@ class _PlexLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   bool get canTimeShift => captureBuffer != null;
 
+  /// Plex live opens keep the language header only (build #22): only the
+  /// Xtream panel enforces a User-Agent, and the Plex identity headers
+  /// ride the API calls, not the stream.
+  @override
+  Map<String, String> get streamHeaders => const {'Accept-Language': 'en'};
+
   @override
   Future<String?> streamUrlAt({int? offsetSeconds, MediaSubtitleTrack? subtitleTrack}) async {
     if (subtitleTrack != null && !await _confirmBurnSelection(subtitleTrack)) return null;

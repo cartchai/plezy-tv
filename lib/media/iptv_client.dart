@@ -603,8 +603,19 @@ class IptvClient implements MediaServerClient {
   @override
   ApiCache get cache => ApiCache.forBackend(backend);
 
+  /// Headers for direct-play stream opens from this panel (build #22):
+  /// the same configured Xtream User-Agent the API client sends, so the
+  /// stream carries one identity with the catalog calls instead of
+  /// mpv/ffmpeg's default. Re-read per access (like [_xtreamUserAgent]),
+  /// so a Settings change applies to the next open. Applies to Xtream and
+  /// M3U alike — both serve streams from the provider.
   @override
-  Map<String, String> get streamHeaders => const {};
+  Map<String, String> get streamHeaders => {'User-Agent': _xtreamUserAgent()};
+
+  /// Headers for artwork fetches from this panel (build #22): posters and
+  /// channel logos carry the same configured Xtream User-Agent instead of
+  /// 'Plezy'. Read by [MediaImageHelper.artworkHeadersFor].
+  Map<String, String> get artworkHeaders => {'User-Agent': _xtreamUserAgent()};
 
   @override
   double get watchedThreshold => 0.9;

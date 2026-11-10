@@ -1407,6 +1407,11 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2269": [
+      "Live TV, movies and shows now introduce themselves to Trex with the same name as the rest of the app — VLC — instead of showing up nameless, so the provider stops refusing the video while letting the browsing through",
+      "Posters and channel logos use that same name too, so Trex sees one app everywhere, not three",
+      "If Trex still refuses a stream after this update, try a different name in Settings → IPTV → Xtream User-Agent — VLC, IPTVSmartersPro, a browser name, or your own"
+    ],
     "changelog2268": [
       "Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline",
       "Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background",

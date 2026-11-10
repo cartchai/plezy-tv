@@ -395,6 +395,10 @@ class _FakeSession implements LiveTvPlaybackSession {
   @override
   List<MediaSubtitleTrack> get subtitleTracks => const [];
 
+  /// Test fake: the default language-only headers (build #22).
+  @override
+  Map<String, String> get streamHeaders => const {'Accept-Language': 'en'};
+
   @override
   Future<LiveTimelineUpdate?> reportTimeline({
     required String state,

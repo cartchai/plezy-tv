@@ -2650,6 +2650,7 @@ class _MediaDetailScreenState extends State<MediaDetailScreen>
                                   imageUrl: imageUrl,
                                   memWidth: memWidth,
                                   memHeight: memHeight,
+                                  headers: MediaImageHelper.artworkHeadersFor(client),
                                 ),
                                 fit: BoxFit.cover,
                                 filterQuality: MediaImageHelper.artworkFilterQuality(context, ImageType.poster),

@@ -325,7 +325,12 @@ class _ProgramDetailsSheetContentState extends State<_ProgramDetailsSheetContent
     );
 
     return Image(
-      image: MediaImageHelper.serverArtworkProvider(imageUrl: posterUrl, memWidth: memWidth, memHeight: memHeight),
+      image: MediaImageHelper.serverArtworkProvider(
+        imageUrl: posterUrl,
+        memWidth: memWidth,
+        memHeight: memHeight,
+        headers: MediaImageHelper.artworkHeadersFor(widget.client),
+      ),
       width: posterWidth,
       height: posterHeight,
       fit: BoxFit.cover,

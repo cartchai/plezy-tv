@@ -245,7 +245,12 @@ class _CyclingMediaBackdropState extends State<CyclingMediaBackdrop> with Widget
       imageType: ImageType.art,
     );
     if (imageUrl.isEmpty) return null;
-    return MediaImageHelper.serverArtworkProvider(imageUrl: imageUrl, memWidth: memWidth, memHeight: memHeight);
+    return MediaImageHelper.serverArtworkProvider(
+      imageUrl: imageUrl,
+      memWidth: memWidth,
+      memHeight: memHeight,
+      headers: MediaImageHelper.artworkHeadersFor(widget.client),
+    );
   }
 
   void _reportMissingProvider(String path) {

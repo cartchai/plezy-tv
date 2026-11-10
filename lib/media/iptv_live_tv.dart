@@ -1089,6 +1089,14 @@ class IptvLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   bool get canTimeShift => _hasArchive;
 
+  /// The live open carries the configured Xtream User-Agent alongside the
+  /// language header (build #22): the panel sees the same identity on the
+  /// stream as on the API calls. Delegates to the client so a Settings
+  /// change applies to the next open; covers the live edge and the
+  /// timeshift URL alike, since both open through this session.
+  @override
+  Map<String, String> get streamHeaders => {'Accept-Language': 'en', ...client.streamHeaders};
+
   @override
   Future<String?> streamUrlAt({int? offsetSeconds, MediaSubtitleTrack? subtitleTrack}) async {
     if (subtitleTrack != null) return null;

@@ -18,7 +18,11 @@ Future<LiveStreamRetryResult> runLiveStreamRetry<Session>({
   required LiveStreamRecovery<Session> recover,
   required LiveStreamUrlLookup<Session> lookupStreamUrl,
   required Future<void> Function() applyPlayerOptions,
-  required Future<void> Function(String streamUrl) open,
+  // The open step receives the recovered session as well as its URL, so
+  // the caller opens with the recovered session's own headers (build #22:
+  // the stream carries the session's User-Agent — the adopted session at
+  // open time is still the previous one, since adoption happens after).
+  required Future<void> Function(String streamUrl, Session session) open,
   required bool Function() isCurrent,
   required void Function(Session session) adoptSession,
   required Session? Function() currentSession,
@@ -40,7 +44,7 @@ Future<LiveStreamRetryResult> runLiveStreamRetry<Session>({
     await applyPlayerOptions();
     if (!isCurrent()) return LiveStreamRetryResult.stale;
 
-    await open(streamUrl);
+    await open(streamUrl, recovered);
     if (!isCurrent()) return LiveStreamRetryResult.stale;
 
     adoptSession(recovered);

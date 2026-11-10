@@ -333,6 +333,7 @@ class OptimizedMediaImage extends StatelessWidget {
       memHeight: memHeight,
       logoToneTarget: logoToneTarget,
       logoToneRemapMixed: logoToneRemapMixed,
+      headers: MediaImageHelper.artworkHeadersFor(client),
     );
 
     // Reduced tier: swap in directly, no fade machinery at all.

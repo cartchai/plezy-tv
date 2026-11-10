@@ -1894,7 +1894,12 @@ class _LibraryBrowseTabState extends BaseLibraryTabState<MediaItem, LibraryBrows
       );
 
       precacheImage(
-        MediaImageHelper.serverArtworkProvider(imageUrl: imageUrl, memWidth: memWidth, memHeight: memHeight),
+        MediaImageHelper.serverArtworkProvider(
+          imageUrl: imageUrl,
+          memWidth: memWidth,
+          memHeight: memHeight,
+          headers: MediaImageHelper.artworkHeadersFor(client),
+        ),
         context,
       ).ignore();
     }

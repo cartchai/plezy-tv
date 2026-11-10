@@ -464,7 +464,11 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       // Live streams are not seekable: the same one-line option the full
       // player applies before every live open.
       await player.setProperty('force-seekable', 'no');
-      await player.open(Media(url, headers: const {'Accept-Language': 'en'}), play: true, isLive: true);
+      // Build #22: the session's headers carry the configured Xtream
+      // User-Agent for IPTV, so the stream carries the same identity as
+      // the API calls. Covers the live edge and catch-up alike — both
+      // open through this session.
+      await player.open(Media(url, headers: session.streamHeaders), play: true, isLive: true);
     } catch (e) {
       if (generation != _generation) return;
       _fail('open failed (${e.runtimeType})');

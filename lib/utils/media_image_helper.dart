@@ -5,6 +5,7 @@ import 'package:cached_network_image_ce/cached_network_image.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/widgets.dart';
 
+import '../media/iptv_client.dart';
 import '../media/media_item.dart';
 import '../media/media_server_client.dart';
 import '../services/device_performance.dart';
@@ -414,18 +415,31 @@ class MediaImageHelper {
   /// cache key; the disk cache keeps serving the original bytes.
   /// [logoToneRemapMixed] forwards the [ToneMappedLogoImage.remapMixed]
   /// policy.
+  /// Headers for an artwork fetch from [client]'s server (build #22).
+  /// IPTV panel images carry the configured Xtream User-Agent — the same
+  /// identity the API client and the player send — so the panel sees one
+  /// name everywhere. Every other backend keeps the app's name, and a
+  /// null client (offline / no server) does too. The disk cache key is
+  /// the URL only, so the header change neither fragments nor invalidates
+  /// the cache.
+  static Map<String, String> artworkHeadersFor(MediaServerClient? client) {
+    if (client is IptvClient) return client.artworkHeaders;
+    return const {'User-Agent': 'Plezy'};
+  }
+
   static ImageProvider serverArtworkProvider({
     required String imageUrl,
     required int memWidth,
     required int memHeight,
     Color? logoToneTarget,
     bool logoToneRemapMixed = true,
+    Map<String, String>? headers,
   }) {
     final provider = CachedNetworkImageProvider(
       imageUrl,
       cacheKey: _serverArtworkCacheKey(imageUrl),
       cacheManager: PlexImageCacheManager.instance,
-      headers: const {'User-Agent': 'Plezy'},
+      headers: headers ?? const {'User-Agent': 'Plezy'},
     );
     final bounded = boundedDecode(provider, memWidth: memWidth, memHeight: memHeight);
     if (logoToneTarget == null) return bounded;

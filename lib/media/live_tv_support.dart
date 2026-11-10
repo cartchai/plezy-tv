@@ -99,6 +99,13 @@ abstract class LiveTvPlaybackSession {
   /// unconfirmed selection would weld a wrong stream into the picture.
   Future<String?> streamUrlAt({int? offsetSeconds, MediaSubtitleTrack? subtitleTrack});
 
+  /// HTTP headers to send when opening a stream URL this session built.
+  /// The live open sends `Accept-Language: en` on every backend; backends
+  /// whose panel enforces a User-Agent (Xtream, build #22) add it here, so
+  /// the stream carries the same identity as the API calls. The full player
+  /// and the mini-player both open through this.
+  Map<String, String> get streamHeaders => const {'Accept-Language': 'en'};
+
   /// Send a playback heartbeat (`'playing'` / `'paused'` / `'stopped'`).
   /// [positionMs] is elapsed playback time; [durationMs] the program
   /// duration when known. Returns what the backend reported back (capture

@@ -272,10 +272,16 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
         return recovered.streamUrlAt();
       },
       applyPlayerOptions: () => _setLiveStreamOptions(currentPlayer),
-      open: (streamUrl) async {
+      open: (streamUrl, recovered) async {
         _live.markStreamRestartedAtLiveEdge(recoveredCaptureBuffer);
         final targetEpoch = recoveredCaptureBuffer == null ? null : _live.streamStartEpoch.round();
-        await _openLiveStream(currentPlayer, streamUrl, targetEpoch: targetEpoch, applyOptions: false);
+        await _openLiveStream(
+          currentPlayer,
+          streamUrl,
+          headers: recovered.streamHeaders,
+          targetEpoch: targetEpoch,
+          applyOptions: false,
+        );
       },
       isCurrent: isCurrent,
       adoptSession: (recovered) {
@@ -316,6 +322,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
   Future<bool> _openLiveStream(
     Player player,
     String streamUrl, {
+    Map<String, String>? headers,
     int? targetEpoch,
     bool awaitClock = false,
     bool? play,
@@ -325,7 +332,12 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
   }) async {
     if (_shuttingDown || !_launchCurrent) return false;
     _live.streamGeneration++;
-    final media = Media(streamUrl, headers: const {'Accept-Language': 'en'});
+    // Build #22: [headers] are the session's own headers — the configured
+    // Xtream User-Agent for IPTV, so the stream carries the same identity
+    // as the API calls instead of mpv's default. Callers pass the session
+    // that built the URL: the adopted session may still be the previous
+    // channel's (a zap adopts after the open, recovery adopts after).
+    final media = Media(streamUrl, headers: headers ?? const {'Accept-Language': 'en'});
     final playNow = play ?? automotivePlaybackAllowedNow();
     if (targetEpoch == null || player is! PlayerNative) {
       if (applyOptions) await _setLiveStreamOptions(player);
@@ -470,6 +482,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     final opened = await _openLiveStream(
       currentPlayer,
       streamUrl,
+      headers: session.streamHeaders,
       targetEpoch: clamped,
       awaitClock: currentPlayer is PlayerNative,
       timeShifted: true,
@@ -524,6 +537,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     await _openLiveStream(
       currentPlayer,
       streamUrl,
+      headers: session.streamHeaders,
       targetEpoch: _live.captureBuffer == null ? null : _live.streamStartEpoch.round(),
     );
     if (mounted) _setPlayerState(() {});
@@ -721,6 +735,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       final opened = await _openLiveStream(
         currentPlayer,
         streamUrl,
+        headers: session.streamHeaders,
         targetEpoch: targetEpoch,
         play: (frameRatePlan?.holdPlaybackStart ?? false) ? false : null,
         onOpenStarted: () {

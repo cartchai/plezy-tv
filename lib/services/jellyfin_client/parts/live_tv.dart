@@ -506,6 +506,11 @@ class _JellyfinLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   bool get canTimeShift => false;
 
+  /// Jellyfin live opens keep the language header only (build #22): only
+  /// the Xtream panel enforces a User-Agent.
+  @override
+  Map<String, String> get streamHeaders => const {'Accept-Language': 'en'};
+
   @override
   Future<String?> streamUrlAt({int? offsetSeconds, MediaSubtitleTrack? subtitleTrack}) async =>
       offsetSeconds == null && subtitleTrack == null ? _url : null;
