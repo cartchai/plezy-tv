@@ -231,7 +231,7 @@ class _BigFakeApi extends XtreamApi {
       const {'username': 'user', 'status': 'Active'};
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => small
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => small
       ? const [
           XtreamCategory(id: '1', name: 'EN - Live 1'),
           XtreamCategory(id: 'L2', name: 'EN - Live 2'),
@@ -244,7 +244,7 @@ class _BigFakeApi extends XtreamApi {
           833, (i) => XtreamCategory(id: 'L$i', name: 'EN - Live ${i + 1}'));
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => small
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => small
       ? const [
           XtreamCategory(id: '1', name: 'EN - Films 1'),
           XtreamCategory(id: 'E2', name: 'EN - Films 2'),
@@ -258,7 +258,7 @@ class _BigFakeApi extends XtreamApi {
           200, (i) => XtreamCategory(id: 'V$i', name: 'FR - Film ${i + 1}'));
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => small
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => small
       ? const [
           XtreamCategory(id: '1', name: 'Action'),
           XtreamCategory(id: '2', name: 'NF - Series 1'),
@@ -274,13 +274,13 @@ class _BigFakeApi extends XtreamApi {
           200, (i) => XtreamCategory(id: 'S$i', name: 'DE - Series ${i + 1}'));
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [];
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [];
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [];
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [];
 
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async =>

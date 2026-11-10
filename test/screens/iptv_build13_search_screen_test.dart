@@ -110,10 +110,16 @@ void main() {
 
     testWidgets('cold crawl: "alpha" finds the show in a late category', (tester) async {
       // (g) shape at Trex scale: unfiltered [] + 100ms per-category
-      // calls, match in category 120. Scaled 1s section budget, same
-      // idiom as the unit harness.
+      // calls, match in category 120. Scaled 3s section budget, same
+      // idiom as the unit harness. Build #21 recalibration: the budget
+      // was 1s, calibrated to the old batch size (32) — 120/32 x 100ms =
+      // 375ms to reach category 120. At the build #21 burst cap of 8 it
+      // needs 120/8 x 100ms = 1500ms, past the 980ms sweep deadline at
+      // a 1s budget. The test's purpose is that a cold search finds a
+      // show in a late category, not the budget value (the real section
+      // budget is 50s); 3s keeps the same shape at the shipped cap.
       final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 3000);
       addTearDown(() => IptvClient.searchSectionBudget = previousBudget);
       final client = trexClient(
         api: _TrexSearchFakeXtreamApi(
@@ -131,7 +137,7 @@ void main() {
       expect(find.text('Alpha Show'), findsWidgets);
 
       // Settle the background unfiltered-load crawl before teardown:
-      // the sweep (batch 32) now finishes in ~500 ms of fake time while
+      // the sweep (cap 8) now finishes in ~1500 ms of fake time while
       // the crawl fallback (batch 16, ~1000 ms of 100 ms getSeries calls)
       // is still firing, which leaves pending fake-async timers at
       // teardown. Build #17 fix-up: the search result is already on
@@ -213,16 +219,16 @@ class _TrexSearchFakeXtreamApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => _categories('Series');
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => _categories('Series');
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => _categories('Movies');
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => _categories('Movies');
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => _categories('Live');
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => _categories('Live');
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       if (unfilteredSeriesEmpty) return const [];
       return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
@@ -235,14 +241,14 @@ class _TrexSearchFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     ];
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       return const [
         XtreamLiveStream(streamId: 100, name: 'HBO East', categoryId: '1'),

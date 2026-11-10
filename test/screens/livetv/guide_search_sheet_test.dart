@@ -487,7 +487,7 @@ final class _ThrowingXtreamApi extends XtreamApi {
   _ThrowingXtreamApi() : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async =>
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async =>
       throw UnimplementedError('sheet must not fetch live streams');
 
   @override

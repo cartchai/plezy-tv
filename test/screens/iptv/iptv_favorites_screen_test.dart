@@ -55,28 +55,28 @@ class _FakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: _testPassword);
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 501, name: 'News 24', categoryId: '1'),
     XtreamLiveStream(streamId: 502, name: 'Sports 1', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [XtreamCategory(id: '1', name: 'Action')];
 }
 
 /// Seeded favourites, written straight into the in-memory prefs store:

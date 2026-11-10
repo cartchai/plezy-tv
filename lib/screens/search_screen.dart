@@ -100,6 +100,13 @@ class _SearchScreenState extends State<SearchScreen>
 
   @override
   void dispose() {
+    // Build #21 (close-after-use): stop the in-flight search, if any —
+    // the user has left this screen, so its sweep must stop talking to
+    // the panel. (The tab is kept alive in an IndexedStack, so this
+    // rarely fires on a tab switch; the background path in main.dart
+    // covers that. This is the safety net for when the screen really is
+    // torn down.)
+    _activeSearchAbort?.abort();
     _hiddenLibraries?.removeListener(_onHiddenLibrariesChanged);
     _allChipFocusNode.dispose();
     _peopleChipFocusNode.dispose();

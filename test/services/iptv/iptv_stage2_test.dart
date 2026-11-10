@@ -882,22 +882,22 @@ class _FakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pass');
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [XtreamCategory(id: '1', name: 'Action')];
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [XtreamCategory(id: '1', name: 'Action')];
 }
 
 /// Fake whose CATEGORIES carry repeating initials — the shape behind the
@@ -909,13 +909,13 @@ class _FakeXtreamApi extends XtreamApi {
 /// category stays visible when EN is turned off.
 class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => [
     for (var i = 1; i <= 5; i++) XtreamLiveStream(streamId: 100 + i, name: 'EN - Channel $i', categoryId: '1'),
     const XtreamLiveStream(streamId: 200, name: 'ES - Channel', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'EN - Live'),
     XtreamCategory(id: '2', name: 'ES - Live'),
     XtreamCategory(id: 'L1', name: 'EN - Live 2'),
@@ -926,14 +926,14 @@ class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   ];
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => [
     for (var i = 1; i <= 5; i++)
       XtreamVodStream(streamId: 300 + i, name: 'EN - Movie $i', containerExtension: 'mp4', categoryId: '1'),
     const XtreamVodStream(streamId: 400, name: 'NF - Movie', containerExtension: 'mp4', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'NF'),
     XtreamCategory(id: 'V1', name: 'NF - Movies 1'),
@@ -944,12 +944,12 @@ class _InitialsFakeXtreamApi extends _FakeXtreamApi {
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => [
     for (var i = 1; i <= 6; i++) XtreamSeries(seriesId: 500 + i, name: 'NF - Show $i', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'NF'),
     XtreamCategory(id: 'S1', name: 'NF - Series 1'),
@@ -968,13 +968,13 @@ class _FlakyFakeXtreamApi extends _FakeXtreamApi {
   final bool failSeries;
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (failVod) throw Exception('VOD catalog unavailable');
     return super.getVodStreams(categoryId: categoryId);
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (failSeries) throw Exception('series catalog unavailable');
     return super.getSeries(categoryId: categoryId);
   }
@@ -986,13 +986,13 @@ class _FlakyFakeXtreamApi extends _FakeXtreamApi {
 /// movies fill every slot before a single series was seen.
 class _CrowdedFakeXtreamApi extends _FakeXtreamApi {
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => List.generate(
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => List.generate(
     120,
     (i) => XtreamVodStream(streamId: 1000 + i, name: 'Alpha Movie ${i + 1}', containerExtension: 'mp4', categoryId: '1'),
   );
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
   ];
 }
@@ -1005,7 +1005,7 @@ class _SlowSeriesFakeXtreamApi extends _FakeXtreamApi {
   final _seriesCompleter = Completer<List<XtreamSeries>>();
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) => _seriesCompleter.future;
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) => _seriesCompleter.future;
 
   void completeSeries() {
     if (!_seriesCompleter.isCompleted) {
@@ -1021,7 +1021,7 @@ class _SlowSeriesFakeXtreamApi extends _FakeXtreamApi {
 /// fired and the search returned [] on every cold search.
 class _ColdCatalogFakeXtreamApi extends _FakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return Completer<List<XtreamSeries>>().future;
     return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
   }
@@ -1034,7 +1034,7 @@ class _ColdCatalogFakeXtreamApi extends _FakeXtreamApi {
 /// the whole section hostage until the budget fired.
 class _StalledCrawlFakeXtreamApi extends _FakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return const [];
     if (categoryId == '1') {
       return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
@@ -1043,7 +1043,7 @@ class _StalledCrawlFakeXtreamApi extends _FakeXtreamApi {
   }
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'Drama'),
     XtreamCategory(id: '3', name: 'Comedy'),
@@ -1071,7 +1071,7 @@ class _EmptyUnfilteredFakeXtreamApi extends _FakeXtreamApi {
   final bool includeDramaSeries;
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return const [];
     if (failVodCategoryIds.contains(categoryId)) throw Exception('category $categoryId unavailable');
     final rows = await super.getVodStreams(categoryId: categoryId);
@@ -1079,7 +1079,7 @@ class _EmptyUnfilteredFakeXtreamApi extends _FakeXtreamApi {
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return const [];
     if (failSeriesCategoryIds.contains(categoryId)) throw Exception('category $categoryId unavailable');
     if (categoryId == '2' && includeDramaSeries) {
@@ -1090,7 +1090,7 @@ class _EmptyUnfilteredFakeXtreamApi extends _FakeXtreamApi {
   }
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => includeDramaSeries
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => includeDramaSeries
       ? const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')]
       : super.getSeriesCategories();
 }
@@ -1102,7 +1102,7 @@ class _EmptyThenFullFakeXtreamApi extends _FakeXtreamApi {
   var _vodCalls = 0;
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId != null) return const [];
     _vodCalls++;
     if (_vodCalls == 1) return const [];
@@ -1116,25 +1116,25 @@ class _EmptyThenFullFakeXtreamApi extends _FakeXtreamApi {
 /// is NOT its own category, so it must NOT be stripped.
 class _PrefixedFakeXtreamApi extends _FakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'NF - Alice', categoryId: '9'),
     XtreamSeries(seriesId: 11, name: 'NF - Babel', categoryId: '9'),
     XtreamSeries(seriesId: 12, name: 'NF - Katla', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '9', name: 'NF'),
     XtreamCategory(id: '1', name: 'Action'),
   ];
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'NF - Alpha Movie', containerExtension: 'mp4', categoryId: '9'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '9', name: 'NF'),
     XtreamCategory(id: '1', name: 'Action'),
   ];

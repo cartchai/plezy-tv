@@ -100,7 +100,7 @@ class _FakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pass');
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
   ];
@@ -111,7 +111,7 @@ class _FakeXtreamApi extends XtreamApi {
   bool hangUnfilteredSeries = false;
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (hangUnfilteredSeries && categoryId == null) {
       return Completer<List<XtreamSeries>>().future;
     }
@@ -121,7 +121,7 @@ class _FakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(
       streamId: 100,
       name: 'Trex News',
@@ -133,15 +133,15 @@ class _FakeXtreamApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async =>
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action')];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'News')];
 
   // EPG: the guide fetches these for every visible channel. The real

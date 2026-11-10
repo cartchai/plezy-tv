@@ -181,9 +181,19 @@ void main() {
 
     const moviesLibraryId = 'iptv:conn-xt-1:movies';
 
+    /// Run [body] with the production section budget scaled to 6s.
+    ///
+    /// Build #21 recalibration: the search burst is now capped at 4 total
+    /// in flight (was a per-section batch of 32), so the sweep covers a
+    /// late category ~8x slower. The 1s budget these tests were written
+    /// against assumed batch 32 and can no longer be met at cap 8 — C4
+    /// needs 237 categories x 80ms / 8 = ~2370ms to reach the last
+    /// category. 6s keeps the test fast (8x tighter than production's
+    /// 50s) while giving the cap-4 sweep room to prove it still reaches
+    /// the last category. The behaviour under test is unchanged.
     Future<T> withScaledBudget<T>(Future<T> Function() body) async {
       final previous = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 6000);
       try {
         return await body();
       } finally {
@@ -277,13 +287,19 @@ void main() {
     test('C4: cold catalog, slow unfiltered load, late category — show lost', () async {
       // FAILING-FIRST (suspect (b) mechanism at real scale): the
       // unfiltered 46,527-row load lands after the section budget and
-      // the per-category sweep (batches of 16, 80ms/call, 900ms
-      // deadline) cannot reach category 1219 — LAST in the 237-category
-      // list — in time, so search returns [] although the show exists
-      // on the panel and per-category works. Whether 1219 is actually
-      // late in the panel's category order is UNVERIFIED — the
-      // "Last search" diagnostic (sweep/partial/ms) on Matt's phone
+      // the per-category sweep must reach category 1219 — LAST in the
+      // 237-category list — in time, or search returns [] although the
+      // show exists on the panel and per-category works. Whether 1219
+      // is actually late in the panel's category order is UNVERIFIED —
+      // the "Last search" diagnostic (sweep/partial/ms) on Matt's phone
       // decides.
+      //
+      // Build #21 recalibration: the burst is now capped at 8 total in
+      // flight (was batch 32, which reached category 1219 in ~593ms),
+      // so the sweep needs 237 / 8 x 80ms = ~2370ms to reach the last
+      // category. The budget is 6s (sweep deadline 5880ms) so the cap-4
+      // sweep still proves it reaches the last category; the behaviour
+      // under test is unchanged.
       final client = clientWith(
         api: _GotFakeApi(
           unfilteredSeriesDelay: const Duration(milliseconds: 1400),
@@ -385,18 +401,18 @@ class _GotFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => _seriesCategories;
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => _seriesCategories;
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       [const XtreamCategory(id: '1', name: '|EN| Movies 1')];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       [const XtreamCategory(id: '1', name: '|EN| Live 1')];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       await Future.delayed(unfilteredSeriesDelay);
       return _allSeries;
@@ -413,8 +429,8 @@ class _GotFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [];
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [];
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 }

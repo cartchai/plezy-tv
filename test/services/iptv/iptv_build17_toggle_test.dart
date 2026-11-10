@@ -152,21 +152,21 @@ class _CountingFakeApi extends XtreamApi {
   Future<Map<String, dynamic>?> getUserInfo() async => const {'status': 'Active'};
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: 'S1', name: '|EN| Series'),
     XtreamCategory(id: 'S2', name: 'FR | Series'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: 'M1', name: '|EN| Movies')];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: 'L1', name: '|EN| Live')];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) counts.unfilteredSeries++;
     return const [
       XtreamSeries(seriesId: 10, name: 'EN Show', categoryId: 'S1'),
@@ -175,13 +175,13 @@ class _CountingFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) counts.unfilteredVod++;
     return const [XtreamVodStream(streamId: 1, name: 'EN Movie', containerExtension: 'mp4', categoryId: 'M1')];
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) counts.unfilteredLive++;
     return const [XtreamLiveStream(streamId: 100, name: 'EN Channel', categoryId: 'L1')];
   }

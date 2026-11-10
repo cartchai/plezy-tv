@@ -99,7 +99,7 @@ class _EpgFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 100, name: 'Channel 100', epgChannelId: 'ch100'),
     XtreamLiveStream(streamId: 200, name: 'Channel 200', epgChannelId: 'ch200'),
   ];

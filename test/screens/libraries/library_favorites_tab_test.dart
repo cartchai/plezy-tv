@@ -53,13 +53,13 @@ class _FakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: _testPassword);
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
   ];
 }

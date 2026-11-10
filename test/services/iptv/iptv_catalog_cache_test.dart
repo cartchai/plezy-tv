@@ -103,7 +103,7 @@ class _CacheFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     liveCalls++;
     _maybeFail();
     if (categoryId != null) return liveRows.where((r) => r.categoryId == categoryId).toList();
@@ -111,7 +111,7 @@ class _CacheFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     vodCalls++;
     _maybeFail();
     if (categoryId != null) return vodRows.where((r) => r.categoryId == categoryId).toList();
@@ -119,7 +119,7 @@ class _CacheFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     seriesCalls++;
     _maybeFail();
     if (categoryId != null) return seriesRows.where((r) => r.categoryId == categoryId).toList();
@@ -127,21 +127,21 @@ class _CacheFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async {
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async {
     liveCategoryCalls++;
     _maybeFail();
     return liveCategories;
   }
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async {
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async {
     vodCategoryCalls++;
     _maybeFail();
     return vodCategories;
   }
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async {
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async {
     seriesCategoryCalls++;
     _maybeFail();
     return seriesCategories;

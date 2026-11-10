@@ -215,14 +215,14 @@ class _GuideFakeApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: 'L1', name: '|EN| Live'),
     XtreamCategory(id: 'L2', name: 'FR | Live'),
     XtreamCategory(id: 'L3', name: 'US | Live'),
   ];
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 100, name: 'EN Channel', categoryId: 'L1'),
     XtreamLiveStream(streamId: 101, name: 'FR Channel', categoryId: 'L2'),
     XtreamLiveStream(streamId: 102, name: 'US Channel', categoryId: 'L3'),

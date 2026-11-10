@@ -1407,6 +1407,11 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2268": [
+      "Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline",
+      "Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background",
+      "If Trex does go offline it now reconnects on its own, and if Trex refuses access while no server is online you will see the refusal message instead of the offline screen"
+    ],
     "changelog2267": [
       "Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept",
       "Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update",

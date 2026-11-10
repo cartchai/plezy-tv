@@ -60,7 +60,7 @@ class _EpgFakeApi extends XtreamApi {
   final Map<String, int> calls = {};
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(
       streamId: 100,
       name: 'Trex News',

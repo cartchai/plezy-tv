@@ -108,23 +108,23 @@ class _HiddenFakeApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [XtreamCategory(id: '1', name: '|EN| Live 1')];
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [XtreamCategory(id: '1', name: '|EN| Live 1')];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [];
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [];
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 100, name: 'Trex News', categoryId: '1'),
     XtreamLiveStream(streamId: 101, name: 'Trex Sports', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [];
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [];
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [];
 }

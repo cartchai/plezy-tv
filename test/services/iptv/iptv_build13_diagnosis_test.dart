@@ -66,10 +66,20 @@ void main() {
   const moviesLibraryId = 'iptv:conn-xt-1:movies';
   const liveLibraryId = 'iptv:conn-xt-1:live';
 
-  /// Run [body] with the production section budget scaled to 1s.
+  /// Run [body] with the production section budget scaled to 3s.
+  ///
+  /// Build #21 recalibration: the search burst is now capped at 4 total
+  /// in flight (was a per-section batch of 16), so the sweep covers a
+  /// late category ~4x slower. The 1s budget these tests were written
+  /// against assumed batch 16 and can no longer be met at cap 8 — e.g.
+  /// B2 needs 110 categories x 80ms / 8 = 1100ms to reach its match.
+  /// 3s keeps the test fast (16x tighter than production's 50s) while
+  /// giving the cap-4 sweep room to prove it still rescues the match.
+  /// The behaviour under test is unchanged: the sweep must still reach
+  /// a late-category match when the unfiltered load is slow or empty.
   Future<T> withScaledBudget<T>(Future<T> Function() body) async {
     final previousBudget = IptvClient.searchSectionBudget;
-    IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
+    IptvClient.searchSectionBudget = const Duration(milliseconds: 3000);
     try {
       return await body();
     } finally {
@@ -106,9 +116,11 @@ void main() {
 
     test('B2: slow unfiltered load + late-category match returns the show', () async {
       // The unfiltered call DOES return the show, but only after 1400ms
-      // — past the 1000ms section budget. The sweep must rescue it: at
-      // batches of 16 and 80ms per call, category 110 lands in batch 7
-      // (~560ms, inside the 900ms sweep deadline). Before the fix the
+      // — past the section budget. The sweep must rescue it. At cap 8
+      // and 80ms per call, category 110 lands after 110 / 8 x 80ms =
+      // ~1100ms, inside the 2940ms sweep deadline (3s budget, build #21
+      // recalibration — the 1s budget assumed the old batch of 16, which
+      // reached category 110 in ~560ms). Before the build #13 fix the
       // sweep (batches of 8, 100ms per call) could not reach category
       // 120 inside 900ms, and the unfiltered load was past the budget —
       // both sources too slow, search returned [].
@@ -307,16 +319,16 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => _categories('Series', seriesCategoryCount);
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => _categories('Series', seriesCategoryCount);
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => _categories('Movies', vodCategoryCount);
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => _categories('Movies', vodCategoryCount);
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => _categories('Live', 150);
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => _categories('Live', 150);
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredSeriesCalls++;
       await Future.delayed(unfilteredSeriesDelay);
@@ -331,7 +343,7 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredVodCalls++;
       if (unfilteredVodEmpty) return const [];
@@ -354,7 +366,7 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredLiveCalls++;
       return const [

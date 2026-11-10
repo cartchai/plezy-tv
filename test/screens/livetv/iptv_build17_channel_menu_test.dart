@@ -53,7 +53,7 @@ class _MenuFakeApi extends XtreamApi {
   int epgCalls = 0;
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 100, name: 'Trex News', categoryId: '1'),
     XtreamLiveStream(streamId: 101, name: 'Trex Sports', categoryId: '1'),
   ];

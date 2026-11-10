@@ -165,20 +165,20 @@ class _Build18FakeApi extends XtreamApi {
   final Map<String, List<XtreamSeries>> _buckets = seriesByCategory();
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => seriesCategories();
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => seriesCategories();
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => [
         const XtreamCategory(id: '1', name: 'Movies'),
         const XtreamCategory(id: '2', name: 'Drama'),
       ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       [const XtreamCategory(id: '1', name: 'Live')];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredSeriesCalls++;
       lastSeriesBody = jsonEncode(allSeriesRows().map((r) => r.toJson()).toList());
@@ -190,7 +190,7 @@ class _Build18FakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null && unfilteredVodEmpty) {
       lastVodStreamsBody = '[]';
       return const <XtreamVodStream>[];
@@ -218,7 +218,7 @@ class _Build18FakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => [
         const XtreamLiveStream(streamId: 1, name: 'EN| GAME OF THRONES 4K', categoryId: '1'),
         const XtreamLiveStream(streamId: 2, name: 'EN| GAME OF THRONES 4K +1', categoryId: '1'),
       ];

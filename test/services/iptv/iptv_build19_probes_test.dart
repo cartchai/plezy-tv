@@ -239,19 +239,19 @@ class _Build19FakeApi extends XtreamApi {
   final Map<String, List<XtreamSeries>> _buckets = seriesByCategory();
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async =>
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async =>
       seriesCategories(includeNetflix: includeNetflixCategories);
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       [const XtreamCategory(id: '1', name: 'Movies')];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       [const XtreamCategory(id: '1', name: 'Live')];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredSeriesCalls++;
       if (unfilteredSeriesThrows) throw Exception('HTTP 400');
@@ -269,7 +269,7 @@ class _Build19FakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => [
     const XtreamVodStream(
       streamId: 1,
       name: 'NF - Game of Thrones: A Day in...',
@@ -278,7 +278,7 @@ class _Build19FakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => [
     const XtreamLiveStream(streamId: 1, name: 'EN| GAME OF THRONES 4K', categoryId: '1'),
     const XtreamLiveStream(streamId: 2, name: 'EN| GAME OF THRONES 4K +1', categoryId: '1'),
   ];
@@ -644,7 +644,15 @@ void main() {
   });
 
   group('build19: Trex series leg — heal timing + partial-list persistence', () {
-    test('P4-fast (control): heal reaches 1219 when the sweep fits the 45 s deadline', () async {
+    test(
+      'P4-fast (control): heal reaches 1219 when the sweep fits the 45 s deadline',
+      // Build #21: at cap 8 the sweep needs 232 / 8 x 1 s = 29 s to
+      // reach 1219, plus warm-up overhead — past the default 30 s test
+      // timeout. The 3-minute timeout (same as P4-slow) is a harness
+      // allowance, not a product budget: the product section budget is
+      // still 50 s and the sweep deadline 49 s.
+      timeout: const Timeout(Duration(minutes: 3)),
+      () async {
       // Disk holds rows from categories 1..5 only, so the heal must sweep
       // the other 232 categories (1219 last) to find GoT.
       final cache = IptvCatalogDiskCache();
@@ -699,15 +707,30 @@ void main() {
             'series loadRows=${diag.series.loadRows} sweepMatches=${diag.series.sweepMatches} '
             'ms=${diag.series.ms} perCategoryCalls=${api.perCategorySeriesCalls}',
           );
-          // FAILING-FIRST: 232 categories / 32 per batch = 8 batches;
-          // 8 x 6 s = 48 s > the 45 s sweep deadline, so the last batch
-          // (holding 1219) times out and GoT is never appended. The
-          // zero-latency harness always passes; the real phone pays a
-          // round trip per call. The threshold is what matters, not the
-          // exact 6 s: any per-call latency above ~5.6 s breaks the heal
-          // for a worst-case wanted set — and a throttled panel serialises
-          // the batch the same way.
-          expect(results.map((i) => i.title), contains(_gotName));
+          // FAILING-FIRST (build #19): 232 categories / 32 per batch = 8
+          // batches; 8 x 6 s = 48 s < the 49 s sweep deadline, so the
+          // last batch (holding 1219) JUST lands and GoT is found. The
+          // threshold is what matters, not the exact 6 s: any per-call
+          // latency above ~5.6 s breaks the heal for a worst-case wanted
+          // set at batch 32 — and a throttled panel serialises the batch
+          // the same way.
+          //
+          // Build #21 recalibration: the burst is now capped at 8 total
+          // in flight (was batch 32), so at 6 s per call the sweep needs
+          // 232 / 8 x 6 s = 174 s — far past the 49 s deadline — and the
+          // heal MISSES 1219, exactly as this test's name says. That is
+          // the correct graceful behaviour at cap 8: the search returns
+          // what it found (other Game of Thrones variants from earlier
+          // categories) instead of hanging, and it does not claim the
+          // exact show. The "heal reaches 1219" guarantee is now
+          // carried by P4-fast (1 s per call, cap 8 reaches in 29 s)
+          // and by build #21's R1 reach test (250 ms per call). A panel
+          // answering at 6 s per category call is severely degraded;
+          // the unfiltered load, which runs outside the cap, is the
+          // primary path then.
+          expect(results.map((i) => i.title), isNot(contains(_gotName)));
+          expect(results, isNotEmpty, reason: 'the search returns what it found, not []');
+          expect(diag.series.ms, lessThan(60000), reason: 'the sweep times out at the section budget, it does not hang');
         } finally {
           client.close();
         }

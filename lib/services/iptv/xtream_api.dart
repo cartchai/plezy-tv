@@ -124,10 +124,26 @@ class XtreamApi {
   ///
   /// Every request carries the configured User-Agent (build #20): the panel
   /// 403s the bare Dart default, so a request must never go out without one.
-  Future<String> _fetchBody(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
+  Future<String> _fetchBody(
+    Uri uri, {
+    Duration timeout = const Duration(seconds: 30),
+    Future<void>? abortTrigger,
+  }) async {
     http.Response response;
     try {
-      response = await _http.get(uri, headers: {'User-Agent': _effectiveUserAgent}).timeout(timeout);
+      // Build #21: an AbortableRequest so a search section can hard-cancel
+      // its in-flight requests when its budget expires (or a new keystroke
+      // cancels the search) instead of abandoning the future and leaving
+      // the socket running. Identical to what BaseClient.get does under
+      // the hood (send + Response.fromStream); the single .timeout keeps
+      // the old combined headers+body budget. A null trigger behaves
+      // exactly like the old get() — every non-search caller passes none.
+      final request = http.AbortableRequest('GET', uri, abortTrigger: abortTrigger);
+      request.headers['User-Agent'] = _effectiveUserAgent;
+      response = await (() async {
+        final streamed = await _http.send(request);
+        return http.Response.fromStream(streamed);
+      })().timeout(timeout);
     } catch (e) {
       throw MediaServerHttpException.from(e, uri: uri);
     }
@@ -153,8 +169,12 @@ class XtreamApi {
     return response.body;
   }
 
-  Future<dynamic> _getJson(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
-    final body = await _fetchBody(uri, timeout: timeout);
+  Future<dynamic> _getJson(
+    Uri uri, {
+    Duration timeout = const Duration(seconds: 30),
+    Future<void>? abortTrigger,
+  }) async {
+    final body = await _fetchBody(uri, timeout: timeout, abortTrigger: abortTrigger);
     try {
       return jsonDecode(body);
     } on FormatException catch (e) {
@@ -203,22 +223,31 @@ class XtreamApi {
     return null;
   }
 
-  Future<List<XtreamCategory>> getLiveCategories() async {
-    final decoded = await _getJson(_playerApiUri(action: 'get_live_categories'));
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async {
+    final decoded = await _getJson(
+      _playerApiUri(action: 'get_live_categories'),
+      abortTrigger: abortTrigger,
+    );
     return _asObjectList(decoded).map(XtreamCategory.fromJson).toList();
   }
 
-  Future<List<XtreamCategory>> getVodCategories() async {
-    final decoded = await _getJson(_playerApiUri(action: 'get_vod_categories'));
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async {
+    final decoded = await _getJson(
+      _playerApiUri(action: 'get_vod_categories'),
+      abortTrigger: abortTrigger,
+    );
     return _asObjectList(decoded).map(XtreamCategory.fromJson).toList();
   }
 
-  Future<List<XtreamCategory>> getSeriesCategories() async {
-    final decoded = await _getJson(_playerApiUri(action: 'get_series_categories'));
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async {
+    final decoded = await _getJson(
+      _playerApiUri(action: 'get_series_categories'),
+      abortTrigger: abortTrigger,
+    );
     return _asObjectList(decoded).map(XtreamCategory.fromJson).toList();
   }
 
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     // The full live list is tens of thousands of rows; give it two minutes
     // on slow connections instead of the 30s default, and parse it off the
     // UI thread — decoding tens of thousands of rows on the main isolate
@@ -226,27 +255,30 @@ class XtreamApi {
     final body = await _fetchBody(
       _playerApiUri(action: 'get_live_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
+      abortTrigger: abortTrigger,
     );
     lastLiveStreamsBody = categoryId == null ? body : null;
     return compute(_parseLiveStreams, body);
   }
 
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     // The full VOD list is ~200k rows (tens of MB of JSON). Same treatment
     // as the live list: a long timeout and isolate parsing, so opening
     // Movies does not hang or time out on a slow connection.
     final body = await _fetchBody(
       _playerApiUri(action: 'get_vod_streams', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
+      abortTrigger: abortTrigger,
     );
     lastVodStreamsBody = categoryId == null ? body : null;
     return compute(_parseVodStreams, body);
   }
 
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     final body = await _fetchBody(
       _playerApiUri(action: 'get_series', extra: categoryId == null ? null : {'category_id': categoryId}),
       timeout: const Duration(seconds: 120),
+      abortTrigger: abortTrigger,
     );
     lastSeriesBody = categoryId == null ? body : null;
     return compute(_parseSeries, body);

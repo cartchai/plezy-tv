@@ -143,25 +143,25 @@ class _BuriedInitialsFakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: 'S1', name: 'SERIES | EN | Drama'),
     XtreamCategory(id: 'S2', name: 'SERIES | FR | Drama'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: 'M1', name: 'MOVIES | EN | Action'),
     XtreamCategory(id: 'M2', name: 'MOVIES | FR | Action'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: 'L1', name: 'LIVE TV | EN | News'),
     XtreamCategory(id: 'L2', name: 'LIVE TV | FR | News'),
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamSeries(seriesId: 10, name: 'EN Drama', categoryId: 'S1'),
       XtreamSeries(seriesId: 11, name: 'FR Drama', categoryId: 'S2'),
@@ -169,7 +169,7 @@ class _BuriedInitialsFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamVodStream(streamId: 1, name: 'EN Action', containerExtension: 'mp4', categoryId: 'M1'),
       XtreamVodStream(streamId: 2, name: 'FR Action', containerExtension: 'mp4', categoryId: 'M2'),
@@ -177,7 +177,7 @@ class _BuriedInitialsFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamLiveStream(streamId: 100, name: 'EN News', categoryId: 'L1'),
       XtreamLiveStream(streamId: 101, name: 'FR News', categoryId: 'L2'),

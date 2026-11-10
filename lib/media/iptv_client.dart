@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -326,13 +327,86 @@ class IptvClient implements MediaServerClient {
   /// ~9s at 500ms per call, well within the 45s sweep deadline.
   static const int _catalogFallbackBatchSize = 16;
 
-  /// Concurrent category calls per batch in the user-initiated search
-  /// sweep (build #17): 32 covers the whole 237-category list inside
-  /// the sweep deadline, so a late category is reached before the
-  /// budget expires. The background crawl fallback stays at 16 — the
-  /// search is one user action, not a loop, and it stops early as soon
-  /// as it has enough matches or the catalog load lands.
-  static const int _searchSweepBatchSize = 32;
+  /// Build #21 — the search burst cap. ONE number for the whole search:
+  /// the three sections (movies, series, live) plus any concurrent search
+  /// on this client share one [_SearchRequestSemaphore] of this size, so
+  /// the panel never sees more than this many search requests in flight
+  /// at once. Before, each section ran 32 concurrent category calls, so
+  /// a cold search put ~96 requests on a panel that allows 1 connection.
+  ///
+  /// Why 8: the sweep must still reach the last category ("|EN| TOP
+  /// SERIES", 237th of 237) inside the 49s sweep deadline at realistic
+  /// per-call latency — that is build #19's heal guarantee, and the
+  /// P4-fast probe (1s per call, 232 categories to sweep) is the test
+  /// of it. Cap 4 fails it: 232 / 4 x 1s = 58s > 49s, so the heal
+  /// misses Game of Thrones on a slow panel. Cap 8 passes it: 232 / 8
+  /// x 1s = 29s, with 20s of margin. 8 is the top of Matt's low-end
+  /// range (4-8) and the smallest cap that keeps the heal working at
+  /// 1s per call; the in-harness reach test proves it at 250ms and
+  /// 500ms per call too. A slower panel (6s per call, the P4-slow
+  /// stress case) cannot be swept inside the deadline at any cap Matt's
+  /// range allows — the unfiltered load, which runs outside the cap, is
+  /// the primary path then. 8 is still a 12x cut from the old ~96
+  /// concurrent requests, and 4x down from the old per-section 32.
+  /// (Build #17's 32 existed only to cover the list inside the deadline
+  /// at 6s per call — a degraded panel — and that is exactly the volume
+  /// that reads as abuse.)
+  static const int _searchBurstCap = 8;
+
+  /// The burst cap, for tests: assert the max in-flight sweep requests
+  /// against this, not a literal, so a cap change stays honest.
+  @visibleForTesting
+  static int get searchBurstCap => _searchBurstCap;
+
+  /// The search-wide burst semaphore (build #21): one per client, shared
+  /// by the three sections of every search on this client — so a second
+  /// keystroke's sweep shares the cap with the first instead of adding a
+  /// second burst on top of it. A permit is released when its call lands
+  /// (or aborts); a permit is never held past the section budget.
+  final _SearchRequestSemaphore _searchBurst = _SearchRequestSemaphore(_searchBurstCap);
+
+  /// Consecutive transient health-probe failures (build #21). A single
+  /// timeout / 429 / 5xx / socket error must not flip the server offline
+  /// — the panel is slow or throttling, not gone — so the offline verdict
+  /// needs this many in a row. Probes are event-driven (resume, manual
+  /// reconnect, connectivity change), not periodic, so 3 means three
+  /// separate triggers agreed, not one slow probe under a burst.
+  static const int _transientFailuresBeforeOffline = 3;
+
+  int _consecutiveTransientHealthFailures = 0;
+
+  /// The last health verdict this client published (build #21). A
+  /// transient probe failure returns this instead of offline, so the app
+  /// keeps the last-known state while the panel struggles.
+  HealthStatus _lastHealthStatus = HealthStatus.online;
+
+  /// Searches currently in flight on this client (build #21). A health
+  /// probe that fires while one is running is deferred, not dropped (see
+  /// [_deferredHealthProbe]).
+  int _activeSearchCount = 0;
+
+  /// The section AbortControllers of the searches currently in flight on
+  /// this client (build #21, close-after-use). [cancelActiveSearches]
+  /// aborts every controller in this set, which hard-cancels the
+  /// sections' in-flight requests (the sockets close via
+  /// AbortableRequest) so a search the user has walked away from — app
+  /// backgrounded, connection torn down — stops talking to the panel.
+  /// A controller is added when its search starts and removed when the
+  /// search's sections all settle; aborting a controller that already
+  /// settled is a no-op, so a stale entry is harmless but they are
+  /// removed promptly to keep the set bounded.
+  final Set<AbortController> _activeSearchAborts = {};
+
+  /// A health probe arrived while a search was in flight (build #21).
+  /// Cleared when the deferred probe fires, once, after the search ends.
+  bool _deferredHealthProbe = false;
+
+  /// Called once, coalesced, when a deferred health probe fires (build
+  /// #21): the search has ended and the probe that arrived mid-search
+  /// should run now. Set by [MultiServerManager] when it binds the
+  /// client; null in tests and for clients the manager never bound. The
+  /// manager re-probes this one connection and applies the verdict.
+  void Function(IptvClient client)? onDeferredHealthProbe;
 
   /// Per-section time budget for [searchItems] (build #8 Task 1): a section
   /// that misses its budget returns [] for that search while its catalog
@@ -429,6 +503,27 @@ class IptvClient implements MediaServerClient {
     _http.close();
   }
 
+  /// Cancel every search currently in flight on this client (build #21,
+  /// close-after-use — Matt: "should the connection have a close
+  /// function so it stops talking after?"). Aborts each in-flight
+  /// section's controller, which hard-cancels its requests (the sockets
+  /// close via AbortableRequest) so no further panel traffic is
+  /// generated for a search the user has walked away from. Called when
+  /// the app backgrounds ([MultiServerManager.cancelActiveIptvSearches],
+  /// wired in main.dart) and when a connection is torn down. Safe to
+  /// call with no search in flight (no-op). The client stays usable
+  /// afterwards — only the in-flight searches are cancelled, not the
+  /// connection itself (use [close] to tear the connection down).
+  /// NOTE: the background catalog crawl is NOT cancelled by this — it
+  /// is a bounded batch walk (16 per batch) that populates the disk
+  /// cache, and it only runs when the unfiltered load returns []; it
+  /// finishes on its own and never re-runs for the same catalog.
+  void cancelActiveSearches() {
+    for (final abort in _activeSearchAborts.toList()) {
+      abort.abort();
+    }
+  }
+
   /// Drop the in-memory catalog caches so the next browse/guide load
   /// re-fetches channels, movies and series from the provider (the
   /// "Refresh playlists" action in IPTV settings). An in-flight fetch is
@@ -522,27 +617,88 @@ class IptvClient implements MediaServerClient {
 
   @override
   Future<HealthStatus> checkHealth() async {
+    // Build #21: a probe that fires while a search is in flight is
+    // deferred, not dropped. The search is already exercising the panel,
+    // and a concurrent probe just adds a request to a busy line. Return
+    // the last-known verdict with no request; the probe runs once,
+    // coalesced, when the search ends (see [_fireDeferredHealthProbe]).
+    if (_activeSearchCount > 0) {
+      _deferredHealthProbe = true;
+      return _lastHealthStatus;
+    }
     if (_isXtream) {
       try {
         final info = await _xtreamApi.getUserInfo();
-        return info == null ? HealthStatus.authError : HealthStatus.online;
+        if (info == null) return _publishHealth(HealthStatus.authError);
+        return _publishHealth(HealthStatus.online);
       } on MediaServerAuthException {
-        return HealthStatus.authError;
+        return _publishHealth(HealthStatus.authError);
       } on MediaServerHttpException catch (e) {
-        if (e.statusCode == 403) return HealthStatus.accessDenied;
-        return HealthStatus.offline;
+        if (e.statusCode == 403) return _publishHealth(HealthStatus.accessDenied);
+        // A cancelled probe says nothing about the server — and it is
+        // not a failure, so it does not advance the transient streak.
+        if (e.isCancellation) return _lastHealthStatus;
+        // Build #21: timeouts, 429s and 5xx are transient — the panel is
+        // slow or throttling, not gone. They need N in a row before the
+        // server is published offline (see [_recordTransientHealthFailure]).
+        if (e.isTransient || e.statusCode == 429 || (e.statusCode != null && e.statusCode! >= 500)) {
+          return _recordTransientHealthFailure();
+        }
+        // Any other 4xx (400/404/405/410...) is definitive: the request
+        // reached the panel and was refused for a reason a retry will not
+        // fix. Publish offline immediately.
+        return _publishHealth(HealthStatus.offline);
       } catch (e) {
         appLogger.d('IPTV health probe failed', error: e);
-        return HealthStatus.offline;
+        // Not an HTTP verdict at all (defensive: getUserInfo only throws
+        // the two typed exceptions above). A network-shaped failure is
+        // transient; anything else publishes offline.
+        if (MediaServerHttpException.from(e).isTransient) return _recordTransientHealthFailure();
+        return _publishHealth(HealthStatus.offline);
       }
     }
     try {
       final response = await _http.head(Uri.parse(_m3u.playlistUrl)).timeout(const Duration(seconds: 15));
-      return response.statusCode == 200 ? HealthStatus.online : HealthStatus.offline;
+      if (response.statusCode == 200) return _publishHealth(HealthStatus.online);
+      if (response.statusCode == 401) return _publishHealth(HealthStatus.authError);
+      if (response.statusCode == 403) return _publishHealth(HealthStatus.accessDenied);
+      if (response.statusCode == 429 || response.statusCode >= 500) return _recordTransientHealthFailure();
+      return _publishHealth(HealthStatus.offline);
     } catch (e) {
       appLogger.d('IPTV health probe failed', error: e);
-      return HealthStatus.offline;
+      if (MediaServerHttpException.from(e).isTransient) return _recordTransientHealthFailure();
+      return _publishHealth(HealthStatus.offline);
     }
+  }
+
+  /// Publish a definitive health verdict: reset the transient streak and
+  /// remember the verdict as the last-known state (build #21).
+  HealthStatus _publishHealth(HealthStatus status) {
+    _consecutiveTransientHealthFailures = 0;
+    _lastHealthStatus = status;
+    return status;
+  }
+
+  /// Record one transient health-probe failure (build #21): a timeout,
+  /// 429, 5xx or socket error. Returns the last-known verdict until the
+  /// streak reaches [_transientFailuresBeforeOffline], then publishes
+  /// offline — the panel has failed three separate probes in a row, so
+  /// it is down, not merely slow.
+  HealthStatus _recordTransientHealthFailure() {
+    _consecutiveTransientHealthFailures++;
+    if (_consecutiveTransientHealthFailures >= _transientFailuresBeforeOffline) {
+      return _publishHealth(HealthStatus.offline);
+    }
+    return _lastHealthStatus;
+  }
+
+  /// Fire the health probe deferred during a search (build #21), once.
+  /// The manager re-probes this one connection; without a manager binding
+  /// there is nothing to fire and the flag just clears.
+  void _fireDeferredHealthProbe() {
+    if (!_deferredHealthProbe) return;
+    _deferredHealthProbe = false;
+    onDeferredHealthProbe?.call(this);
   }
 
   @override
@@ -2104,6 +2260,30 @@ class IptvClient implements MediaServerClient {
     final needle = query.trim().toLowerCase();
     if (needle.isEmpty) return const [];
     abort?.throwIfAborted();
+    // Build #21: track the in-flight search so a health probe that fires
+    // mid-search can be deferred instead of adding a concurrent request
+    // to a busy panel (see [checkHealth]). The deferred probe fires once,
+    // coalesced, when the last concurrent search on this client ends.
+    _activeSearchCount++;
+    try {
+      return await _searchItemsInner(
+        needle,
+        limit: limit,
+        abort: abort,
+        excludedLibraryIds: excludedLibraryIds,
+      );
+    } finally {
+      _activeSearchCount--;
+      if (_activeSearchCount == 0) _fireDeferredHealthProbe();
+    }
+  }
+
+  Future<List<MediaItem>> _searchItemsInner(
+    String needle, {
+    required int limit,
+    required AbortController? abort,
+    required Set<String> excludedLibraryIds,
+  }) async {
     final searchStarted = DateTime.now();
     if (_isXtream) {
       final includeMovies = !excludedLibraryIds.contains(_moviesLibraryId);
@@ -2136,30 +2316,74 @@ class IptvClient implements MediaServerClient {
       // in the background and warms the cache, so a cold 46k-row series
       // catalog can no longer hold the movies leg hostage under the 60s
       // IPTV leg deadline — the next search finds the slow section.
-      final sections = await Future.wait([
-        if (includeMovies)
-          _searchMovies(needle, limit, moviesTrace).timeout(searchSectionBudget, onTimeout: () => moviesTrace.partialOut)
-        else
-          Future.value(const <MediaItem>[]),
-        if (includeSeries)
-          _searchSeries(needle, limit, seriesTrace).timeout(searchSectionBudget, onTimeout: () => seriesTrace.partialOut)
-        else
-          Future.value(const <MediaItem>[]),
-        if (includeLive)
-          _searchLive(needle, limit, liveTrace).timeout(searchSectionBudget, onTimeout: () => liveTrace.partialOut)
-        else
-          Future.value(const <MediaItem>[]),
-      ]);
-      _lastSearchDiagnostics = IptvSearchDiagnostics(
-        query: needle,
-        scoped: excludedLibraryIds.isNotEmpty,
-        totalMs: DateTime.now().difference(searchStarted).inMilliseconds,
-        movies: moviesTrace.diagnostics,
-        series: seriesTrace.diagnostics,
-        live: liveTrace.diagnostics,
-        recordedAt: DateTime.now(),
-      );
-      return sections.expand((items) => items).toList();
+      // Build #21: one AbortController per section, plus the search-wide
+      // burst semaphore. A new keystroke (the caller's abort) cancels all
+      // three sections at once; a section's own budget timeout cancels
+      // only that section — and cancelling means the sockets close, not
+      // just the future being abandoned (see XtreamApi's AbortableRequest).
+      // The three sections share one [_searchBurst], so the panel never
+      // sees more than [_searchBurstCap] search requests in flight.
+      final moviesAbort = AbortController();
+      final seriesAbort = AbortController();
+      final liveAbort = AbortController();
+      // Build #21 (close-after-use): track the sections' controllers
+      // so cancelActiveSearches() can abort an in-flight search (app
+      // backgrounded, connection torn down).
+      _activeSearchAborts.addAll([moviesAbort, seriesAbort, liveAbort]);
+      if (abort != null) {
+        unawaited(
+          abort.trigger.then((_) {
+            moviesAbort.abort();
+            seriesAbort.abort();
+            liveAbort.abort();
+          }),
+        );
+      }
+      try {
+        final sections = await Future.wait([
+          if (includeMovies)
+            _searchMovies(needle, limit, moviesTrace, burst: _searchBurst, sectionAbort: moviesAbort)
+                .timeout(searchSectionBudget, onTimeout: () {
+              // Hard-cancel the section's in-flight requests: the budget
+              // expired, so the search already returned — those sockets
+              // must stop, not keep downloading for a dead search.
+              moviesAbort.abort();
+              return moviesTrace.partialOut;
+            })
+          else
+            Future.value(const <MediaItem>[]),
+          if (includeSeries)
+            _searchSeries(needle, limit, seriesTrace, burst: _searchBurst, sectionAbort: seriesAbort)
+                .timeout(searchSectionBudget, onTimeout: () {
+              seriesAbort.abort();
+              return seriesTrace.partialOut;
+            })
+          else
+            Future.value(const <MediaItem>[]),
+          if (includeLive)
+            _searchLive(needle, limit, liveTrace, burst: _searchBurst, sectionAbort: liveAbort)
+                .timeout(searchSectionBudget, onTimeout: () {
+              liveAbort.abort();
+              return liveTrace.partialOut;
+            })
+          else
+            Future.value(const <MediaItem>[]),
+        ]);
+        _lastSearchDiagnostics = IptvSearchDiagnostics(
+          query: needle,
+          scoped: excludedLibraryIds.isNotEmpty,
+          totalMs: DateTime.now().difference(searchStarted).inMilliseconds,
+          movies: moviesTrace.diagnostics,
+          series: seriesTrace.diagnostics,
+          live: liveTrace.diagnostics,
+          recordedAt: DateTime.now(),
+        );
+        return sections.expand((items) => items).toList();
+      } finally {
+        _activeSearchAborts.remove(moviesAbort);
+        _activeSearchAborts.remove(seriesAbort);
+        _activeSearchAborts.remove(liveAbort);
+      }
     }
     // M3U: the playlist is the catalog; channels surface as playable items.
     final m3uLiveTrace = _SectionTrace();
@@ -2255,63 +2479,98 @@ class IptvClient implements MediaServerClient {
 
   /// Sweep per-category catalog rows with a SLIDING WINDOW (build #19),
   /// feeding each category's rows to [onRows] AS THEY LAND: up to
-  /// [batchSize] calls run concurrently, and a finished call frees its
-  /// slot immediately — the next category starts without waiting for the
-  /// rest of its batch. The old batched Future.wait let one slow call
-  /// hold a whole batch hostage: with 232 categories, a slow call in an
-  /// early batch delayed every later batch behind it. With the window,
-  /// a fast call frees its slot at once. (At a UNIFORM 6 s/call the
-  /// window alone cannot beat the 8-batch x 6 s packing minimum — the
-  /// sweep deadline moved 45 s -> 49 s for that, see [_sweepDeadline].)
-  /// Stops at [deadline] or when [shouldStop] says enough matches were
-  /// found; rows landing after the sweep stopped are dropped, never
-  /// appended to a list that was already returned.
+  /// [burst] permits run concurrently, and a finished call frees its
+  /// permit immediately — the next category starts without waiting for
+  /// the rest. The old batched Future.wait let one slow call hold a whole
+  /// batch hostage: with 232 categories, a slow call in an early batch
+  /// delayed every later batch behind it. With the window, a fast call
+  /// frees its permit at once. (At a UNIFORM 6 s/call the window alone
+  /// cannot beat the 8-batch x 6 s packing minimum — the sweep deadline
+  /// moved 45 s -> 49 s for that, see [_sweepDeadline].)
+  /// Stops at [deadline], when [shouldStop] says enough matches were
+  /// found, or when [sectionAbort] fires; rows landing after the sweep
+  /// stopped are dropped, never appended to a list that was already
+  /// returned.
   ///
-  /// [batchSize] is how many category calls run concurrently. The
-  /// background crawl fallback uses [_catalogFallbackBatchSize] (16); the
-  /// user-initiated search sweep uses [_searchSweepBatchSize] (32, build
-  /// #17) so the whole 237-category list is covered inside the sweep
-  /// deadline — at 16 a late category (e.g. "|EN| TOP SERIES", last in
-  /// the list) is never reached before the deadline and its shows are
-  /// lost even though per-category works.
+  /// Concurrency comes from [burst], the search-wide semaphore (build
+  /// #21) — not a per-sweep batch size. The three sections share one
+  /// semaphore of [_searchBurstCap] permits, so a search never puts more
+  /// than that many category calls on the panel at once (before: 32 per
+  /// section, ~96 in flight). A finished call frees its permit at once;
+  /// an aborted call frees it too. The sweep still covers the whole
+  /// 237-category list inside the deadline on a healthy panel (see
+  /// [_searchBurstCap] for the reach math) — the old 32 existed only to
+  /// cover it at 6s per call, a degraded panel.
   Future<void> _sweepCatalogCategories<T>(
     List<XtreamCategory> categories,
     Future<List<T>> Function(String categoryId) loadCategory,
     void Function(List<T> rows) onRows,
     bool Function() shouldStop,
     DateTime deadline, {
-    int batchSize = _catalogFallbackBatchSize,
+    required _SearchRequestSemaphore burst,
+    required AbortController sectionAbort,
   }) async {
     var stopped = false;
     // In-flight calls. Each task removes itself on completion, so the
     // set's size is the live concurrency count.
     final active = <Future<void>>{};
     for (final category in categories) {
-      if (stopped || shouldStop()) break;
+      if (stopped || shouldStop() || sectionAbort.isAborted) break;
       final timeLeft = deadline.difference(DateTime.now());
       if (timeLeft <= Duration.zero) break;
-      if (active.length >= batchSize) {
-        // Wait for ANY in-flight call to free a slot — but no longer
-        // than the deadline. On timeout the sweep ends; rows landing
-        // later are dropped by the `stopped` guard in each task.
-        await Future.any(active).timeout(timeLeft, onTimeout: () {
-          stopped = true;
-        });
-        if (stopped) break;
+      // Take a permit from the search-wide cap before launching. The
+      // acquire waits for a permit, the deadline, or the abort —
+      // whichever comes first — so a stalled panel cannot wedge the loop.
+      if (!await burst.acquireUntil(deadline, sectionAbort)) {
+        stopped = true;
+        break;
       }
       late final Future<void> task;
-      task = loadCategory(category.id).then((rows) {
-        active.remove(task);
-        if (!stopped && !shouldStop()) onRows(rows);
-      }).catchError((Object e) {
-        active.remove(task);
-        appLogger.w('IPTV: catalog sweep category ${category.id} unavailable: $e');
-      });
+      try {
+        task = loadCategory(category.id).then((rows) {
+          burst.release();
+          active.remove(task);
+          if (!stopped && !shouldStop()) onRows(rows);
+        }).catchError((Object e) {
+          burst.release();
+          active.remove(task);
+          // Build #21: an aborted request is not a failed category — the
+          // section's budget expired (or a new keystroke cancelled the
+          // search), so stop the sweep instead of launching the next
+          // category and generating more panel traffic.
+          if (sectionAbort.isAborted || (e is MediaServerHttpException && e.isCancellation)) {
+            stopped = true;
+            return;
+          }
+          appLogger.w('IPTV: catalog sweep category ${category.id} unavailable: $e');
+        });
+      } catch (e) {
+        // Defensive: an async loadCategory cannot throw synchronously,
+        // but a leaked permit would starve the whole search.
+        burst.release();
+        rethrow;
+      }
       active.add(task);
     }
     // Wait for the launched calls to land, bounded by the deadline, so
-    // the caller gets every row that arrives in budget.
-    if (active.isNotEmpty) {
+    // the caller gets every row that arrives in budget. But when the sweep
+    // stopped EARLY — the deadline passed, or enough matches were found —
+    // the in-flight calls' rows will be dropped by the stopped /
+    // shouldStop guard in onRows, so hard-cancel them instead of letting
+    // them run to their own HTTP budget for a dead search. (Without this
+    // the sweep's own deadline ends the sweep just before the section
+    // timeout fires, the section returns normally, the abort never fires,
+    // and the orphaned calls keep downloading — the battery drain Matt
+    // reported.) A sweep that visited every category keeps its in-flight
+    // calls: the final wait below collects their rows.
+    if (active.isNotEmpty && !sectionAbort.isAborted) {
+      final stoppedEarly =
+          shouldStop() || deadline.difference(DateTime.now()) <= Duration.zero;
+      if (stoppedEarly) {
+        sectionAbort.abort();
+      }
+    }
+    if (active.isNotEmpty && !sectionAbort.isAborted) {
       final timeLeft = deadline.difference(DateTime.now());
       if (timeLeft > Duration.zero) {
         await Future.wait(active).timeout(timeLeft, onTimeout: () {
@@ -2341,6 +2600,8 @@ class IptvClient implements MediaServerClient {
     required Set<String?> represented,
     required bool Function() shouldStop,
     required DateTime deadline,
+    required _SearchRequestSemaphore burst,
+    required AbortController sectionAbort,
   }) async {
     final categories = await loadCategories().catchError((Object e) {
       appLogger.w('IPTV: category list unavailable for warm-path sweep: $e');
@@ -2356,7 +2617,8 @@ class IptvClient implements MediaServerClient {
       onRows,
       shouldStop,
       deadline,
-      batchSize: _searchSweepBatchSize,
+      burst: burst,
+      sectionAbort: sectionAbort,
     );
   }
 
@@ -2420,7 +2682,13 @@ class IptvClient implements MediaServerClient {
   DateTime _sweepDeadline(DateTime sectionStarted) =>
       sectionStarted.add(searchSectionBudget * 0.98);
 
-  Future<List<MediaItem>> _searchMovies(String needle, int limit, _SectionTrace trace) async {
+  Future<List<MediaItem>> _searchMovies(
+    String needle,
+    int limit,
+    _SectionTrace trace, {
+    required _SearchRequestSemaphore burst,
+    required AbortController sectionAbort,
+  }) async {
     try {
       final sectionStarted = DateTime.now();
       final favorites = await _favoriteItems();
@@ -2447,7 +2715,7 @@ class IptvClient implements MediaServerClient {
           final healedRows = <XtreamVodStream>[];
           await _sweepMissingCategories<XtreamVodStream>(
             loadCategories: _vodCategories,
-            loadCategory: (id) => _xtreamApi.getVodStreams(categoryId: id),
+            loadCategory: (id) => _xtreamApi.getVodStreams(categoryId: id, abortTrigger: sectionAbort.trigger),
             onRows: (sweepRows) {
               healedRows.addAll(sweepRows);
               final before = out.length;
@@ -2457,6 +2725,8 @@ class IptvClient implements MediaServerClient {
             represented: {for (final r in rows) r.categoryId},
             shouldStop: () => out.length >= limit,
             deadline: _sweepDeadline(sectionStarted),
+            burst: burst,
+            sectionAbort: sectionAbort,
           );
           // Build #19 (P5b): the heal found rows the disk file lacked —
           // persist them so the next search does not heal again and a
@@ -2528,7 +2798,7 @@ class IptvClient implements MediaServerClient {
           .toList(growable: false);
       await _sweepCatalogCategories<XtreamVodStream>(
         wanted,
-        (id) => _xtreamApi.getVodStreams(categoryId: id),
+        (id) => _xtreamApi.getVodStreams(categoryId: id, abortTrigger: sectionAbort.trigger),
         (rows) {
           final before = out.length;
           _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2536,7 +2806,8 @@ class IptvClient implements MediaServerClient {
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
-        batchSize: _searchSweepBatchSize,
+        burst: burst,
+        sectionAbort: sectionAbort,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found NOTHING — instant [] per-category calls, or
@@ -2601,7 +2872,13 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  Future<List<MediaItem>> _searchSeries(String needle, int limit, _SectionTrace trace) async {
+  Future<List<MediaItem>> _searchSeries(
+    String needle,
+    int limit,
+    _SectionTrace trace, {
+    required _SearchRequestSemaphore burst,
+    required AbortController sectionAbort,
+  }) async {
     try {
       final sectionStarted = DateTime.now();
       final favorites = await _favoriteItems();
@@ -2631,7 +2908,7 @@ class IptvClient implements MediaServerClient {
           final healedRows = <XtreamSeries>[];
           await _sweepMissingCategories<XtreamSeries>(
             loadCategories: _seriesCategories,
-            loadCategory: (id) => _xtreamApi.getSeries(categoryId: id),
+            loadCategory: (id) => _xtreamApi.getSeries(categoryId: id, abortTrigger: sectionAbort.trigger),
             onRows: (sweepRows) {
               healedRows.addAll(sweepRows);
               final before = out.length;
@@ -2641,6 +2918,8 @@ class IptvClient implements MediaServerClient {
             represented: {for (final r in rows) r.categoryId},
             shouldStop: () => out.length >= limit,
             deadline: _sweepDeadline(sectionStarted),
+            burst: burst,
+            sectionAbort: sectionAbort,
           );
           // Build #19 (P5b): the heal found rows the disk file lacked —
           // persist them so the next search does not heal again and a
@@ -2706,7 +2985,7 @@ class IptvClient implements MediaServerClient {
           .toList(growable: false);
       await _sweepCatalogCategories<XtreamSeries>(
         wanted,
-        (id) => _xtreamApi.getSeries(categoryId: id),
+        (id) => _xtreamApi.getSeries(categoryId: id, abortTrigger: sectionAbort.trigger),
         (rows) {
           final before = out.length;
           _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, seen, trace);
@@ -2714,7 +2993,8 @@ class IptvClient implements MediaServerClient {
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
-        batchSize: _searchSweepBatchSize,
+        burst: burst,
+        sectionAbort: sectionAbort,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found nothing before the load landed — filter the
@@ -2779,7 +3059,13 @@ class IptvClient implements MediaServerClient {
   /// sweep, so a slow 55k-row load cannot hold the section hostage.
   /// Search never opens a stream (one-stream limit): results are plain
   /// items whose tap resolves through `fetchItem('live:<id>')`.
-  Future<List<MediaItem>> _searchLive(String needle, int limit, _SectionTrace trace) async {
+  Future<List<MediaItem>> _searchLive(
+    String needle,
+    int limit,
+    _SectionTrace trace, {
+    required _SearchRequestSemaphore burst,
+    required AbortController sectionAbort,
+  }) async {
     try {
       final sectionStarted = DateTime.now();
       final categoryNames = await _liveCategoryNames();
@@ -2828,7 +3114,7 @@ class IptvClient implements MediaServerClient {
       final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
       await _sweepCatalogCategories<XtreamLiveStream>(
         wanted,
-        (id) => _xtreamApi.getLiveStreams(categoryId: id),
+        (id) => _xtreamApi.getLiveStreams(categoryId: id, abortTrigger: sectionAbort.trigger),
         (rows) {
           final before = out.length;
           _appendLiveMatches(rows, needle, limit, categoryNames, out, seen, trace);
@@ -2836,7 +3122,8 @@ class IptvClient implements MediaServerClient {
         },
         () => out.length >= limit || loadLanded,
         _sweepDeadline(sectionStarted),
-        batchSize: _searchSweepBatchSize,
+        burst: burst,
+        sectionAbort: sectionAbort,
       );
       if (out.isEmpty && !loadLanded) {
         // The sweep found nothing before the load landed — wait out the
@@ -3615,6 +3902,81 @@ class IptvCatalogDiagnostics {
 
   /// How many categories are turned off by their own switch.
   final int hiddenCategoriesCount;
+}
+
+/// A counting semaphore shared by the three search sections of one search
+/// — and by concurrent searches on the same client (build #21). It is the
+/// thing that enforces [IptvClient.searchBurstCap]: a category call takes
+/// a permit before it is launched and returns it when it lands (or aborts),
+/// so the panel never sees more than the cap in flight, however many
+/// sections or keystrokes are running.
+///
+/// Grant rule (single isolate, first-wins): a permit is handed to exactly
+/// one waiter. [release] completes the first waiter still queued — that
+/// waiter owns the permit from that moment, without [_available] moving —
+/// and skips waiters whose deadline or abort already won (their completer
+/// is already completed, so completing it again is a no-op). A waiter that
+/// times out or aborts removes itself from the queue and owns nothing.
+/// [_available] only moves when a permit is taken with no waiter queued
+/// ([acquireUntil] fast path) or returned with no waiter queued ([release]).
+class _SearchRequestSemaphore {
+  _SearchRequestSemaphore(int permits) : _available = permits;
+
+  int _available;
+  final Queue<Completer<bool>> _waiters = Queue<Completer<bool>>();
+
+  /// Take a permit, waiting until one is free, [deadline], or [abort]
+  /// fires. Returns true when a permit was granted, false when the wait
+  /// ended without one — the caller must stop, not retry.
+  Future<bool> acquireUntil(DateTime deadline, AbortController? abort) async {
+    if (_available > 0) {
+      _available--;
+      return true;
+    }
+    if (abort?.isAborted ?? false) return false;
+    final timeLeft = deadline.difference(DateTime.now());
+    if (timeLeft <= Duration.zero) return false;
+    final waiter = Completer<bool>();
+    _waiters.add(waiter);
+    final timer = Timer(timeLeft, () {
+      if (!waiter.isCompleted) waiter.complete(false);
+    });
+    // Abort wakes the waiter the same way (the trigger future completes
+    // on abort; the isCompleted guard makes a late abort a no-op when
+    // the deadline already won).
+    unawaited(
+      abort?.trigger.then((_) {
+        if (!waiter.isCompleted) waiter.complete(false);
+      }),
+    );
+    bool granted;
+    try {
+      granted = await waiter.future;
+    } finally {
+      timer.cancel();
+    }
+    if (!granted) {
+      // No permit: remove ourselves from the queue (a release() that
+      // already picked us up removes us first, so this is a no-op then).
+      _waiters.remove(waiter);
+      return false;
+    }
+    return true;
+  }
+
+  /// Return a permit. Hands it straight to the first waiter still queued;
+  /// parks it when nobody is waiting.
+  void release() {
+    while (_waiters.isNotEmpty) {
+      final waiter = _waiters.removeFirst();
+      if (!waiter.isCompleted) {
+        waiter.complete(true);
+        return;
+      }
+      // Already completed (deadline/abort won) — try the next waiter.
+    }
+    _available++;
+  }
 }
 
 /// Per-section readout accumulated by one search (build #13): which

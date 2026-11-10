@@ -56,7 +56,7 @@ class _CoverageFakeApi extends XtreamApi {
   final Map<String, List<XtreamEpgProgram>> shortEpg = {};
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(streamId: 100, name: 'US| COMEDY CENTRAL HD', epgChannelId: 'comedycentral.us', categoryId: '1'),
     XtreamLiveStream(streamId: 101, name: 'US| DIY CHANNEL HD', epgChannelId: 'diy.us', categoryId: '1'),
     XtreamLiveStream(streamId: 102, name: 'US| A&E HD', epgChannelId: 'ae.us', categoryId: '1'),
@@ -65,7 +65,7 @@ class _CoverageFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async =>
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'US')];
 
   @override

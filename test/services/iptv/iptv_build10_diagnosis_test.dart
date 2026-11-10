@@ -162,6 +162,12 @@ void main() {
       // batch to 16, so category 20 lands in batch 2 (800ms, inside the
       // deadline) and the partial-row publication hands the match to the
       // search as soon as the batch lands.
+      //
+      // Build #21 recalibration: the burst is now capped at 8 total in
+      // flight (was batch 16), so category 20 needs 20 / 8 x 400ms =
+      // 1000ms to reach. The budget is 3s (sweep deadline 2940ms) so the
+      // cap-4 sweep still proves it reaches the late category; the
+      // behaviour under test is unchanged.
       final client = xtreamClient(
         api: _TimedSeriesFakeXtreamApi(
           categoryDelay: const Duration(milliseconds: 400),
@@ -170,7 +176,7 @@ void main() {
         ),
       );
       final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 3000);
       try {
         final results = await client.searchItems('alpha');
         expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
@@ -208,6 +214,13 @@ void main() {
       // match's category 9 lands in batch 1 (850ms, inside the 900ms
       // deadline) and the partial-row publication hands it to the
       // search as soon as the batch lands.
+      //
+      // Build #21 recalibration: the burst is now capped at 8 total in
+      // flight (was batch 16), so after the 600ms names fetch the sweep
+      // needs 9 / 8 x 250ms = ~281ms more to reach category 9 (lands at
+      // ~881ms). The budget is 3s (sweep deadline 2940ms) so the cap-4
+      // sweep still proves it finds the match; the behaviour under test
+      // is unchanged.
       final client = xtreamClient(
         api: _TimedSeriesFakeXtreamApi(
           namesDelay: const Duration(milliseconds: 600),
@@ -217,7 +230,7 @@ void main() {
         ),
       );
       final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 1000);
+      IptvClient.searchSectionBudget = const Duration(milliseconds: 3000);
       try {
         final results = await client.searchItems('alpha');
         expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
@@ -283,21 +296,21 @@ class _DiagnosisFakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pa' 'ss');
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => const [
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async =>
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action')];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async =>
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async =>
       const [XtreamCategory(id: '1', name: 'Action')];
 }
 
@@ -305,14 +318,14 @@ class _DiagnosisFakeXtreamApi extends XtreamApi {
 /// The series catalog is empty, so both surfaces that read it are empty.
 class _EmptySeriesApi extends _DiagnosisFakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [];
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [];
 }
 
 /// Unfiltered get_series returns [] but per-category calls return rows —
 /// the build #7 fallback assumption. The crawl loads the catalog.
 class _EmptyUnfilteredSeriesApi extends _DiagnosisFakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return const [];
     return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
   }
@@ -321,7 +334,7 @@ class _EmptyUnfilteredSeriesApi extends _DiagnosisFakeXtreamApi {
 /// Every series carries the "EN - " prefix.
 class _EnInitialApi extends _DiagnosisFakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'EN - Alpha Show', categoryId: '1'),
   ];
 }
@@ -329,7 +342,7 @@ class _EnInitialApi extends _DiagnosisFakeXtreamApi {
 /// Series rows carry a category_id ('999') that no listed category has.
 class _MismatchedCategoryApi extends _DiagnosisFakeXtreamApi {
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '999'),
   ];
 }
@@ -337,13 +350,13 @@ class _MismatchedCategoryApi extends _DiagnosisFakeXtreamApi {
 /// 120 movies matching a generic query plus one low-scoring series match.
 class _CrowdedTheApi extends _DiagnosisFakeXtreamApi {
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async => List.generate(
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => List.generate(
     120,
     (i) => XtreamVodStream(streamId: 1000 + i, name: 'The Movie ${i + 1}', containerExtension: 'mp4', categoryId: '1'),
   );
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async => const [
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamSeries(seriesId: 10, name: 'A Show About The Thing', categoryId: '1'),
   ];
 }
@@ -366,7 +379,7 @@ class _TimedSeriesFakeXtreamApi extends _DiagnosisFakeXtreamApi {
   final int categoryCount;
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async {
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async {
     await Future.delayed(namesDelay);
     if (namesThrow) throw Exception('series categories unavailable');
     return [
@@ -375,7 +388,7 @@ class _TimedSeriesFakeXtreamApi extends _DiagnosisFakeXtreamApi {
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) return Completer<List<XtreamSeries>>().future;
     await Future.delayed(categoryDelay);
     if (categoryId == matchCategoryId) {

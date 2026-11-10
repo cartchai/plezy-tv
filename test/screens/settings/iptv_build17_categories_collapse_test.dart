@@ -202,7 +202,7 @@ class _CategoriesFakeApi extends XtreamApi {
       const {'username': 'user', 'status': 'Active'};
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'EN - Live 1'),
     XtreamCategory(id: 'L2', name: 'EN - Live 2'),
     XtreamCategory(id: 'L3', name: 'EN - Live 3'),
@@ -212,7 +212,7 @@ class _CategoriesFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'EN - Films 1'),
     XtreamCategory(id: 'E2', name: 'EN - Films 2'),
     XtreamCategory(id: 'E3', name: 'EN - Films 3'),
@@ -223,7 +223,7 @@ class _CategoriesFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: 'Action'),
     XtreamCategory(id: '2', name: 'NF - Series 1'),
     XtreamCategory(id: 'S2', name: 'NF - Series 2'),

@@ -1745,6 +1745,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // Backgrounded: drop the library push sockets — they are
         // foreground-only, and the stale-resume refresh covers the gap.
         _libraryEventService.suspend();
+        // Backgrounded: stop talking to the IPTV panel — cancel any
+        // search in flight (build #21, close-after-use). The user has
+        // walked away; the sweep would otherwise keep fetching
+        // categories for up to 50s for a search nobody is watching.
+        // The connections stay usable — only the in-flight searches
+        // are cancelled, and the resume path re-probes and reconnects.
+        _serverManager.cancelActiveIptvSearches();
         // Database is session-scoped and must survive suspend/resume.
         // Closing here would kill the Drift isolate channel while services
         // (sync, downloads, cache) still hold references to the executor.

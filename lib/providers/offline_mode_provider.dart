@@ -13,9 +13,13 @@ enum OfflineModeReason {
   waitingForServerStatus,
   noKnownVisibleServers,
 
-  /// Every visible server answered and refused this account (a rejected token
-  /// or a refused account). They are reachable, so this is not offline mode;
-  /// the refusal banner explains the empty app instead.
+  /// At least one visible server answered and refused this account (a
+  /// rejected token or a refused account) while NO visible server is
+  /// online. They are reachable, so this is not offline mode; the refusal
+  /// banner explains the empty app instead. (Build #21: was "every
+  /// visible server refused", so Trex-refused + Plex-offline on mobile
+  /// data fell through to the offline shell even though Trex was
+  /// reachable and the banner was the right UI.)
   onlyRefusedServers,
   noServerConnection,
 }
@@ -78,7 +82,7 @@ class OfflineModeProvider extends ChangeNotifier with DisposableChangeNotifierMi
   OfflineModeReason get offlineReason {
     if (!_hasReceivedServerStatus) return OfflineModeReason.waitingForServerStatus;
     if (!_hasKnownVisibleServers) return OfflineModeReason.noKnownVisibleServers;
-    if (_hasOnlyRefusedServers) return OfflineModeReason.onlyRefusedServers;
+    if (_hasRefusedServerAndNoneOnline) return OfflineModeReason.onlyRefusedServers;
     if (!hasServerConnection) return OfflineModeReason.noServerConnection;
     return OfflineModeReason.online;
   }
@@ -104,11 +108,18 @@ class OfflineModeProvider extends ChangeNotifier with DisposableChangeNotifierMi
   bool get _hasKnownVisibleServers =>
       (_multiServerProvider?.expectedServerIds.length ?? _serverManager.serverIds.length) > 0;
 
-  bool get _hasOnlyRefusedServers {
+  /// At least one visible server refused this account while no visible
+  /// server is online (build #21). The old rule needed EVERY visible
+  /// server refused, so Trex-refused + Plex-offline collapsed to the
+  /// offline shell; a refused server is reachable, so the refusal banner
+  /// is the right UI whenever any server refused and none is online.
+  /// Genuine no-network (no server refused anyone) still falls through
+  /// to [OfflineModeReason.noServerConnection].
+  bool get _hasRefusedServerAndNoneOnline {
     final provider = _multiServerProvider;
     if (provider == null) return false;
     final serverCount = provider.expectedServerIds.length;
-    return serverCount > 0 && provider.refusedServerIds.length == serverCount;
+    return serverCount > 0 && provider.refusedServerIds.isNotEmpty && !provider.hasConnectedServers;
   }
 
   /// Attach the profile-visible server provider. Offline state is evaluated

@@ -126,22 +126,22 @@ class _BrowseFakeXtreamApi extends XtreamApi {
   final String seriesBody;
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => const [
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: '|EN| Movies 1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => const [
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: '|EN| Series 1'),
   ];
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => const [
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => const [
     XtreamCategory(id: '1', name: '|EN| Live 1'),
   ];
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       lastVodStreamsBody = vodBody;
       return vodRows;
@@ -151,7 +151,7 @@ class _BrowseFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       lastSeriesBody = seriesBody;
       return seriesRows;
@@ -161,5 +161,5 @@ class _BrowseFakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async => const [];
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
 }

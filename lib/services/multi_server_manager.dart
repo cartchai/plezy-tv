@@ -976,6 +976,13 @@ class MultiServerManager {
       }
       if (oldClient != null) unawaited(_closeClientGracefully(oldClient));
       final client = IptvClient.forConnection(connection);
+      // Build #21: a health probe requested while a search is in flight is
+      // deferred, not dropped — the client calls this once, coalesced, when
+      // the search ends, so the probe costs one request for however many
+      // triggers fired mid-search.
+      client.onDeferredHealthProbe = (c) {
+        unawaited(_probeIptvHealth(connection.id, c));
+      };
       _iptvByConnectionId[connection.id] = client;
       _clients[connection.id] = client;
 
@@ -1609,6 +1616,67 @@ class MultiServerManager {
     }
   }
 
+  /// Attempt reconnection for a single offline IPTV connection (build #21).
+  ///
+  /// Mirrors [_reconnectJellyfinServer]: run the authenticated health probe
+  /// ([IptvClient.checkHealth] hits player_api.php with no action) and apply
+  /// the verdict, ignoring a stale result if the client was replaced while
+  /// the probe was in flight. On success the connection flips back online
+  /// so the library tabs and guide reload. Without this branch a flipped
+  /// Trex stayed offline until a manual reconnect or resume; the resume
+  /// path calls [reconnectOfflineServers], so Trex now recovers on its own.
+  Future<void> _reconnectIptvServer(String connectionId, IptvClient client) async {
+    try {
+      appLogger.d('Attempting reconnection for IPTV server ${client.serverName ?? connectionId}');
+      await _probeIptvHealth(connectionId, client);
+      final status = _iptvHealthByConnectionId[connectionId];
+      if (status == HealthStatus.online) {
+        appLogger.i('Successfully reconnected to ${client.serverName ?? connectionId}');
+      } else {
+        appLogger.d('Reconnection probe for ${client.serverName ?? connectionId} returned ${status?.name}');
+      }
+    } catch (e) {
+      appLogger.d('Reconnection failed for ${client.serverName ?? connectionId}: $e');
+      // Leave status as offline — will retry on next trigger.
+    }
+  }
+
+  /// Cancel every IPTV search currently in flight on every connection
+  /// (build #21, close-after-use — Matt: "should the connection have a
+  /// close function so it stops talking after?"). Each client aborts its
+  /// in-flight sections' controllers, which hard-cancels their requests
+  /// (the sockets close) so no further panel traffic is generated for a
+  /// search the user has walked away from. Called when the app
+  /// backgrounds (main.dart, `paused`/`detached`). Safe with no search
+  /// in flight (no-op). The connections stay usable afterwards — only
+  /// the in-flight searches are cancelled, not the connections.
+  void cancelActiveIptvSearches() {
+    for (final client in _iptvByConnectionId.values) {
+      client.cancelActiveSearches();
+    }
+  }
+
+  /// Re-probe one IPTV connection's health and apply the verdict (build
+  /// #21). Used by [_reconnectIptvServer] and by the deferred probe a
+  /// search defers: the client fires its [IptvClient.onDeferredHealthProbe]
+  /// once, coalesced, when the search ends, and this runs the single
+  /// deferred probe instead of re-probing every server. A stale result
+  /// (client replaced mid-probe) is ignored, like the other health paths.
+  Future<void> _probeIptvHealth(String connectionId, IptvClient client) async {
+    try {
+      final status = await client.checkHealth();
+      if (!identical(_clients[connectionId], client)) {
+        appLogger.d('Ignoring stale IPTV health result for $connectionId');
+        return;
+      }
+      _iptvHealthByConnectionId[connectionId] = status;
+      _applyHealth(ServerId(connectionId), status);
+    } catch (e) {
+      appLogger.d('IPTV health probe failed for $connectionId: $e');
+      // Leave status as-is — will retry on next trigger.
+    }
+  }
+
   /// Attempt reconnection for all offline servers.
   ///
   /// When [forceRediscovery] is true, the cached endpoint is cleared before
@@ -1664,14 +1732,32 @@ class MultiServerManager {
       // `_activeJellyfinMachine`. Run the same auth probe used at add time.
       final activeCompoundId = _activeJellyfinMachine[serverId];
       final jellyfinClient = activeCompoundId != null ? _jellyfinByCompoundId[activeCompoundId] : null;
-      if (jellyfinClient == null) return Future<void>.value();
+      if (jellyfinClient != null) {
+        return _runServerTask(
+          serverId,
+          () => _reconnectJellyfinServer(serverId, jellyfinClient),
+          timeout: const Duration(seconds: 15),
+          timeoutLabel: 'Jellyfin reconnection',
+        );
+      }
 
-      return _runServerTask(
-        serverId,
-        () => _reconnectJellyfinServer(serverId, jellyfinClient),
-        timeout: const Duration(seconds: 15),
-        timeoutLabel: 'Jellyfin reconnection',
-      );
+      // IPTV offline path (build #21) — no `_plexServers` entry and no
+      // Jellyfin compound id, but the active [IptvClient] is keyed by
+      // connection id in `_clients` (its serverId IS the connection id).
+      // Without this branch a flipped Trex stayed offline until a manual
+      // reconnect or resume; the resume path calls this sweep, so Trex
+      // now recovers on its own. Run the same auth probe used at add time.
+      final iptvClient = _clients[serverId];
+      if (iptvClient is IptvClient) {
+        return _runServerTask(
+          serverId,
+          () => _reconnectIptvServer(serverId, iptvClient),
+          timeout: const Duration(seconds: 15),
+          timeoutLabel: 'IPTV reconnection',
+        );
+      }
+
+      return Future<void>.value();
     });
 
     await Future.wait(futures);

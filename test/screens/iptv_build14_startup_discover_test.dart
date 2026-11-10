@@ -372,28 +372,28 @@ class _TrexScreenFakeXtreamApi extends XtreamApi {
   Future<Map<String, dynamic>?> getUserInfo() async => {'username': 'user', 'status': 'Active'};
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async => _categories('Series');
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async => _categories('Series');
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async => _categories('Movies');
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async => _categories('Movies');
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async => _categories('Live');
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async => _categories('Live');
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
     ];
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     return const [
       XtreamLiveStream(streamId: 100, name: 'HBO East', categoryId: '1'),
       XtreamLiveStream(streamId: 101, name: 'Al Jazeera', categoryId: '900'),

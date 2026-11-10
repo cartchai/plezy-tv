@@ -415,25 +415,25 @@ class _TrexPanelFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories() async {
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async {
     await _latency();
     return liveCategories();
   }
 
   @override
-  Future<List<XtreamCategory>> getVodCategories() async {
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async {
     await _latency();
     return vodCategories();
   }
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories() async {
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async {
     await _latency();
     return seriesCategories();
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId}) async {
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     await _latency();
     final rows = categoryId == null ? liveRows() : liveRows().where((r) => r.categoryId == categoryId).toList();
     lastLiveStreamsBody = categoryId == null ? jsonEncode(rows.map((r) => r.toJson()).toList()) : null;
@@ -441,7 +441,7 @@ class _TrexPanelFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId}) async {
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     await _latency();
     if (categoryId == null) {
       // Unfiltered VOD returns [] on this panel — the crawl path.
@@ -454,7 +454,7 @@ class _TrexPanelFakeApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamSeries>> getSeries({String? categoryId}) async {
+  Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     await _latency();
     if (categoryId != null) {
       lastSeriesBody = null;

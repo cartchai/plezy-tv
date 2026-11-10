@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2268 => [
+		'Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline',
+		'Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background',
+		'If Trex does go offline it now reconnects on its own, and if Trex refuses access while no server is online you will see the refusal message instead of the offline screen',
+	];
 	List<String> get changelog2267 => [
 		'Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept',
 		'Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update',
@@ -10172,6 +10177,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2268.0' => 'Searching no longer disconnects Trex: a slow or busy provider used to flip the app into offline mode mid-search — a bad connection now just waits instead of disconnecting, and it takes three failures in a row before the app calls a server offline',
+			'about.changelog2268.1' => 'Search makes far fewer requests to the provider: at most 8 at a time instead of up to 96, and a search that times out — or one you leave — now stops its requests instead of leaving them running in the background',
+			'about.changelog2268.2' => 'If Trex does go offline it now reconnects on its own, and if Trex refuses access while no server is online you will see the refusal message instead of the offline screen',
 			'about.changelog2267.0' => 'Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept',
 			'about.changelog2267.1' => 'Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update',
 			'about.changelog2267.2' => 'If Trex still refuses access after this update, the provider only allows specific names for this account — that one needs the provider to allow it',
@@ -10416,11 +10424,11 @@ extension on Translations {
 			'explore.sourceMaterial.novel' => 'Novel',
 			'explore.sourceMaterial.visualNovel' => 'Visual novel',
 			'explore.sourceMaterial.game' => 'Game',
+			_ => null,
+		} ?? switch (path) {
 			'explore.sourceMaterial.webComic' => 'Web comic',
 			'explore.sourceMaterial.musicRelease' => 'Music',
 			'explore.sourceMaterial.otherMedia' => 'Other',
-			_ => null,
-		} ?? switch (path) {
 			'explore.creditRole.actor' => 'Actor',
 			'explore.creditRole.director' => 'Director',
 			'explore.creditRole.writer' => 'Writer',
@@ -10930,11 +10938,11 @@ extension on Translations {
 			'downloads.errorPostProcessing' => ({required Object reason}) => 'Post-processing failed: ${reason}',
 			'downloads.reasonFileNotSaved' => 'the file could not be saved on this device',
 			'downloads.reasonCannotResume' => 'the partial download could not be resumed',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.reasonDeviceStorageFull' => 'this device is out of storage',
 			'downloads.notificationDownloading' => 'Downloading...',
 			'downloads.notificationComplete' => 'Download complete',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.notificationPaused' => 'Download paused',
 			'shaders.title' => 'Shaders',
 			'shaders.noShaderDescription' => 'No video enhancement',
@@ -11444,11 +11452,11 @@ extension on Translations {
 			'iptv.initialsLoading' => 'Loading initials…',
 			'iptv.initialsLoadFailed' => 'Could not load the category initials. Check the connection and try again.',
 			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s categories.',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.catalogDiagnosticsTitle' => 'Series catalog',
 			'iptv.catalogDiagnosticsHint' => 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.',
 			'iptv.catalogDiagnosticsLoading' => 'Loading catalog…',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.catalogDiagnosticsFailed' => 'Could not load the catalog details.',
 			'iptv.catalogDiagnosticsUnfilteredRows' => ({required Object count}) => 'Series loaded (all categories): ${count}',
 			'iptv.catalogDiagnosticsCategoryCount' => ({required Object count}) => 'Series categories: ${count}',
