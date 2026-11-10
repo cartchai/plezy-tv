@@ -72,7 +72,7 @@ class _EpgFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) async {
     calls[streamId] = (calls[streamId] ?? 0) + 1;
     if (failing.contains(streamId)) throw StateError('provider down');
     return scripted[streamId] ?? const [];

@@ -103,6 +103,11 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
     if (stale()) return;
 
     _firstFrame.markReady();
+    // Build #28: the stream is playing — background panel work waits
+    // until it stops (see [IptvPlaybackActivity]). Paused still counts
+    // as playing (the panel holds the slot until it expires); only a
+    // real stop/dispose or a fatal error marks idle.
+    IptvPlaybackActivity.instance.markPlaying();
     // This request is proven: a later in-place switch that fails restores it.
     _workingOpenRequest = _currentOpenRequest;
     _http503Watchdog.disarm();
@@ -256,10 +261,15 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
       currentPlayer.streams.playbackRestart.listen((_) async {
         if (!mounted || player != currentPlayer) return;
         _lastLogError = null;
+        // Build #28: a restart after a refusal must not refill the live
+        // ladder — a refused stream cannot be re-opened again after any
+        // restart. The check reads the latched statuses BEFORE they are
+        // cleared below.
+        final hadRefusal = !shouldRefillLiveLadderAfterRestart(_fatalHttpStatuses);
         _fatalHttpStatuses.clear();
         _transientHttpStatuses.clear();
         _transientRetryAttempts = 0;
-        _resetLiveLadderOnPlaybackRestart();
+        if (!hadRefusal) _resetLiveLadderOnPlaybackRestart();
         await _markFirstFrameReady(currentPlayer, settingsService);
       }),
     );

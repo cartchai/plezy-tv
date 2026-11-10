@@ -44,11 +44,11 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       case PlaybackFailureAction.playbackNotAllowedDialog:
         _latchFatalPlaybackError(action);
         unawaited(_showPlaybackNotAllowedDialog());
-      // One bounded re-open after a backoff for a transient refusal (429, or
-      // a 403 that may be transient). The failure view stays down — the
-      // viewer never sees a flash of the error for a failure the retry may
-      // clear. If the retry also fails, the policy runs again with the
-      // budget spent and the terminal path owns it. Deliberately NOT
+      // One bounded re-open after a backoff for a transient refusal (429
+      // only, build #28 — a 403 is never retried). The failure view stays
+      // down — the viewer never sees a flash of the error for a failure the
+      // retry may clear. If the retry also fails, the policy runs again with
+      // the budget spent and the terminal path owns it. Deliberately NOT
       // latched as fatal: the open is still recoverable.
       case PlaybackFailureAction.retryTransient:
         _transientRetryAttempts++;
@@ -129,6 +129,8 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
   void _latchFatalPlaybackError(PlaybackFailureAction action, {String? cause}) {
     _hasFatalPlaybackError = true;
     _progressTracker?.stopTracking();
+    // Build #28: the stream is dead — background panel work may run again.
+    IptvPlaybackActivity.instance.markIdle();
     _abortCurrentOpen('player error: ${action.name}');
     _detachWatchTogetherAfterFailure();
     final currentPlayer = player;

@@ -27,6 +27,7 @@ import '../media/episode_collection.dart';
 import '../media/live_tv_support.dart';
 import '../media/iptv_client.dart';
 import '../media/iptv_live_tv.dart';
+import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/iptv_refusal_log.dart';
 import '../models/livetv_capture_buffer.dart';
 import '../models/livetv_channel.dart';
@@ -117,6 +118,8 @@ import 'video_player/wakelock_controller.dart';
 import 'video_player/playback_failure_action.dart';
 import 'video_player/playback_open_deadline.dart';
 import 'video_player/live_channel_pretune.dart';
+import 'video_player/live_stream_release_gate.dart';
+import 'video_player/live_zap_debouncer.dart';
 import 'video_player/playback_transition_gate.dart';
 import 'video_player/open_http_503_watchdog.dart';
 import 'video_player/open_failure_log.dart';
@@ -735,6 +738,41 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   // In-flight media-source transition. At most one can run at a time: reloads
   // and channel switches are mutually exclusive.
   final PlaybackTransitionGate _transitionGate = PlaybackTransitionGate();
+
+  /// Wait-for-release barrier for live zaps (build #28): on a
+  /// one-connection line the old stream's socket must die before the new
+  /// one opens. Per player instance — the mini-player holds its own.
+  final LiveStreamReleaseGate _liveReleaseGate = LiveStreamReleaseGate();
+
+  /// Zap debounce (build #28, OwnTV's shape): rapid presses collapse into
+  /// one tune instead of one tune per press. Callers awaiting a switch get
+  /// a Future that completes when the tune executes (or is dropped as a
+  /// net-zero burst) — see [_switchLiveChannel].
+  late final LiveZapDebouncer _liveZapDebouncer = LiveZapDebouncer(
+    onExecute: (delta) {
+      final completers = _pendingZapCompleters.toList(growable: false);
+      _pendingZapCompleters.clear();
+      unawaited(
+        _switchLiveChannelNow(delta).whenComplete(() {
+          for (final completer in completers) {
+            if (!completer.isCompleted) completer.complete();
+          }
+        }),
+      );
+    },
+    onDrop: () {
+      final completers = _pendingZapCompleters.toList(growable: false);
+      _pendingZapCompleters.clear();
+      for (final completer in completers) {
+        if (!completer.isCompleted) completer.complete();
+      }
+    },
+  );
+
+  /// Callers awaiting a debounced switch, completed when the tune
+  /// executes (or is dropped). Cleared in [dispose] so a caller awaiting
+  /// a switch during disposal does not hang.
+  final List<Completer<void>> _pendingZapCompleters = <Completer<void>>[];
   bool _playbackIntentShouldPlay = true;
 
   int _pendingSubtitleCycleCount = 0;
@@ -2417,6 +2455,13 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     _retireLaunchObserver();
     _livePretuner?.dispose();
     _livePretuner = null;
+    // Build #28: drop a pending debounced tune and release any caller
+    // awaiting a switch — the screen is going away, the tune never runs.
+    _liveZapDebouncer.dispose();
+    for (final completer in _pendingZapCompleters) {
+      if (!completer.isCompleted) completer.complete();
+    }
+    _pendingZapCompleters.clear();
     _playerInitializationGeneration++;
     _frameRate.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -2931,11 +2976,20 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     // Shared by accepted route exit and app shutdown, not resumable suspension.
     _isExiting.value = true;
     _playbackIntentShouldPlay = false;
+    // Build #28: the stream stopped — background panel work may run again.
+    IptvPlaybackActivity.instance.markIdle();
     // While the receipt can still tell this session apart from a replaced
     // one: the generation bump below would read as a replacement.
     _retireLaunchObserver();
     _livePretuner?.dispose();
     _livePretuner = null;
+    // Build #28: drop a pending debounced tune and release any caller
+    // awaiting a switch — the video is shutting down, the tune never runs.
+    _liveZapDebouncer.dispose();
+    for (final completer in _pendingZapCompleters) {
+      if (!completer.isCompleted) completer.complete();
+    }
+    _pendingZapCompleters.clear();
     _playerInitializationGeneration++;
     _transitionGate.bumpGeneration();
     _transitionGate.completeIdleWaiters();

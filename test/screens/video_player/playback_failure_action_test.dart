@@ -24,9 +24,10 @@ PlaybackFailureAction resolve({
   );
 }
 
-// The 403-terminal assertions below pass the transient budget as spent:
-// with attempts remaining a 403 takes the one bounded retry first (build
-// #24), and only a persistent 403 ends in the dialog.
+// The 403-terminal assertions below use [resolveTerminal] (transient
+// budget spent) out of habit from build #24, when a 403 took one bounded
+// retry first. Build #28 removed the 403 retry entirely: a 403 is terminal
+// immediately, with or without budget remaining.
 PlaybackFailureAction resolveTerminal({
   String? cause,
   Set<int> statuses = const <int>{},
@@ -48,11 +49,12 @@ PlaybackFailureAction resolveTerminal({
 
 void main() {
   group('HTTP 403', () {
-    test('on-demand playback treats the refusal as terminal once the retry budget is spent', () {
+    test('on-demand playback treats the refusal as terminal immediately, with no retry', () {
       // The server refused this account or connection (#2510); no retry,
-      // quality change, or backend switch gets past it. The one bounded
-      // retry (build #24) runs first; the dialog is what a persistent
-      // refusal ends in.
+      // quality change, or backend switch gets past it. Build #28 removed
+      // the one bounded 403 retry (build #24): re-hitting a refusal reads
+      // as an attack, so the dialog is immediate, not after a retry.
+      expect(resolve(statuses: {403}), PlaybackFailureAction.playbackNotAllowedDialog);
       expect(resolveTerminal(statuses: {403}), PlaybackFailureAction.playbackNotAllowedDialog);
     });
 
@@ -67,8 +69,12 @@ void main() {
       );
     });
 
-    test('live TV keeps its fallback ladder', () {
-      expect(resolve(statuses: {403}, isLive: true), PlaybackFailureAction.liveRetry);
+    test('live TV treats a 403 as terminal, not a ladder rung', () {
+      // Build #28: a refused live stream goes to the access-denied dialog
+      // with no re-open. The ladder still rides out transient failures
+      // (a 404 climbs it), but a refusal is not one.
+      expect(resolve(statuses: {403}, isLive: true), PlaybackFailureAction.playbackNotAllowedDialog);
+      expect(resolve(statuses: {404}, isLive: true), PlaybackFailureAction.liveRetry);
     });
   });
 

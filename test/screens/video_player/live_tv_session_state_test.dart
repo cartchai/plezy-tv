@@ -389,6 +389,10 @@ class _FakeSession implements LiveTvPlaybackSession {
   @override
   bool get canTimeShift => false;
 
+  // Build #28: test fake — never requires release-before-open.
+  @override
+  bool get requiresReleaseBeforeOpen => false;
+
   @override
   LiveProgramInfo get program => LiveProgramInfo.none;
 

@@ -150,11 +150,11 @@ class _FakeXtreamApi extends XtreamApi {
   // `testWidgets`' fake async zone and the guide's loading indicator
   // would spin `pumpAndSettle` into its timeout.
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async =>
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async =>
       '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
 
   @override
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async => const [];
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) async => const [];
 }
 
 /// In-memory favourites store for widget tests. The production store

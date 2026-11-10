@@ -491,7 +491,7 @@ final class _ThrowingXtreamApi extends XtreamApi {
       throw UnimplementedError('sheet must not fetch live streams');
 
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async =>
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async =>
       throw UnimplementedError('sheet must not fetch xmltv');
 }
 

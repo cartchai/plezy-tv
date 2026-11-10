@@ -277,10 +277,21 @@ class XtreamApi {
 
   /// Same User-Agent rule as [_fetchBody] (build #20): the EPG feed and the
   /// M3U export go through here, and the panel sees them too.
-  Future<String> _getText(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
+  /// [abortTrigger] (build #28) hard-cancels the request — the feed
+  /// download stops when the app backgrounds instead of running to
+  /// completion unobserved. A null trigger behaves exactly like the old
+  /// get().
+  Future<String> _getText(Uri uri, {Duration timeout = const Duration(seconds: 30), Future<void>? abortTrigger}) async {
     http.Response response;
     try {
-      response = await _http.get(uri, headers: {'User-Agent': _effectiveUserAgent}).timeout(timeout);
+      // Build #28: AbortableRequest, same shape as [_fetchBody] — see
+      // its comment. The M3U export keeps passing no trigger.
+      final request = http.AbortableRequest('GET', uri, abortTrigger: abortTrigger);
+      request.headers['User-Agent'] = _effectiveUserAgent;
+      response = await (() async {
+        final streamed = await _http.send(request);
+        return http.Response.fromStream(streamed);
+      })().timeout(timeout);
     } catch (e) {
       final mapped = MediaServerHttpException.from(e, uri: uri);
       if (!mapped.isCancellation) {
@@ -406,10 +417,16 @@ class XtreamApi {
   /// Short EPG for one stream (up to [limit] listings). Titles and
   /// descriptions arrive Base64-encoded; they are decoded here, falling
   /// back to the raw string when decoding fails.
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
+  Future<List<XtreamEpgProgram>> getShortEpg(
+    String streamId, {
+    int limit = 4,
+    Duration? timeout,
+    Future<void>? abortTrigger,
+  }) async {
     final decoded = await _getJson(
       _playerApiUri(action: 'get_short_epg', extra: {'stream_id': streamId, 'limit': '$limit'}),
       timeout: timeout ?? const Duration(seconds: 30),
+      abortTrigger: abortTrigger,
     );
     if (decoded is! Map<String, dynamic>) return const [];
     final listings = decoded['epg_listings'];
@@ -427,8 +444,8 @@ class XtreamApi {
   /// Full XMLTV guide (large — callers fetch it only when the guide is
   /// actually being browsed). 120s: the file runs to megabytes and a slow
   /// connection legitimately takes a while to deliver it.
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) =>
-      _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'), timeout: timeout);
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) =>
+      _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'), timeout: timeout, abortTrigger: abortTrigger);
 
 /// Parse helpers for the disk cache (build #11): a cached payload is the
 /// same JSON the API returns, so it parses through the same isolate

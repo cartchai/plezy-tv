@@ -69,12 +69,12 @@ class _CoverageFakeApi extends XtreamApi {
       const [XtreamCategory(id: '1', name: 'US')];
 
   @override
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) async {
     return shortEpg[streamId] ?? const [];
   }
 
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     final now = DateTime.now();
     String programme(String channel, String title, DateTime start, DateTime end) =>
         '<programme channel="$channel" start="${_xmltvTime(start)}" stop="${_xmltvTime(end)}">'

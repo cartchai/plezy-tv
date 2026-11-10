@@ -11,11 +11,13 @@ import '../../mpv/player/player.dart';
 import '../../mpv/player/video_rect_support.dart';
 import '../../mpv/video.dart';
 import '../../providers/multi_server_provider.dart';
+import '../../services/iptv/iptv_playback_activity.dart';
 import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/playback_coordinator.dart';
 import '../../services/settings_service.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/live_tv_player_navigation.dart';
+import '../video_player/live_stream_release_gate.dart';
 import '../video_player/live_tv_session_args.dart';
 
 /// Playback state of the Live TV mini-player (build #12).
@@ -185,6 +187,11 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
   String? _catchUpProgrammeTitle;
   Player? _player;
   LiveTvPlaybackSession? _session;
+
+  /// Wait-for-release barrier for retunes (build #28): on a
+  /// one-connection line the old stream's socket must die before the new
+  /// one opens. Per player instance — the full player holds its own.
+  final LiveStreamReleaseGate _releaseGate = LiveStreamReleaseGate();
   bool _isPlaying = false;
   bool _isBuffering = false;
   bool _muted = false;
@@ -465,6 +472,17 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
       // Live streams are not seekable: the same one-line option the full
       // player applies before every live open.
       await player.setProperty('force-seekable', 'no');
+      // Build #28: on a one-connection line the old stream's slot is
+      // still counted until its socket dies, so the new stream must not
+      // open until the old one is released. The release is the player
+      // stop — there is no panel disconnect call — and the gate bounds
+      // the wait at 1.5 s, never blocking the retune on a failed stop.
+      // Only when the previous session requires it: Plex/Jellyfin and
+      // multi-connection lines keep opening straight onto the player.
+      if (previousSession != null && previousSession.requiresReleaseBeforeOpen) {
+        await _releaseGate.release(() => player.stop());
+        if (generation != _generation) return;
+      }
       // Build #22: the session's headers carry the configured Xtream
       // User-Agent for IPTV, so the stream carries the same identity as
       // the API calls. Covers the live edge and catch-up alike — both
@@ -478,6 +496,9 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     if (generation != _generation) return;
     _status = LiveTvMiniPlayerStatus.active;
     _isPlaying = true;
+    // Build #28: the stream is playing — background panel work waits
+    // until it stops (see [IptvPlaybackActivity]).
+    IptvPlaybackActivity.instance.markPlaying();
     _isBuffering = false;
     // The open returned: the frame may already be latched (build #15),
     // and the watchdog starts from here if it is not.
@@ -542,6 +563,8 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _catchUpProgrammeTitle = null;
     _isPlaying = false;
     _isBuffering = false;
+    // Build #28: the stream stopped — background panel work may run again.
+    IptvPlaybackActivity.instance.markIdle();
     await _releasePlayerAndSession();
     _notify();
   }
@@ -554,6 +577,9 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _status = LiveTvMiniPlayerStatus.stopped;
     _isPlaying = false;
     _isBuffering = false;
+    // Build #28: the stream stopped — background panel work may run again.
+    // (The full player marks playing again at its first frame.)
+    IptvPlaybackActivity.instance.markIdle();
     await _releasePlayerAndSession();
     _notify();
   }
@@ -668,6 +694,8 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _status = LiveTvMiniPlayerStatus.failed;
     _isPlaying = false;
     _isBuffering = false;
+    // Build #28: the stream stopped — background panel work may run again.
+    IptvPlaybackActivity.instance.markIdle();
     final session = _session;
     _session = null;
     // Build #27: a tune the panel answered with an HTTP status is a
@@ -751,6 +779,8 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _disposed = true;
     _firstFrameWatchdog?.cancel();
     _firstFrameWatchdog = null;
+    // Build #28: the stream stopped — background panel work may run again.
+    IptvPlaybackActivity.instance.markIdle();
     await _releasePlayerAndSession();
     hasFirstFrame.dispose();
     super.dispose();

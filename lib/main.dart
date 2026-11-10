@@ -1752,6 +1752,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
         // The connections stay usable — only the in-flight searches
         // are cancelled, and the resume path re-probes and reconnects.
         _serverManager.cancelActiveIptvSearches();
+        // Build #28: background work too — the weekly index sync, the
+        // stale-disk catalog refreshes, and the in-flight EPG fetches.
+        // A sync parked on playback (or a feed download nobody watches)
+        // stops instead of running to completion in the background.
+        _serverManager.cancelActiveIptvBackgroundWork();
         // Database is session-scoped and must survive suspend/resume.
         // Closing here would kill the Drift isolate channel while services
         // (sync, downloads, cache) still hold references to the executor.

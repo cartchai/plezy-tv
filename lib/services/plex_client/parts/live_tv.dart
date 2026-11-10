@@ -965,6 +965,11 @@ class _PlexLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   LiveTvBackgroundPolicy get backgroundPolicy => LiveTvBackgroundPolicy.retainSession;
 
+  // Build #28: Plex allows concurrent sessions — the next stream never
+  // waits for this one to release.
+  @override
+  bool get requiresReleaseBeforeOpen => false;
+
   @override
   final CaptureBuffer? captureBuffer;
 

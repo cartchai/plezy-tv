@@ -26,10 +26,13 @@ enum PlaybackFailureAction {
   /// Live ladder is exhausted and its last retry failed.
   liveInterrupted,
 
-  /// Re-open the stream once after a backoff: a transient refusal (429, or
-  /// a 403 that may be transient) deserves one retry before the terminal
-  /// path. The failure view stays down until the retry also fails, so the
-  /// viewer never sees a flash of the error for a failure the retry clears.
+  /// Re-open the stream once after a backoff: a transient refusal (429)
+  /// deserves one retry before the terminal path. The failure view stays
+  /// down until the retry also fails, so the viewer never sees a flash of
+  /// the error for a failure the retry clears. 403 is never retried (build
+  /// #28): a refusal of this account or connection re-hit reads as an
+  /// attack — refused panel calls count toward the flood limit — and no
+  /// careful peer retries one.
   retryTransient,
 
   /// Show the raw player error and leave the route.
@@ -52,6 +55,13 @@ const Duration transientRetryBackoff = Duration(seconds: 1);
 Duration liveRetryBackoff(int fallbackLevel) =>
     fallbackLevel <= 1 ? const Duration(seconds: 1) : const Duration(seconds: 2);
 
+/// Whether a playback restart refills the live ladder (build #28). A restart
+/// proves the current ladder level works — unless the restart follows a
+/// refusal: a refused stream must never be re-opened again after any
+/// restart, so a 403 latched on the dead open keeps the ladder spent.
+bool shouldRefillLiveLadderAfterRestart(Set<int> fatalHttpStatuses) =>
+    !fatalHttpStatuses.contains(403);
+
 /// Decides what [cause] plus the statuses seen on this open mean for playback.
 ///
 /// Pure so the policy is testable without a live player screen, mirroring
@@ -61,29 +71,31 @@ Duration liveRetryBackoff(int fallbackLevel) =>
 /// Live TV deliberately diverges on 404: an HLS segment that has rolled off the
 /// playlist, or a transcode session restarting under us, answers 404 mid-stream,
 /// and the bounded ladder exists to ride that out. Only on-demand playback
-/// treats 404 as terminal, where it does mean the file is unreadable. 403 takes
-/// the same split: on-demand it is a refusal of this account or connection
-/// (#2510), while live TV has no observed 403 cause worth abandoning the bounded
-/// ladder for. It outranks every other status latched on the same open — until
-/// the server lets this account stream, what it says about the file or session
-/// is moot. 500 stays terminal for both — a limit rejection is not something a
-/// retry clears. 503 arrives only as the open-phase watchdog's cause tag (it
-/// never latches into [fatalHttpStatuses]); by then the reconnect loop has had
-/// its chances, so on-demand playback surfaces it while live TV keeps its
-/// ladder.
+/// treats 404 as terminal, where it does mean the file is unreadable. 403 is
+/// terminal for both (build #28): a refusal of this account or connection is
+/// not something a retry clears — re-hitting it reads as an attack, and the
+/// panel's flood filter counts refused requests. It outranks every other
+/// status latched on the same open — until the server lets this account
+/// stream, what it says about the file or session is moot. 500 stays terminal
+/// for both — a limit rejection is not something a retry clears. 503 arrives
+/// only as the open-phase watchdog's cause tag (it never latches into
+/// [fatalHttpStatuses]); by then the reconnect loop has had its chances, so
+/// on-demand playback surfaces it while live TV keeps its ladder.
 ///
 /// An audio-output failure is checked first: the device stopped taking audio,
 /// so a latched status or the live ladder would only re-open a stream into the
 /// same dead output.
 ///
 /// A transient refusal gets one bounded retry before the terminal path — but
-/// only on-demand. Live TV already rides its fallback ladder, which owns
-/// retries (with backoff) there. The 403 retry applies because PlezTV cannot
-/// tell a UA-block 403 from a transient 403: a persistent 403 still ends in
-/// the access-denied dialog once the budget is spent. 429 is the transient
+/// only on-demand, and only for 429. Live TV already rides its fallback
+/// ladder, which owns retries (with backoff) there. 429 is the transient
 /// case proper — the panel asking the client to wait, not refusing the
 /// account — and it is never latched as fatal, so with the budget spent it
-/// falls through to the raw error below.
+/// falls through to the raw error below. 458 stays ladder-eligible on live
+/// TV: it is the transient line-busy signal ("458 is TRANSIENT" — a slot
+/// that has not cleared yet), and the ladder's backoff gives the ghost slot
+/// time to expire, so a retry after the wait can succeed where a 403 retry
+/// never could.
 ///
 /// [PlayerError.openTimedOut] and [PlayerError.streamInitFailed] name no
 /// status and no device fault, so they take the default path like any other
@@ -101,13 +113,15 @@ PlaybackFailureAction resolvePlaybackFailureAction({
 }) {
   if (cause == PlayerError.audioOutputFailed) return PlaybackFailureAction.fatal;
 
-  if (!isLive &&
-      transientRetryAttempts < maxTransientPlaybackRetries &&
-      (transientHttpStatuses.contains(429) || fatalHttpStatuses.contains(403))) {
+  // Build #28: a 403 is a refusal of this account or connection — never a
+  // retry, on-demand or live. Re-hitting a refusal reads as an attack
+  // (refused panel calls count toward the flood limit), so the stream goes
+  // straight to the access-denied dialog, never "offline", with no re-open.
+  if (fatalHttpStatuses.contains(403)) return PlaybackFailureAction.playbackNotAllowedDialog;
+
+  if (!isLive && transientRetryAttempts < maxTransientPlaybackRetries && transientHttpStatuses.contains(429)) {
     return PlaybackFailureAction.retryTransient;
   }
-
-  if (!isLive && fatalHttpStatuses.contains(403)) return PlaybackFailureAction.playbackNotAllowedDialog;
 
   if (cause == PlayerError.serverHttp500 || fatalHttpStatuses.contains(500)) {
     return PlaybackFailureAction.serverLimitDialog;

@@ -112,6 +112,15 @@ abstract class LiveTvPlaybackSession {
   /// window, playback-stream origin), null when it reports nothing.
   Future<LiveTimelineUpdate?> reportTimeline({required String state, required int positionMs, required int durationMs});
 
+  /// Whether the next stream must wait for this session's stream to be
+  /// released before opening (build #28). One-connection Xtream panels
+  /// count the old stream's slot until its socket dies, so opening the
+  /// next stream first stacks two streams on the only session (the
+  /// panel answers 458). Plex/Jellyfin/Emby never need it: their
+  /// servers allow concurrent sessions. Defaults to false; the IPTV
+  /// session overrides it from the client's cached connection limit.
+  bool get requiresReleaseBeforeOpen => false;
+
   /// Release a session that was never adopted: nothing played it and no
   /// heartbeat was ever sent for it (a superseded zap, an unmount mid-start, a
   /// failed recovery). Best-effort; never throws. An adopted session ends with

@@ -158,8 +158,12 @@ void main() {
         expect(liveTv.startedChannels, isEmpty);
 
         // "Next" is the same channel zap the on-screen button performs.
+        // Build #28: the zap is debounced (500 ms) — the no-op "previous"
+        // above already executed through the debouncer, so this press
+        // lands inside the rapid-press window and is deferred; pump past
+        // it for the tune to fire.
         router.route(const NextTrackEvent());
-        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
         expect(liveTv.startedChannels, ['ch-2']);
         expect(player.seekTargets, isEmpty);
 
@@ -590,6 +594,10 @@ class _RecoveringLiveSession implements LiveTvPlaybackSession {
 
   @override
   bool get canTimeShift => false;
+
+  // Build #28: test fake — never requires release-before-open.
+  @override
+  bool get requiresReleaseBeforeOpen => false;
 
   @override
   LiveProgramInfo get program => LiveProgramInfo.none;

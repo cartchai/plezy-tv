@@ -1567,6 +1567,12 @@
     "changelog2272": [
       "Settings → IPTV has a new \"Connection refusals\" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at",
       "Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log"
+    ],
+    "changelog2273": [
+      "Zapping and retuning now wait for the old stream to finish closing before opening the next one — on a one-connection line the old stream used to stay counted while the new one opened, which the provider reads as two streams at once and blocks the account for",
+      "A refused stream is never retried any more — it goes straight to the access-denied message instead of re-opening again and again, which reads as an attack. A busy line (458) can still retry once, after waiting",
+      "Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved",
+      "After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app"
     ]
   },
   "serverSelection": {

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../connection/connection.dart';
+import '../exceptions/media_server_exceptions.dart';
 import '../i18n/strings.g.dart';
 import '../media/live_tv_support.dart';
 import '../media/media_source_info.dart';
@@ -16,9 +17,11 @@ import '../models/livetv_channel.dart';
 import '../models/livetv_program.dart';
 import '../models/transcode_quality_preset.dart';
 import '../services/favorite_channels_repository.dart';
+import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/xmltv_parser.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
+import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_client.dart';
 
 /// Which source served a channel's EPG (build #17, §10) — the split the
@@ -112,6 +115,45 @@ class IptvLiveTvSupport implements LiveTvSupport {
   String get _hiddenChannelsPrefsKey => 'iptv_hidden_channels:${_client.connection.id}';
   final Set<String> _hiddenChannelKeys = {};
   bool _hiddenChannelsLoaded = false;
+
+  /// AbortControllers for EPG fetches currently in flight on this
+  /// support (build #28): the per-channel short-EPG calls and the
+  /// whole-guide XMLTV download. [cancelBackgroundWork] triggers every
+  /// controller in this set when the app backgrounds, and
+  /// [cancelEpgFetchForChannel] triggers one channel's. A controller is
+  /// added when its fetch starts and removed when the fetch settles;
+  /// aborting one that already settled is a no-op.
+  final Set<AbortController> _activeEpgAborts = <AbortController>{};
+
+  /// The in-flight EPG fetch per channel key (build #28) — the
+  /// scroll-away cancel: when a guide row leaves the viewport, the tab
+  /// cancels that channel's fetch instead of letting it run to
+  /// completion unobserved. The feed download is shared, so it is NOT
+  /// in this map — only the per-channel short-EPG call is.
+  final Map<String, AbortController> _epgAbortsByChannel = <String, AbortController>{};
+
+  /// Stop every in-flight EPG fetch on this support (build #28): the
+  /// per-channel short-EPG calls and the whole-guide XMLTV download.
+  /// Called by [IptvClient.cancelBackgroundWork] when the app
+  /// backgrounds. Safe to call with nothing in flight (no-op). A
+  /// cancellation is not a failure — it is never recorded as a refusal
+  /// and never poisons the feed's negative cache (see
+  /// [_loadXmltvGuide]).
+  void cancelBackgroundWork() {
+    for (final abort in _activeEpgAborts.toList()) {
+      abort.abort();
+    }
+  }
+
+  /// Stop one channel's in-flight EPG fetch (build #28) — the
+  /// scroll-away cancel. A no-op when that channel has no fetch in
+  /// flight. The shared feed download is untouched: other visible rows
+  /// may still need it. An M3U channel has no per-channel call (its
+  /// only fetch is the shared feed), so this is a no-op for M3U — the
+  /// feed is stopped only by [cancelBackgroundWork].
+  void cancelEpgFetchForChannel(String channelKey) {
+    _epgAbortsByChannel.remove(channelKey)?.abort();
+  }
 
   /// The favorite source string, factored out of [buildFavoriteChannelSource]
   /// so the hide key uses the identical derivation.
@@ -513,6 +555,32 @@ class IptvLiveTvSupport implements LiveTvSupport {
     DateTime to,
     Duration? ttl,
   ) async {
+    // Build #28: this channel's fetch owns an AbortController, so a row
+    // that scrolls away (or the app backgrounding) stops it instead of
+    // letting it run to completion unobserved. The shared feed download
+    // is NOT aborted by it — other visible rows may still need it (see
+    // [cancelEpgFetchForChannel]).
+    final abort = AbortController();
+    _epgAbortsByChannel[channelKey] = abort;
+    _activeEpgAborts.add(abort);
+    try {
+      return await _fetchXtreamEpgWithAbort(channelKey, settings, from, to, ttl, abort);
+    } finally {
+      _activeEpgAborts.remove(abort);
+      if (identical(_epgAbortsByChannel[channelKey], abort)) {
+        _epgAbortsByChannel.remove(channelKey);
+      }
+    }
+  }
+
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamEpgWithAbort(
+    String channelKey,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to,
+    Duration? ttl,
+    AbortController abort,
+  ) async {
     // Start the big feed loading in the background now, so the fallback
     // below awaits the shared in-flight future instead of starting it.
     // Attach a no-op error listener NOW: the future is only awaited after
@@ -524,8 +592,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     unawaited(xmltvFuture.then<void>((_) {}).catchError((_) {}));
     List<LiveTvProgram>? shortEpg;
     try {
-      shortEpg = await _fetchXtreamShortEpg(channelKey, settings, from, to);
+      shortEpg = await _fetchXtreamShortEpg(channelKey, settings, from, to, abort.trigger);
     } catch (e) {
+      // A cancellation is not a failure — the row scrolled away or the
+      // app backgrounded. Do not fall through to the feed: the fetch is
+      // over, and waiting on a download nobody watches is the waste
+      // this cancel exists to stop.
+      if (MediaServerHttpException.from(e).isCancellation) rethrow;
       appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
     if (shortEpg != null && shortEpg.isNotEmpty) {
@@ -537,14 +610,28 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // loading). A feed that loads but has nothing for the channel returns
     // [] (genuine empty); a feed that fails only throws when get_short_epg
     // never answered — both sources failed.
+    //
+    // Build #28: a cancel that landed after get_short_epg answered is
+    // honoured here, before waiting on the feed — the row scrolled away
+    // or the app backgrounded, and the feed is a download nobody watches.
+    abort.throwIfAborted();
     try {
       return await xmltvFuture;
     } catch (e) {
       if (shortEpg != null) {
-        appLogger.w(
-          'IPTV: xmltv.php fetch failed for channel $channelKey; get_short_epg already answered empty',
-          error: e,
-        );
+        // Build #28: a feed deferred while a stream is playing is not
+        // a failure — it is the gate doing its job, and it retries when
+        // playback stops. Logging it per row would spam the log while
+        // the user watches with the guide open. A genuine feed failure
+        // while playing is silent here for the same reason: the feed is
+        // re-attempted when idle, and the panel error is already in the
+        // refusal recorder.
+        if (!IptvPlaybackActivity.instance.isPlaying) {
+          appLogger.w(
+            'IPTV: xmltv.php fetch failed for channel $channelKey; get_short_epg already answered empty',
+            error: e,
+          );
+        }
         return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
       }
       rethrow;
@@ -601,11 +688,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
     _EpgSettings settings,
     DateTime from,
     DateTime to,
+    Future<void>? abortTrigger,
   ) async {
     await _acquireShortEpgSlot();
     try {
       final listings = await _client.xtreamApi
-          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60))
+          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60), abortTrigger: abortTrigger)
           .timeout(
             shortEpgFirstPaintTimeout,
             onTimeout: () => throw TimeoutException('get_short_epg first-paint timeout for $channelKey'),
@@ -737,9 +825,29 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// stale guide is served immediately while the refresh runs in the
   /// background (stale-while-revalidate), and a failed download is
   /// remembered briefly instead of retried channel by channel.
+  /// Start a shared feed download (build #28): the download owns an
+  /// AbortController, registered in [_activeEpgAborts] so
+  /// [cancelBackgroundWork] can stop it when the app backgrounds. The
+  /// controller is removed when the download settles. The [fetchBody]
+  /// receives the controller's trigger — the Xtream feed aborts at the
+  /// socket (see [XtreamApi.getXmltv]); the M3U feed races it
+  /// (best-effort, see [_xmltvGuide]).
+  Future<_CachedXmltvGuide> _startXmltvDownload(
+    String cacheKey,
+    Future<String> Function(Future<void>? abortTrigger) fetchBody,
+  ) {
+    final abort = AbortController();
+    _activeEpgAborts.add(abort);
+    final future = _loadXmltvGuide(cacheKey, () => fetchBody(abort.trigger));
+    unawaited(
+      future.then<void>((_) {}).catchError((_) {}).whenComplete(() => _activeEpgAborts.remove(abort)),
+    );
+    return future;
+  }
+
   Future<_CachedXmltvGuide> _xmltvGuideForKey(
     String cacheKey,
-    Future<String> Function() fetchBody,
+    Future<String> Function(Future<void>? abortTrigger) fetchBody,
     Duration? ttl,
   ) async {
     bool fresh(_CachedXmltvGuide guide) => ttl == null || DateTime.now().difference(guide.fetchedAt) < ttl;
@@ -767,7 +875,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // the refresh runs in the background — the guide never waits on a
     // download for programmes it already has.
     if (cached != null) {
-      final future = _loadXmltvGuide(cacheKey, fetchBody);
+      // Build #28: while a stream is playing, do NOT start the refresh
+      // download — the stale guide answers and the refresh waits until
+      // playback stops. A new feed download on top of viewing traffic is
+      // exactly the background work that gets a one-connection line
+      // blocked.
+      if (IptvPlaybackActivity.instance.isPlaying) return cached;
+      final future = _startXmltvDownload(cacheKey, fetchBody);
       _xmltvGuideFutures[cacheKey] = future;
       unawaited(
         future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -783,7 +897,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (persisted != null) {
       _xmltvCache[cacheKey] = persisted;
       if (!fresh(persisted)) {
-        final future = _loadXmltvGuide(cacheKey, fetchBody);
+        // Build #28: while a stream is playing, the persisted feed
+        // answers and the refresh download waits — see the stale-cache
+        // branch above.
+        if (IptvPlaybackActivity.instance.isPlaying) return persisted;
+        final future = _startXmltvDownload(cacheKey, fetchBody);
         _xmltvGuideFutures[cacheKey] = future;
         unawaited(
           future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -794,8 +912,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
       return persisted;
     }
 
-    // Fully cold: one shared download, as before.
-    final future = _loadXmltvGuide(cacheKey, fetchBody);
+    // Fully cold: one shared download, as before — unless a stream is
+    // playing (build #28): then there is no guide to serve and no
+    // download starts. The caller falls back to get_short_epg (or an
+    // empty guide) and the feed loads when playback stops.
+    if (IptvPlaybackActivity.instance.isPlaying) {
+      throw StateError('XMLTV feed for $cacheKey deferred while a stream is playing');
+    }
+    final future = _startXmltvDownload(cacheKey, fetchBody);
     _xmltvGuideFutures[cacheKey] = future;
     try {
       return await future;
@@ -812,7 +936,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     try {
       body = await fetchBody();
     } catch (e) {
-      _xmltvFailedAt[cacheKey] = DateTime.now();
+      // Build #28: a cancellation is not a failure — the app backgrounded
+      // or the feed was stopped, not refused. It must not poison the
+      // negative cache, or the next guide fetch would refuse to download
+      // the feed for 120 s.
+      if (!MediaServerHttpException.from(e).isCancellation) {
+        _xmltvFailedAt[cacheKey] = DateTime.now();
+      }
       rethrow;
     }
     final programs = await compute(parseXmltv, body);
@@ -870,8 +1000,24 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   /// The M3U connection's user-supplied EPG URL, as a parsed guide.
   Future<_CachedXmltvGuide> _xmltvGuide(String epgUrl, {Duration? ttl}) {
-    return _xmltvGuideForKey(epgUrl, () async {
-      final response = await http.get(Uri.parse(epgUrl)).timeout(const Duration(seconds: 120));
+    return _xmltvGuideForKey(epgUrl, (abortTrigger) async {
+      final get = http.get(Uri.parse(epgUrl)).timeout(const Duration(seconds: 120));
+      // Build #28: a bare http.get cannot be aborted at the socket, so
+      // the abort races it — the caller stops waiting and the download's
+      // result is discarded (best-effort: the socket may finish in the
+      // background). The Xtream feed aborts at the socket (see
+      // [XtreamApi.getXmltv]).
+      final response = abortTrigger == null
+          ? await get
+          : await Future.any([
+              get,
+              abortTrigger.then(
+                (_) => throw MediaServerHttpException(
+                  type: MediaServerHttpErrorType.cancelled,
+                  message: 'XMLTV fetch cancelled',
+                ),
+              ),
+            ]);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('XMLTV fetch failed with HTTP ${response.statusCode}');
       }
@@ -883,7 +1029,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// connection (the support is per-client), fetched lazily on the first
   /// channel that needs it and shared by the rest of the guide.
   Future<_CachedXmltvGuide> _xtreamXmltvGuide({Duration? ttl}) {
-    return _xmltvGuideForKey('xtream:${_client.connection.id}', () => _client.xtreamApi.getXmltv(), ttl);
+    return _xmltvGuideForKey(
+      'xtream:${_client.connection.id}',
+      (abortTrigger) => _client.xtreamApi.getXmltv(abortTrigger: abortTrigger),
+      ttl,
+    );
   }
 
   /// Bump on every cache clear so the guide can tell its per-channel state
@@ -1059,6 +1209,14 @@ class IptvLiveTvPlaybackSession implements LiveTvPlaybackSession {
     required this.liveUrl,
     required this.archiveDurationSeconds,
   }) : _startedAtEpoch = DateTime.now().millisecondsSinceEpoch / 1000;
+
+  /// Build #28: on a one-connection line the next stream must wait for
+  /// this one to be released (see [LiveTvPlaybackSession
+  /// .requiresReleaseBeforeOpen]). The limit is the client's cached
+  /// `max_connections` — unknown until the health probe runs, and
+  /// unknown means wait.
+  @override
+  bool get requiresReleaseBeforeOpen => client.isSingleConnection;
 
   bool get _hasArchive => archiveDurationSeconds > 0;
 

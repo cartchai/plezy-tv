@@ -3823,6 +3823,12 @@ class Translations$about$en {
 		'Settings → IPTV has a new "Connection refusals" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at',
 		'Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log',
 	];
+	List<String> get changelog2273 => [
+		'Zapping and retuning now wait for the old stream to finish closing before opening the next one — on a one-connection line the old stream used to stay counted while the new one opened, which the provider reads as two streams at once and blocks the account for',
+		'A refused stream is never retried any more — it goes straight to the access-denied message instead of re-opening again and again, which reads as an attack. A busy line (458) can still retry once, after waiting',
+		'Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved',
+		'After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app',
+	];
 }
 
 // Path: serverSelection
@@ -10410,6 +10416,10 @@ extension on Translations {
 			'about.changelog2250.3' => 'Country/region filter on each connection\'s edit screen',
 			'about.changelog2272.0' => 'Settings → IPTV has a new "Connection refusals" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at',
 			'about.changelog2272.1' => 'Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log',
+			'about.changelog2273.0' => 'Zapping and retuning now wait for the old stream to finish closing before opening the next one — on a one-connection line the old stream used to stay counted while the new one opened, which the provider reads as two streams at once and blocks the account for',
+			'about.changelog2273.1' => 'A refused stream is never retried any more — it goes straight to the access-denied message instead of re-opening again and again, which reads as an attack. A busy line (458) can still retry once, after waiting',
+			'about.changelog2273.2' => 'Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved',
+			'about.changelog2273.3' => 'After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
 			'serverSelection.noValidServers' => 'No usable servers were found on this account',
@@ -10538,12 +10548,12 @@ extension on Translations {
 			'explore.season.spring' => 'Spring',
 			'explore.season.summer' => 'Summer',
 			'explore.season.fall' => 'Fall',
+			_ => null,
+		} ?? switch (path) {
 			'explore.season.withYear' => ({required Object season, required Object year}) => '${season} ${year}',
 			'explore.format.tv' => 'TV',
 			'explore.format.tvShort' => 'TV Short',
 			'explore.format.movie' => 'Movie',
-			_ => null,
-		} ?? switch (path) {
 			'explore.format.special' => 'Special',
 			'explore.format.ova' => 'OVA',
 			'explore.format.ona' => 'ONA',
@@ -11052,12 +11062,12 @@ extension on Translations {
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
 			'downloads.options' => 'Downloads options',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.groupings.library' => 'Library',
 			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
 			'downloads.unknownShow' => 'Unknown Show',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.unknownSeason' => 'Unknown Season',
 			'downloads.unknownAlbum' => 'Unknown Album',
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
@@ -11566,12 +11576,12 @@ extension on Translations {
 			'iptv.epgDaysCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} day', other: '${n} days', ), 
 			'iptv.epgUpdateInterval' => 'Update interval',
 			'iptv.epgUpdateIntervalDescription' => 'How often the guide refreshes',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.epgHoursCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Every ${n} hour', other: 'Every ${n} hours', ), 
 			'iptv.epgManualOnly' => 'Manual only',
 			'iptv.epgPastDays' => 'Past days to keep',
 			'iptv.epgPastDaysDescription' => 'Past guide days kept for catch-up scrolling',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.epgPastDaysNone' => 'None',
 			'iptv.epgUpdateOnStart' => 'Update on app start',
 			'iptv.epgUpdateOnStartDescription' => 'Refresh the guide when the app starts',

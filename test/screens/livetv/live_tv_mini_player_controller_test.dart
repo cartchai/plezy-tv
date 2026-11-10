@@ -27,7 +27,7 @@ class _UnitApi extends XtreamApi {
   ];
 
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     throw Exception('xmltv feed unavailable in controller tests');
   }
 }

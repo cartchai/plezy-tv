@@ -73,7 +73,7 @@ class _EpgFakeApi extends XtreamApi {
   Duration? shortEpgDelay;
 
   @override
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) async {
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) async {
     calls[streamId] = (calls[streamId] ?? 0) + 1;
     if (failShortEpg) throw Exception('get_short_epg unavailable');
     final gate = shortEpgGate;
@@ -92,7 +92,7 @@ class _EpgFakeApi extends XtreamApi {
   }
 
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     xmltvCalls++;
     if (failXmltv) throw Exception('xmltv.php unavailable');
     return xmltvBody;

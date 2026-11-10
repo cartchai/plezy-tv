@@ -506,6 +506,11 @@ class _JellyfinLiveTvPlaybackSession implements LiveTvPlaybackSession {
   @override
   bool get canTimeShift => false;
 
+  // Build #28: Jellyfin allows concurrent sessions — the next stream
+  // never waits for this one to release.
+  @override
+  bool get requiresReleaseBeforeOpen => false;
+
   /// Jellyfin live opens keep the language header only (build #22): only
   /// the Xtream panel enforces a User-Agent.
   @override

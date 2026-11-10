@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../../../exceptions/media_server_exceptions.dart';
 import '../../../focus/dpad_navigator.dart';
 import '../../../focus/dpad_select_long_press_controller.dart';
 import '../../../focus/focus_theme.dart';
@@ -1165,10 +1166,15 @@ class GuideTabState extends State<GuideTab>
               _mergedProgramsCache.remove(scopeKey);
             });
           })
-          .catchError((Object _) {
+          .catchError((Object e) {
             if (!mounted) return;
             setState(() {
               _iptvEpgInFlight.remove(scopeKey);
+              // Build #28: a cancellation (row scrolled away / app
+              // backgrounded) is not a failure — the channel is NOT
+              // marked failed, so scrolling back refetches it instead
+              // of showing the retry state for a fetch nobody watched.
+              if (MediaServerHttpException.from(e).isCancellation) return;
               // Fail open: the row renders hour placeholders for this
               // window instead of retrying in a loop.
               _iptvEpgFailed.add(scopeKey);
@@ -2255,6 +2261,25 @@ class GuideTabState extends State<GuideTab>
   }) {
     // Visible rows drive the lazy IPTV EPG fetch for their own channel.
     _ensureIptvEpg(channel);
+    // Build #28: the row's lifecycle owns the fetch — when the row
+    // scrolls out of the viewport (the sliver disposes it), the fetch
+    // stops instead of running to completion unobserved. The stable key
+    // keeps the state across rebuilds, so a setState while the row is
+    // visible never cancels a fetch that is still wanted.
+    return _IptvEpgRowLifecycle(
+      key: ValueKey(liveTvChannelScopeKey(channel)),
+      channelKey: channel.key,
+      support: _iptvSupportFor(channel),
+      child: _buildProgramRowContent(channel, programs, theme, channelIndex: channelIndex),
+    );
+  }
+
+  Widget _buildProgramRowContent(
+    LiveTvChannel channel,
+    List<LiveTvProgram> programs,
+    ThemeData theme, {
+    required int channelIndex,
+  }) {
     final scopeKey = liveTvChannelScopeKey(channel);
     // Build #8 Task 3: a failed channel shows a visible retry state, not
     // silent hour placeholders — but only when it has no real programs at
@@ -2714,4 +2739,35 @@ class _ChannelCellState extends State<_ChannelCell> {
       ),
     );
   }
+}
+
+/// Lifecycle owner for one guide row's IPTV EPG fetch (build #28).
+///
+/// The sliver disposes rows that scroll out of the viewport (+ cache
+/// extent); this widget's [State.dispose] cancels that channel's
+/// in-flight fetch, so a row nobody sees stops talking to the panel.
+/// The stable [ValueKey] (the channel's scope key, set by the caller)
+/// keeps the state across rebuilds, so a setState while the row is
+/// visible never cancels a fetch that is still wanted. A null [support]
+/// (a Plex/Jellyfin row) disposes to a no-op.
+class _IptvEpgRowLifecycle extends StatefulWidget {
+  const _IptvEpgRowLifecycle({super.key, required this.channelKey, required this.support, required this.child});
+
+  final String channelKey;
+  final IptvLiveTvSupport? support;
+  final Widget child;
+
+  @override
+  State<_IptvEpgRowLifecycle> createState() => _IptvEpgRowLifecycleState();
+}
+
+class _IptvEpgRowLifecycleState extends State<_IptvEpgRowLifecycle> {
+  @override
+  void dispose() {
+    widget.support?.cancelEpgFetchForChannel(widget.channelKey);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

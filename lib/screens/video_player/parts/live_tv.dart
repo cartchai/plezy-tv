@@ -209,7 +209,16 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       startSession: (channel) => _startLiveSession(channel),
       resolveUrl: (session) => session.streamUrlAt(),
       discardSession: (session) => _abandonLiveSession(session),
-      shouldProbe: (session) => session is IptvLiveTvPlaybackSession,
+      // Build #28: probe only an IPTV session whose line does NOT require
+      // release-before-open. A probe is a panel GET on the neighbour's
+      // playlist — on a one-connection line it stacks on top of the
+      // stream already playing (the zap-overlap mechanism), so the
+      // neighbour is pre-tuned (session + URL, both local) but never
+      // probed; the 10 s open deadline still bounds a dead channel when
+      // the zap opens it. The neighbour session's own panel decides —
+      // correct for cross-server lists, where one neighbour may be
+      // single-connection and the next multi-connection.
+      shouldProbe: (session) => session is IptvLiveTvPlaybackSession && !session.requiresReleaseBeforeOpen,
       probePlaylist: probeIptvPlaylist,
     );
     _livePretuner!.refresh(channels, _live.channelIndex);
@@ -361,6 +370,13 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     void Function()? onOpenStarted,
   }) async {
     if (_shuttingDown || !_launchCurrent) return false;
+    // Build #28: no open starts while a previous stream's release is
+    // still in flight — the choke point, so a release the zap started
+    // (or a mini-player tune started) is honoured by every open, not
+    // just the zap that asked for it. Returns immediately when no
+    // release is running, so Plex/Jellyfin and multi-connection opens
+    // pay nothing.
+    await _liveReleaseGate.waitForRelease();
     _live.streamGeneration++;
     // Build #22: [headers] are the session's own headers — the configured
     // Xtream User-Agent for IPTV, so the stream carries the same identity
@@ -692,7 +708,20 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     await _seekLiveToEpoch(_live.captureBuffer!.seekableEndEpoch);
   }
 
-  Future<void> _switchLiveChannel(int delta) async {
+  /// Channel switch, debounced (build #28, OwnTV's shape): rapid presses
+  /// collapse into one tune instead of one tune per press, so a held key
+  /// cannot open a stream per step on a one-connection panel. The returned
+  /// Future completes when the tune executes (or is dropped as a net-zero
+  /// burst) — an isolated press tunes at once, so the common case awaits
+  /// the tune itself.
+  Future<void> _switchLiveChannel(int delta) {
+    final completer = Completer<void>();
+    _pendingZapCompleters.add(completer);
+    _liveZapDebouncer.request(delta);
+    return completer.future;
+  }
+
+  Future<void> _switchLiveChannelNow(int delta) async {
     if (_shuttingDown) return;
     final channels = widget.live?.channels;
     if (channels == null || channels.isEmpty) return;
@@ -779,6 +808,23 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       });
       _live.markStreamRestartedAtLiveEdge(session.captureBuffer);
       final targetEpoch = session.captureBuffer == null ? null : _live.streamStartEpoch.round();
+      // Build #28: on a one-connection line the old stream's slot is still
+      // counted until its socket dies, so the new stream must not open
+      // until the old one is released. The release is the player stop —
+      // there is no panel disconnect call — and the gate bounds the wait
+      // at 1.5 s, never blocking the zap on a failed stop. Only when the
+      // previous session requires it: Plex/Jellyfin and multi-connection
+      // lines keep the old order (open first, adopt after), so a failed
+      // zap leaves the current channel playing. The session and URL are
+      // already resolved above, so the stop happens as late as possible —
+      // the old channel plays until the last moment.
+      if (previousSession != null && previousSession.requiresReleaseBeforeOpen) {
+        await _liveReleaseGate.release(() => currentPlayer.stop());
+        if (!isCurrentChannelSwitch()) {
+          _abandonLiveSession(session);
+          return;
+        }
+      }
       // A zap starts no playback attempt, so it arms its own first-frame
       // signal; the deadline bounds a stream that stops moving before one.
       zapOutcome = PlaybackOpenOutcome.arm(currentPlayer, deadline: openDeadlineFor(isLive: true));

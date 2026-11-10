@@ -1675,6 +1675,19 @@ class MultiServerManager {
     }
   }
 
+  /// Stop background IPTV panel work on every connection (build #28):
+  /// the weekly index sync, the stale-disk catalog refreshes, and the
+  /// in-flight EPG fetches. Called when the app backgrounds (main.dart,
+  /// `paused`/`detached`, next to [cancelActiveIptvSearches]). Safe with
+  /// nothing in flight (no-op). The connections stay usable afterwards
+  /// — only the in-flight background jobs are cancelled, not the
+  /// connections.
+  void cancelActiveIptvBackgroundWork() {
+    for (final client in _iptvByConnectionId.values) {
+      client.cancelBackgroundWork();
+    }
+  }
+
   /// Re-probe one IPTV connection's health and apply the verdict (build
   /// #21). Used by [_reconnectIptvServer] and by the deferred probe a
   /// search defers: the client fires its [IptvClient.onDeferredHealthProbe]

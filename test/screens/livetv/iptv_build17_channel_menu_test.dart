@@ -59,7 +59,7 @@ class _MenuFakeApi extends XtreamApi {
   ];
 
   @override
-  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout}) {
+  Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) {
     epgCalls++;
     final completer = Completer<List<XtreamEpgProgram>>();
     pending[streamId] = completer;
@@ -67,7 +67,7 @@ class _MenuFakeApi extends XtreamApi {
   }
 
   @override
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120)}) async {
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     throw Exception('xmltv feed unavailable in menu tests');
   }
 

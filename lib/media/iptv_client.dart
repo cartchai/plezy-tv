@@ -32,6 +32,7 @@ import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
+import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/iptv_search_index.dart';
 import '../services/settings_service.dart';
 import '../services/playback_initialization_types.dart';
@@ -516,10 +517,16 @@ class IptvClient implements MediaServerClient {
     final intervalHours = _catalogSyncIntervalHours();
     final dbPath = await IptvSearchIndex.dbFilePath();
     final nowMs = DateTime.now().millisecondsSinceEpoch;
+    // Build #28: every sync owns an AbortController, registered so
+    // [cancelBackgroundWork] can stop it when the app backgrounds. A
+    // caller-passed controller (the manual refresh popup's Cancel) is
+    // registered too — backgrounding cancels it as well.
+    abort ??= AbortController();
+    _activeBackgroundAborts.add(abort);
     _refreshSearchIndexState(syncing: true);
     try {
       for (final type in IptvSearchIndex.types) {
-        abort?.throwIfAborted();
+        abort.throwIfAborted();
         final lastSync = index.lastSync(connection.id)[type];
         final indexedCount = index.rowCounts(connection.id)[type] ?? 0;
         if (!force && intervalHours > 0 && lastSync != null && indexedCount > 0) {
@@ -537,6 +544,13 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'up-to-date'));
           continue;
         }
+        // Build #28: background work waits while a stream is playing.
+        // A forced (manual) refresh is the user asking explicitly, so
+        // it is not gated. Otherwise the sync pauses between types and
+        // resumes when playback stops — it is not abandoned. The abort
+        // races the wait, so a background cancel still stops a sync
+        // that is parked on playback.
+        if (!force) await _waitForIdleUnlessAborted(abort);
         onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'fetching'));
         List<XtreamCategory> categories;
         int fetchedCount;
@@ -553,13 +567,13 @@ class IptvClient implements MediaServerClient {
           final List<Object> fetched;
           switch (type) {
             case IptvSearchIndex.typeLive:
-              fetched = await _xtreamApi.getLiveStreams(abortTrigger: abort?.trigger);
+              fetched = await _xtreamApi.getLiveStreams(abortTrigger: abort.trigger);
               catalogBody = _xtreamApi.lastLiveStreamsBody;
             case IptvSearchIndex.typeMovie:
-              fetched = await _xtreamApi.getVodStreams(abortTrigger: abort?.trigger);
+              fetched = await _xtreamApi.getVodStreams(abortTrigger: abort.trigger);
               catalogBody = _xtreamApi.lastVodStreamsBody;
             default:
-              fetched = await _xtreamApi.getSeries(abortTrigger: abort?.trigger);
+              fetched = await _xtreamApi.getSeries(abortTrigger: abort.trigger);
               catalogBody = _xtreamApi.lastSeriesBody;
           }
           fetchedRows = fetched;
@@ -640,8 +654,28 @@ class IptvClient implements MediaServerClient {
       }
       return IptvSearchSyncResult(rows: rows, skipped: skipped);
     } finally {
+      _activeBackgroundAborts.remove(abort);
       _refreshSearchIndexState();
     }
+  }
+
+  /// Wait until no stream is playing (build #28), or throw when [abort]
+  /// fires first. Background panel work calls this before starting a
+  /// fetch, so it never stacks on top of viewing traffic on a
+  /// one-connection line. The wait is raced against the abort trigger:
+  /// a sync parked on playback still stops when the app backgrounds.
+  /// (The parked `waitForIdle` listener self-cleans at the next
+  /// `markIdle` when the abort wins the race.)
+  Future<void> _waitForIdleUnlessAborted(AbortController? abort) async {
+    final activity = IptvPlaybackActivity.instance;
+    if (!activity.isPlaying) return;
+    final trigger = abort?.trigger;
+    if (trigger == null) {
+      await activity.waitForIdle();
+      return;
+    }
+    await Future.any([activity.waitForIdle(), trigger]);
+    abort?.throwIfAborted();
   }
 
   /// Publish freshly synced rows into the memoized catalog futures
@@ -787,6 +821,38 @@ class IptvClient implements MediaServerClient {
   /// keeps the last-known state while the panel struggles.
   HealthStatus _lastHealthStatus = HealthStatus.online;
 
+  /// The line's connection limit (build #28), cached from the panel's
+  /// `user_info.max_connections` the one time the client calls
+  /// `getUserInfo()` — the health probe. Null until the probe has run
+  /// (or the panel did not report it): unknown.
+  int? _maxConnections;
+
+  /// The connection limit the panel last reported, or null when unknown.
+  int? get maxConnections => _maxConnections;
+
+  /// True when this line allows one stream at a time — or when the
+  /// limit is unknown (build #28). A one-connection line is the common
+  /// Xtream shape, and the wait-for-release cost is bounded by the
+  /// player stop completing (usually tens of milliseconds), so waiting
+  /// when unsure is the safe default: opening the next stream before
+  /// the old one is released stacks two streams on the only session
+  /// and the panel answers 458.
+  bool get isSingleConnection => _maxConnections == null || _maxConnections == 1;
+
+  /// How long after a recorded 403 the health probe stays backed off
+  /// (build #28) — the boards' "wait 5 min with everything closed"
+  /// advice, as a duration. Test-overridable.
+  @visibleForTesting
+  static Duration refusalProbeBackoff = const Duration(minutes: 5);
+
+  /// The refusal log this client consults before probing (build #28).
+  /// Defaults to the app-wide singleton; tests inject a log backed by
+  /// fake prefs.
+  IptvRefusalLog _refusalLog = IptvRefusalLog.instance;
+
+  @visibleForTesting
+  set testRefusalLog(IptvRefusalLog log) => _refusalLog = log;
+
   /// Searches currently in flight on this client (build #21). A health
   /// probe that fires while one is running is deferred, not dropped (see
   /// [_deferredHealthProbe]).
@@ -803,6 +869,16 @@ class IptvClient implements MediaServerClient {
   /// settled is a no-op, so a stale entry is harmless but they are
   /// removed promptly to keep the set bounded.
   final Set<AbortController> _activeSearchAborts = {};
+
+  /// AbortControllers for background panel work currently in flight on
+  /// this client (build #28): the weekly index sync and the stale-disk
+  /// catalog refreshes. [cancelBackgroundWork] triggers every controller
+  /// in this set when the app backgrounds, so work nobody is watching
+  /// stops talking to the panel. A controller is added when its job
+  /// starts and removed when the job settles; aborting one that already
+  /// settled is a no-op. The set never grows past the concurrent
+  /// background jobs (6 catalog refreshes + 1 sync).
+  final Set<AbortController> _activeBackgroundAborts = <AbortController>{};
 
   /// A health probe arrived while a search was in flight (build #21).
   /// Cleared when the deferred probe fires, once, after the search ends.
@@ -942,6 +1018,23 @@ class IptvClient implements MediaServerClient {
     }
   }
 
+  /// Stop background panel work on this client (build #28): the weekly
+  /// index sync, the stale-disk catalog refreshes, and the in-flight
+  /// EPG fetches. Called when the app backgrounds
+  /// ([MultiServerManager.cancelActiveIptvBackgroundWork], wired in
+  /// main.dart next to [cancelActiveSearches]) and when a connection is
+  /// torn down. Safe to call with nothing in flight (no-op). The client
+  /// stays usable afterwards — only the in-flight background jobs are
+  /// cancelled, not the connection itself (use [close] to tear the
+  /// connection down). A sync parked on playback (see
+  /// [_waitForIdleUnlessAborted]) stops too — its wait races the abort.
+  void cancelBackgroundWork() {
+    for (final abort in _activeBackgroundAborts.toList()) {
+      abort.abort();
+    }
+    _liveTv.cancelBackgroundWork();
+  }
+
   /// Drop the in-memory catalog caches so the next browse/guide load
   /// re-fetches channels, movies and series from the provider (the
   /// "Refresh playlists" action in IPTV settings). An in-flight fetch is
@@ -1076,8 +1169,40 @@ class IptvClient implements MediaServerClient {
   @override
   LiveTvSupport get liveTv => _liveTv;
 
+  /// True when the refusal log holds a 403 for this connection recorded
+  /// within [refusalProbeBackoff] (build #28). Only a 403 (access
+  /// denied) backs off the probe — a 429 is rate-limiting, not a
+  /// refusal, and the probe is how the app learns the panel recovered.
+  /// A log that cannot be loaded says nothing, so the probe runs
+  /// (fail-open: a broken log must not take the server offline). The
+  /// check is best-effort by construction: a refusal recorded
+  /// fire-and-forget a moment earlier may not have persisted yet, so
+  /// one probe can slip through — one call, not a sweep.
+  Future<bool> _hasRecentRefusal() async {
+    try {
+      await _refusalLog.ensureLoaded();
+    } catch (_) {
+      return false;
+    }
+    final cutoff = DateTime.now().subtract(refusalProbeBackoff);
+    return _refusalLog.entriesNotifier.value.any(
+      (e) => e.connectionId == connection.id && e.statusCode == 403 && e.timestamp.isAfter(cutoff),
+    );
+  }
+
   @override
   Future<HealthStatus> checkHealth() async {
+    // Build #28: after a refusal, do not re-probe the panel on every
+    // resume. A refused `player_api.php` call counts toward the panel's
+    // flood limit, so a probe that lands on a panel that just refused
+    // us feeds the very block it is trying to measure. While the
+    // refusal log holds a 403 for this connection recorded within
+    // [refusalProbeBackoff], return the last-known verdict with no
+    // panel call. After the window, probe normally. A fresh sign-in
+    // bypasses this (different path — the user explicitly asked).
+    if (await _hasRecentRefusal()) {
+      return _lastHealthStatus;
+    }
     // Build #21: a probe that fires while a search is in flight is
     // deferred, not dropped. The search is already exercising the panel,
     // and a concurrent probe just adds a request to a busy line. Return
@@ -1091,6 +1216,12 @@ class IptvClient implements MediaServerClient {
       try {
         final info = await _xtreamApi.getUserInfo();
         if (info == null) return _publishHealth(HealthStatus.authError);
+        // Build #28: cache the line's connection limit from the one
+        // `getUserInfo()` the client makes — the zap path and the
+        // pre-tune gate read it (see [isSingleConnection]). A reply
+        // without the field leaves the previous value alone.
+        final maxConnections = int.tryParse('${info['max_connections']}');
+        if (maxConnections != null) _maxConnections = maxConnections;
         return _publishHealth(HealthStatus.online);
       } on MediaServerAuthException {
         return _publishHealth(HealthStatus.authError);
@@ -1249,7 +1380,7 @@ class IptvClient implements MediaServerClient {
   /// rows stay on screen either way.
   void _refreshCatalogInBackground<T>({
     required String dataset,
-    required Future<List<T>> Function() fetch,
+    required Future<List<T>> Function(Future<void>? abortTrigger) fetch,
     required Map<String, dynamic> Function(T row) toJson,
     required void Function(List<T> rows) swap,
     // Raw response body of the fetch, when it has one (build #13) —
@@ -1258,33 +1389,63 @@ class IptvClient implements MediaServerClient {
     String? Function()? rawBody,
   }) {
     final generation = _catalogGeneration;
+    // Build #28: the refresh owns an AbortController, registered so
+    // [cancelBackgroundWork] can stop it when the app backgrounds.
+    final abort = AbortController();
+    _activeBackgroundAborts.add(abort);
     unawaited(
-      fetch().then((rows) async {
-        if (generation != _catalogGeneration || rows.isEmpty) return;
-        final body = rawBody?.call();
-        if (body != null && body.isNotEmpty) {
-          await _catalogCache.write(connection.id, dataset, body);
-        } else {
-          await _catalogCache.write(connection.id, dataset, jsonEncode(rows.map(toJson).toList()));
+      () async {
+        try {
+          // Build #28: a stale-disk refresh is background work — it
+          // waits while a stream is playing instead of stacking on top
+          // of viewing traffic on a one-connection line. The browse
+          // already served the stale disk rows, so nothing waits on
+          // this; when playback stops, the refresh runs and swaps in
+          // the fresh rows. The wait races the abort, so a background
+          // cancel still stops a refresh parked on playback.
+          await _waitForIdleUnlessAborted(abort);
+          final rows = await fetch(abort.trigger);
+          // The VOD/series fetch is the crawl-capable loader, which does
+          // not take an abort trigger (build #21: the crawl is a bounded
+          // batch walk that finishes on its own) — so a cancel that lands
+          // mid-fetch is honoured here, before any disk write or swap:
+          // the panel calls already happened, but the cancelled refresh
+          // writes nothing.
+          abort.throwIfAborted();
+          if (generation != _catalogGeneration || rows.isEmpty) return;
+          final body = rawBody?.call();
+          if (body != null && body.isNotEmpty) {
+            await _catalogCache.write(connection.id, dataset, body);
+          } else {
+            await _catalogCache.write(connection.id, dataset, jsonEncode(rows.map(toJson).toList()));
+          }
+          if (generation != _catalogGeneration) {
+            // A clear landed during the write: drop the resurrected file
+            // instead of serving pre-clear rows as fresh.
+            await _catalogCache.delete(connection.id, dataset);
+            return;
+          }
+          swap(rows);
+          // The Live TV guide subscribes to the same notifier: it must only
+          // reload for live rows / live categories. A VOD- or series-only
+          // refresh landing used to rebuild the whole 55k-channel guide and
+          // re-fetch EPG for the visible channels (build #14, SA-4 partial),
+          // so the event carries which catalog actually changed.
+          final liveCatalogChanged = dataset == IptvCatalogDiskCache.liveDataset ||
+              dataset == IptvCatalogDiskCache.liveCategoriesDataset;
+          notifyCatalogRefreshed(liveCatalogChanged: liveCatalogChanged);
+        } on MediaServerHttpException catch (e) {
+          // A background cancel is not a failure — it is the user
+          // walking away. Swallow it silently; anything else is logged.
+          if (!e.isCancellation) {
+            appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
+          }
+        } catch (e) {
+          appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
+        } finally {
+          _activeBackgroundAborts.remove(abort);
         }
-        if (generation != _catalogGeneration) {
-          // A clear landed during the write: drop the resurrected file
-          // instead of serving pre-clear rows as fresh.
-          await _catalogCache.delete(connection.id, dataset);
-          return;
-        }
-        swap(rows);
-        // The Live TV guide subscribes to the same notifier: it must only
-        // reload for live rows / live categories. A VOD- or series-only
-        // refresh landing used to rebuild the whole 55k-channel guide and
-        // re-fetch EPG for the visible channels (build #14, SA-4 partial),
-        // so the event carries which catalog actually changed.
-        final liveCatalogChanged = dataset == IptvCatalogDiskCache.liveDataset ||
-            dataset == IptvCatalogDiskCache.liveCategoriesDataset;
-        notifyCatalogRefreshed(liveCatalogChanged: liveCatalogChanged);
-      }).catchError((Object e) {
-        appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
-      }),
+      }(),
     );
   }
 
@@ -1320,8 +1481,8 @@ class IptvClient implements MediaServerClient {
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamLiveStream>(
           dataset: IptvCatalogDiskCache.liveDataset,
-          fetch: () async {
-            final rows = await _xtreamApi.getLiveStreams();
+          fetch: (abortTrigger) async {
+            final rows = await _xtreamApi.getLiveStreams(abortTrigger: abortTrigger);
             if (rows.isNotEmpty) _liveLoadSource = 'network';
             return rows;
           },
@@ -1386,7 +1547,7 @@ class IptvClient implements MediaServerClient {
         final diskRowCount = disk.rows.length;
         _refreshCatalogInBackground<XtreamVodStream>(
           dataset: IptvCatalogDiskCache.vodDataset,
-          fetch: () async {
+          fetch: (abortTrigger) async {
             final loaded = await _loadVodStreams();
             // A crawl-shaped refresh must not overwrite the disk file:
             // return [] so the refresh skips, and the served rows stay
@@ -1522,7 +1683,7 @@ class IptvClient implements MediaServerClient {
         final diskRowCount = disk.rows.length;
         _refreshCatalogInBackground<XtreamSeries>(
           dataset: IptvCatalogDiskCache.seriesDataset,
-          fetch: () async {
+          fetch: (abortTrigger) async {
             final loaded = await _loadSeries();
             // A crawl-shaped refresh must not overwrite the disk file:
             // return [] so the refresh skips, and the served rows stay
@@ -1737,7 +1898,7 @@ class IptvClient implements MediaServerClient {
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamCategory>(
           dataset: IptvCatalogDiskCache.liveCategoriesDataset,
-          fetch: () => _xtreamApi.getLiveCategories(),
+          fetch: (abortTrigger) => _xtreamApi.getLiveCategories(abortTrigger: abortTrigger),
           toJson: (r) => r.toJson(),
           swap: (rows) => _liveCategoriesFuture = Future.value(rows),
         );
@@ -1770,7 +1931,7 @@ class IptvClient implements MediaServerClient {
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamCategory>(
           dataset: IptvCatalogDiskCache.vodCategoriesDataset,
-          fetch: () => _xtreamApi.getVodCategories(),
+          fetch: (abortTrigger) => _xtreamApi.getVodCategories(abortTrigger: abortTrigger),
           toJson: (r) => r.toJson(),
           swap: (rows) => _vodCategoriesFuture = Future.value(rows),
         );
@@ -1803,7 +1964,7 @@ class IptvClient implements MediaServerClient {
       if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
         _refreshCatalogInBackground<XtreamCategory>(
           dataset: IptvCatalogDiskCache.seriesCategoriesDataset,
-          fetch: () => _xtreamApi.getSeriesCategories(),
+          fetch: (abortTrigger) => _xtreamApi.getSeriesCategories(abortTrigger: abortTrigger),
           toJson: (r) => r.toJson(),
           swap: (rows) => _seriesCategoriesFuture = Future.value(rows),
         );
