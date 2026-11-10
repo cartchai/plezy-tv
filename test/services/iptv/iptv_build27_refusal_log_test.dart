@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/base_shared_preferences_service.dart';
 import 'package:plezy/services/iptv/iptv_refusal_log.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../test_helpers/prefs.dart';
 
@@ -195,5 +196,41 @@ void main() {
     expect(entries.single.statusCode, isNull);
     expect(entries.single.failureKind, 'timeout');
     expect(entries.single.toShareText(), contains('timeout'));
+  });
+
+  test('a failed load does not poison the log: the next record retries and lands', () async {
+    // The prefs store is down for exactly one call, then recovers.
+    var calls = 0;
+    Future<SharedPreferencesWithCache> flakyProvider() async {
+      calls++;
+      if (calls == 1) throw StateError('prefs down');
+      return BaseSharedPreferencesService.sharedCache();
+    }
+    final log = IptvRefusalLog(
+      prefsProvider: flakyProvider,
+      networkTypeProvider: () async => 'wifi',
+    );
+    // Recording never throws, even with the store down — the entry is
+    // dropped, not the caller.
+    await log.record(_entry());
+    expect(calls, 1);
+    // The second record retries the load (the failed future is not
+    // cached) and lands.
+    await log.record(_entry(action: 'xmltv.php'));
+    final entries = await log.loadEntries();
+    expect(entries, hasLength(1));
+    expect(entries.single.action, 'xmltv.php');
+  });
+
+  test('record never throws when the network probe throws (the entry still lands)', () async {
+    final log = IptvRefusalLog(
+      prefsProvider: BaseSharedPreferencesService.sharedCache,
+      networkTypeProvider: () async => throw StateError('probe down'),
+    );
+    // The entry carries no network, so record resolves it via the probe.
+    await log.record(_entry(network: 'unknown'));
+    final entries = await log.loadEntries();
+    expect(entries, hasLength(1));
+    expect(entries.single.network, 'unknown');
   });
 }

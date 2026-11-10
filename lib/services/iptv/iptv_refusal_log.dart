@@ -276,7 +276,23 @@ class IptvRefusalLog {
 
   /// Load the persisted entries into [entriesNotifier] (once). The
   /// screen calls this on open; [record]/[clear] load implicitly.
-  Future<void> ensureLoaded() => _loadFuture ??= _loadFromPrefs();
+  /// A failed load does not poison the instance: the cached future is
+  /// dropped, so the next call retries the load instead of rethrowing
+  /// the same failure forever. The load future itself is returned
+  /// directly (no async wrapper), so the success path keeps the exact
+  /// timing the widget tests drain on.
+  Future<void> ensureLoaded() {
+    final cached = _loadFuture;
+    if (cached != null) return cached;
+    final load = _loadFromPrefs();
+    _loadFuture = load;
+    unawaited(
+      load.catchError((_) {
+        if (identical(_loadFuture, load)) _loadFuture = null;
+      }),
+    );
+    return load;
+  }
 
   /// Read the persisted entries fresh (a new instance after a restart
   /// reads the same log).
@@ -288,25 +304,36 @@ class IptvRefusalLog {
   /// Append [entry] (newest first), dropping the oldest past
   /// [maxEntries]. The network type is resolved here when the entry
   /// does not carry one — callers that already know it pass it in.
-  /// Never throws.
+  /// Never throws: a failed load, a failed probe, or a failed write
+  /// drops the entry, never the caller.
   Future<void> record(IptvRefusalEntry entry) {
     return _enqueue(() async {
-      await ensureLoaded();
-      final network = entry.network == 'unknown' ? await _networkTypeProvider() : entry.network;
-      final withNetwork = network == entry.network ? entry : entry.copyWith(network: network);
-      final next = [withNetwork, ...entriesNotifier.value];
-      if (next.length > maxEntries) next.removeRange(maxEntries, next.length);
-      await _persist(next);
-      entriesNotifier.value = List.unmodifiable(next);
+      try {
+        await ensureLoaded();
+        final network = entry.network == 'unknown' ? await _networkType() : entry.network;
+        final withNetwork = network == entry.network ? entry : entry.copyWith(network: network);
+        final next = [withNetwork, ...entriesNotifier.value];
+        if (next.length > maxEntries) next.removeRange(maxEntries, next.length);
+        await _persist(next);
+        entriesNotifier.value = List.unmodifiable(next);
+      } catch (_) {
+        // Recording never throws: a diagnostic must never break the
+        // error path it observes.
+      }
     });
   }
 
   /// Drop every recorded refusal (persisted and in-memory).
+  /// Never throws.
   Future<void> clear() {
     return _enqueue(() async {
-      await ensureLoaded();
-      await _persist(const []);
-      entriesNotifier.value = const [];
+      try {
+        await ensureLoaded();
+        await _persist(const []);
+        entriesNotifier.value = const [];
+      } catch (_) {
+        // Clearing never throws either.
+      }
     });
   }
 
@@ -340,13 +367,22 @@ class IptvRefusalLog {
 
   /// Serialise write tasks so concurrent refused requests cannot
   /// read-modify-write over each other. A failed task does not break
-  /// the queue for the next one; the failure still reaches the
-  /// awaiting caller (the recorders catch it — recording never breaks
-  /// the error path).
+  /// the queue for the next one; [record] and [clear] swallow their
+  /// own errors, so the returned future never throws either.
   Future<void> _enqueue(Future<void> Function() task) {
     final run = _queue.then((_) => task());
     _queue = run.catchError((_) {});
     return run;
+  }
+
+  /// Best-effort network resolution: a probe that cannot answer (or
+  /// throws) yields 'unknown' instead of losing the entry.
+  Future<String> _networkType() async {
+    try {
+      return await _networkTypeProvider();
+    } catch (_) {
+      return 'unknown';
+    }
   }
 
   /// The network when a refusal happened, from the platform probe
