@@ -138,6 +138,14 @@ void main() {
       await _pumpScreen(tester);
 
       await tester.scrollUntilVisible(find.text(t.iptv.xtreamUserAgent), 200);
+      // scrollUntilVisible ends with Scrollable.ensureVisible, whose jump
+      // only takes effect on the NEXT frame — until then the tile still
+      // carries its pre-jump geometry, so a tap now reads a stale centre
+      // and misses. (Build #23's three sync rows pushed the section down
+      // far enough that the stale centre fell off-screen: y=965 in a
+      // 900px viewport, where pre-#23 it sat at y=873 and the tap landed.)
+      // One pump applies the jump; the tile lands at the top, tappable.
+      await tester.pump();
       await tester.tap(find.text(t.iptv.xtreamUserAgent));
       await tester.pumpAndSettle();
 
