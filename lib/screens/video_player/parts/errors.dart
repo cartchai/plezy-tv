@@ -242,7 +242,13 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
 
   void _onPlayerLog(PlayerLog log) {
     final status = PlayerError.httpStatusFromLog(log.text);
-    if (status != null && fatalPlaybackHttpStatuses.contains(status)) _fatalHttpStatuses.add(status);
+    // Build #27: a stream the panel answers with a fatal HTTP status is
+    // a refusal — record it (once per open: the set only latches a status
+    // the first time) so it shows in Settings → IPTV → Connection
+    // refusals. Record-only; the failure policy below is unchanged.
+    if (status != null && fatalPlaybackHttpStatuses.contains(status) && _fatalHttpStatuses.add(status)) {
+      unawaited(_recordIptvStreamRefusal(status: status, failureKind: 'http'));
+    }
     if (status != null && transientPlaybackHttpStatuses.contains(status)) _transientHttpStatuses.add(status);
     // An open the server answers with 503 never fails on its own: ffmpeg's
     // reconnect loop retries 503 forever and mpv just reports buffering
@@ -271,6 +277,36 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     _onPlayerError(PlayerError(log.text.trim(), cause: cause));
   }
 
+  /// Record a stream refusal in the IPTV refusal log (build #27): the
+  /// panel answered this open with [status], or the open stalled out
+  /// ([failureKind] 'timeout', no status). Record-only — it never
+  /// changes the failure policy, and it only fires for IPTV clients:
+  /// a Plex/Jellyfin 403 is not a panel refusal. The action is the
+  /// title of what was opening, never the stream URL (which carries the
+  /// credentials in its path). Fire-and-forget: the log write must never
+  /// hold up the failure UI.
+  Future<void> _recordIptvStreamRefusal({required int? status, required String failureKind}) async {
+    final client = _getMediaServerClient(context);
+    if (client is! IptvClient) return;
+    final title = _currentOpenRequest?.metadata.title;
+    final action = title == null || title.isEmpty ? 'stream' : 'stream: $title';
+    try {
+      await IptvRefusalLog.instance.record(
+        IptvRefusalEntry(
+          timestamp: DateTime.now(),
+          connectionId: client.connection.id,
+          connectionName: client.connection.displayName,
+          action: action,
+          statusCode: status,
+          failureKind: failureKind,
+          userAgent: client.streamHeaders['User-Agent'] ?? '',
+        ),
+      );
+    } catch (_) {
+      // Recording is best-effort; the failure itself is unaffected.
+    }
+  }
+
   /// The open-phase 503 watchdog's deadline passed with no first frame: the
   /// server is still refusing the stream. Synthesize the error the reconnect
   /// loop will never raise on its own so the normal failure policy runs.
@@ -280,6 +316,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       'Server kept answering the stream with HTTP 503 for '
       '${openHttp503Patience.inSeconds}s without a first frame — giving up on this open',
     );
+    unawaited(_recordIptvStreamRefusal(status: 503, failureKind: 'http'));
     _onPlayerError(PlayerError(t.messages.serverBusyTitle, cause: PlayerError.serverHttp503));
   }
 
@@ -296,6 +333,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     appLogger.w(
       'No load progress for ${openDeadlineFor(isLive: widget.isLive).inSeconds}s before the first frame — giving up on this open',
     );
+    unawaited(_recordIptvStreamRefusal(status: null, failureKind: 'timeout'));
     _onPlayerError(PlayerError(t.messages.playbackFailed, cause: PlayerError.openTimedOut));
   }
 

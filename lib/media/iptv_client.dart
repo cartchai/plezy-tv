@@ -43,6 +43,7 @@ import '../utils/library_content_notifier.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_live_tv.dart';
 import '../services/iptv/iptv_item_favorites_repository.dart';
+import '../services/iptv/iptv_refusal_log.dart';
 import '../services/iptv/m3u_parser.dart';
 import '../services/iptv/xtream_api.dart';
 
@@ -160,6 +161,14 @@ class IptvClient implements MediaServerClient {
     // so changing Settings → IPTV → Xtream User-Agent applies to the next
     // request without rebuilding the client (or restarting the app).
     userAgentProvider: _xtreamUserAgent,
+    // Build #27: every refused response and transport failure is handed
+    // to the refusal log (Settings → IPTV → Connection refusals) with
+    // its headers and body — the 403 the app used to discard is the
+    // diagnostic. Record-only: the exception the caller sees is
+    // unchanged, and no request is added.
+    onRefusal: (entry) => IptvRefusalLog.instance.record(entry),
+    connectionId: connection.id,
+    connectionName: _name,
   );
 
   /// The configured Xtream User-Agent for this client's requests (build

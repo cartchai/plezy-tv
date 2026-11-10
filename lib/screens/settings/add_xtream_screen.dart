@@ -9,6 +9,7 @@ import '../../focus/focusable_text_field.dart';
 import '../../i18n/strings.g.dart';
 import '../../mixins/controller_disposer_mixin.dart';
 import '../../profiles/profile.dart';
+import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/iptv/xtream_api.dart';
 import '../../services/settings_service.dart';
 import '../../utils/app_logger.dart';
@@ -79,12 +80,17 @@ class _AddXtreamScreenState extends State<AddXtreamScreen> with AsyncFormStateMi
   /// that 403s the bare Dart UA would fail sign-in here even though the
   /// app itself would work, so the probe must present the same signature
   /// the app will use.
-  Future<bool> _probe(String serverUrl, String username, String password) async {
+  Future<bool> _probe(String serverUrl, String username, String password, String name) async {
     final api = XtreamApi(
       serverUrl: serverUrl,
       username: username,
       password: password,
       userAgent: _configuredUserAgent(),
+      // Build #27: a sign-in refusal is a refusal too — the 06:02 event
+      // WAS a failed sign-in. Recorded with the typed name (no connection
+      // exists yet) so it shows in Settings → IPTV → Connection refusals.
+      onRefusal: (entry) => IptvRefusalLog.instance.record(entry),
+      connectionName: name,
     );
     try {
       final info = await api.getUserInfo();
@@ -102,7 +108,7 @@ class _AddXtreamScreenState extends State<AddXtreamScreen> with AsyncFormStateMi
     final password = _passwordController.text;
     await runAsync<void>(
       () async {
-        final authed = await _probe(serverUrl, username, password);
+        final authed = await _probe(serverUrl, username, password, name);
         if (!mounted) return;
         if (!authed) {
           setErrorText(t.addServer.invalidCredentials);

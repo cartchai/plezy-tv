@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../../exceptions/media_server_exceptions.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/json_utils.dart';
+import 'iptv_refusal_log.dart';
 
 /// The User-Agent values the Xtream panel sees (build #20).
 ///
@@ -95,6 +96,16 @@ class XtreamApi {
   /// the next request without rebuilding the client. Wins over [_userAgent].
   final String Function()? _userAgentProvider;
 
+  /// The refusal recorder (build #27): called with a sanitized entry for
+  /// every refused response and transport failure, before the throw.
+  /// Null in tests and for callers that do not record.
+  final Future<void> Function(IptvRefusalEntry entry)? _onRefusal;
+
+  /// The connection this client serves, for the recorded entry ('' when
+  /// the client is a pre-connection probe — the sign-in screen).
+  final String _connectionId;
+  final String _connectionName;
+
   XtreamApi({
     required String serverUrl,
     required this.username,
@@ -102,6 +113,9 @@ class XtreamApi {
     http.Client? httpClient,
     this._userAgent,
     this._userAgentProvider,
+    this._onRefusal,
+    this._connectionId = '',
+    this._connectionName = '',
   }) : serverUrl = serverUrl.endsWith('/') ? serverUrl.substring(0, serverUrl.length - 1) : serverUrl,
        _http = httpClient ?? http.Client();
 
@@ -165,12 +179,21 @@ class XtreamApi {
         return http.Response.fromStream(streamed);
       })().timeout(timeout);
     } catch (e) {
-      throw MediaServerHttpException.from(e, uri: uri);
+      final mapped = MediaServerHttpException.from(e, uri: uri);
+      // Build #27: a transport failure is a refusal too (timeout / socket
+      // error) — but a cancellation is not: a search the user abandoned
+      // says nothing about the panel and must never fill the log.
+      if (!mapped.isCancellation) {
+        await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
+      }
+      throw mapped;
     }
     if (response.statusCode == 401) {
+      await _recordRefusal(uri: uri, statusCode: 401, failureKind: 'http', response: response);
       throw MediaServerAuthException('Xtream authentication failed', statusCode: 401);
     }
     if (response.statusCode == 403) {
+      await _recordRefusal(uri: uri, statusCode: 403, failureKind: 'http', response: response);
       throw MediaServerHttpException(
         type: MediaServerHttpErrorType.unknown,
         message: 'Xtream access denied',
@@ -179,6 +202,7 @@ class XtreamApi {
       );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      await _recordRefusal(uri: uri, statusCode: response.statusCode, failureKind: 'http', response: response);
       throw MediaServerHttpException(
         type: MediaServerHttpErrorType.unknown,
         message: 'Xtream request failed with HTTP ${response.statusCode}',
@@ -188,6 +212,50 @@ class XtreamApi {
     }
     return response.body;
   }
+
+  /// Hand a refusal to the recorder (build #27), if one is attached.
+  /// Record-only: the exception the caller sees is unchanged, and this
+  /// never throws — a diagnostic must never break the error path it
+  /// observes. The URL itself is never stored ([IptvRefusalEntry.actionForUri]
+  /// derives the action without host or credentials) and the body/headers
+  /// are sanitized with this client's own credentials as redaction values.
+  Future<void> _recordRefusal({
+    required Uri uri,
+    required int? statusCode,
+    required String failureKind,
+    http.Response? response,
+  }) async {
+    final onRefusal = _onRefusal;
+    if (onRefusal == null) return;
+    try {
+      await onRefusal(
+        IptvRefusalEntry(
+          timestamp: DateTime.now(),
+          connectionId: _connectionId,
+          connectionName: _connectionName,
+          action: IptvRefusalEntry.actionForUri(uri),
+          statusCode: statusCode,
+          failureKind: failureKind,
+          headers: response == null
+              ? const {}
+              : IptvRefusalEntry.sanitizeHeaders(response.headers, redactValues: [username, password]),
+          bodySnippet: response == null
+              ? ''
+              : IptvRefusalEntry.sanitizeBody(response.body, redactValues: [username, password]),
+          userAgent: _effectiveUserAgent,
+        ),
+      );
+    } catch (_) {
+      // Recording is best-effort; the refusal itself still throws.
+    }
+  }
+
+  static String _failureKindFor(MediaServerHttpErrorType type) => switch (type) {
+    MediaServerHttpErrorType.connectionTimeout || MediaServerHttpErrorType.receiveTimeout => 'timeout',
+    MediaServerHttpErrorType.connectionError => 'connection',
+    MediaServerHttpErrorType.cancelled => 'cancelled',
+    MediaServerHttpErrorType.unknown => 'unknown',
+  };
 
   Future<dynamic> _getJson(
     Uri uri, {
@@ -214,9 +282,14 @@ class XtreamApi {
     try {
       response = await _http.get(uri, headers: {'User-Agent': _effectiveUserAgent}).timeout(timeout);
     } catch (e) {
-      throw MediaServerHttpException.from(e, uri: uri);
+      final mapped = MediaServerHttpException.from(e, uri: uri);
+      if (!mapped.isCancellation) {
+        await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
+      }
+      throw mapped;
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      await _recordRefusal(uri: uri, statusCode: response.statusCode, failureKind: 'http', response: response);
       throw MediaServerHttpException(
         type: MediaServerHttpErrorType.unknown,
         message: 'Xtream request failed with HTTP ${response.statusCode}',

@@ -11,6 +11,7 @@ import '../../mpv/player/player.dart';
 import '../../mpv/player/video_rect_support.dart';
 import '../../mpv/video.dart';
 import '../../providers/multi_server_provider.dart';
+import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/playback_coordinator.dart';
 import '../../services/settings_service.dart';
 import '../../utils/app_logger.dart';
@@ -669,6 +670,32 @@ class LiveTvMiniPlayerController extends ChangeNotifier {
     _isBuffering = false;
     final session = _session;
     _session = null;
+    // Build #27: a tune the panel answered with an HTTP status is a
+    // refusal — record it so it shows in Settings → IPTV → Connection
+    // refusals. Only when the session carried a User-Agent: IPTV
+    // sessions do (build #22); Plex/Jellyfin sessions return the
+    // default Accept-Language-only headers, so their failures are not
+    // panel refusals and are never recorded. Fire-and-forget: the log
+    // write must never hold up the failed card. The connection id is
+    // not held here — the channel name in the action identifies the
+    // tune (Matt has one Trex line).
+    final httpStatus = _lastHttpStatus;
+    final userAgent = session?.streamHeaders['User-Agent'];
+    if (httpStatus != null && userAgent != null && userAgent.isNotEmpty) {
+      final channelName = _channel?.displayName ?? 'live channel';
+      final action = _catchUpStartEpoch != null ? 'timeshift: $channelName' : 'live: $channelName';
+      unawaited(
+        IptvRefusalLog.instance.record(
+          IptvRefusalEntry(
+            timestamp: DateTime.now(),
+            action: action,
+            statusCode: httpStatus,
+            failureKind: 'http',
+            userAgent: userAgent,
+          ),
+        ),
+      );
+    }
     if (session != null) unawaited(session.discard());
     // Record the tune as failed (reveal: none) before the player goes.
     _firstFrameWatchdog?.cancel();

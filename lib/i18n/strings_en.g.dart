@@ -3819,6 +3819,10 @@ class Translations$about$en {
 		'Live TV from IPTV in the Live TV section; movies and series in the Library',
 		'Country/region filter on each connection\'s edit screen',
 	];
+	List<String> get changelog2272 => [
+		'Settings → IPTV has a new "Connection refusals" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at',
+		'Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log',
+	];
 }
 
 // Path: serverSelection
@@ -6903,6 +6907,57 @@ class Translations$iptv$en {
 
 	/// en: '${count} groups off'
 	String groupsOff({required Object count}) => '${count} groups off';
+
+	/// en: 'Connection refusals'
+	String get refusalsTitle => 'Connection refusals';
+
+	/// en: 'Every time the provider refuses a request — what it answered and when. No usernames or passwords are stored here.'
+	String get refusalsDescription => 'Every time the provider refuses a request — what it answered and when. No usernames or passwords are stored here.';
+
+	/// en: 'No refusals recorded yet.'
+	String get refusalsEmpty => 'No refusals recorded yet.';
+
+	/// en: '(one) {1 refusal recorded} (other) {${n} refusals recorded}'
+	String refusalsCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '1 refusal recorded',
+		other: '${n} refusals recorded',
+	);
+
+	/// en: 'Copy refusals'
+	String get refusalsCopy => 'Copy refusals';
+
+	/// en: 'Refusals copied to clipboard'
+	String get refusalsCopied => 'Refusals copied to clipboard';
+
+	/// en: 'Clear refusals'
+	String get refusalsClear => 'Clear refusals';
+
+	/// en: 'Refusals cleared'
+	String get refusalsCleared => 'Refusals cleared';
+
+	/// en: 'Status'
+	String get refusalsStatus => 'Status';
+
+	/// en: 'Time'
+	String get refusalsTime => 'Time';
+
+	/// en: 'Connection'
+	String get refusalsConnection => 'Connection';
+
+	/// en: 'Network'
+	String get refusalsNetwork => 'Network';
+
+	/// en: 'User-Agent'
+	String get refusalsUserAgent => 'User-Agent';
+
+	/// en: 'Response headers'
+	String get refusalsHeaders => 'Response headers';
+
+	/// en: 'Response body'
+	String get refusalsBody => 'Response body';
+
+	/// en: 'No HTTP status'
+	String get refusalsNoStatus => 'No HTTP status';
 }
 
 // Path: iptvCategories
@@ -10353,6 +10408,8 @@ extension on Translations {
 			'about.changelog2250.1' => 'M3U and Xtream Codes import: Add connection → M3U / Xtream Codes',
 			'about.changelog2250.2' => 'Live TV from IPTV in the Live TV section; movies and series in the Library',
 			'about.changelog2250.3' => 'Country/region filter on each connection\'s edit screen',
+			'about.changelog2272.0' => 'Settings → IPTV has a new "Connection refusals" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at',
+			'about.changelog2272.1' => 'Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
 			'serverSelection.noValidServers' => 'No usable servers were found on this account',
@@ -10485,10 +10542,10 @@ extension on Translations {
 			'explore.format.tv' => 'TV',
 			'explore.format.tvShort' => 'TV Short',
 			'explore.format.movie' => 'Movie',
-			'explore.format.special' => 'Special',
-			'explore.format.ova' => 'OVA',
 			_ => null,
 		} ?? switch (path) {
+			'explore.format.special' => 'Special',
+			'explore.format.ova' => 'OVA',
 			'explore.format.ona' => 'ONA',
 			'explore.format.music' => 'Music',
 			'explore.format.other' => 'Other',
@@ -10999,10 +11056,10 @@ extension on Translations {
 			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
 			'downloads.unknownShow' => 'Unknown Show',
-			'downloads.unknownSeason' => 'Unknown Season',
-			'downloads.unknownAlbum' => 'Unknown Album',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.unknownSeason' => 'Unknown Season',
+			'downloads.unknownAlbum' => 'Unknown Album',
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
 			'downloads.errorDownloadNotAllowed' => 'Download not allowed by the server (403)',
@@ -11513,10 +11570,10 @@ extension on Translations {
 			'iptv.epgManualOnly' => 'Manual only',
 			'iptv.epgPastDays' => 'Past days to keep',
 			'iptv.epgPastDaysDescription' => 'Past guide days kept for catch-up scrolling',
-			'iptv.epgPastDaysNone' => 'None',
-			'iptv.epgUpdateOnStart' => 'Update on app start',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.epgPastDaysNone' => 'None',
+			'iptv.epgUpdateOnStart' => 'Update on app start',
 			'iptv.epgUpdateOnStartDescription' => 'Refresh the guide when the app starts',
 			'iptv.epgTimeOffset' => 'Time offset',
 			'iptv.epgTimeOffsetDescription' => 'Shift guide times when listings are out by whole hours',
@@ -11587,6 +11644,22 @@ extension on Translations {
 			'iptv.miniPlayerLineBusy' => 'Line busy — another stream is using your connection',
 			'iptv.miniPlayerWatchLive' => 'Watch live',
 			'iptv.groupsOff' => ({required Object count}) => '${count} groups off',
+			'iptv.refusalsTitle' => 'Connection refusals',
+			'iptv.refusalsDescription' => 'Every time the provider refuses a request — what it answered and when. No usernames or passwords are stored here.',
+			'iptv.refusalsEmpty' => 'No refusals recorded yet.',
+			'iptv.refusalsCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '1 refusal recorded', other: '${n} refusals recorded', ), 
+			'iptv.refusalsCopy' => 'Copy refusals',
+			'iptv.refusalsCopied' => 'Refusals copied to clipboard',
+			'iptv.refusalsClear' => 'Clear refusals',
+			'iptv.refusalsCleared' => 'Refusals cleared',
+			'iptv.refusalsStatus' => 'Status',
+			'iptv.refusalsTime' => 'Time',
+			'iptv.refusalsConnection' => 'Connection',
+			'iptv.refusalsNetwork' => 'Network',
+			'iptv.refusalsUserAgent' => 'User-Agent',
+			'iptv.refusalsHeaders' => 'Response headers',
+			'iptv.refusalsBody' => 'Response body',
+			'iptv.refusalsNoStatus' => 'No HTTP status',
 			'iptvCategories.title' => ({required Object name}) => '${name} categories',
 			'iptvCategories.intro' => 'Turn off a category to hide its channels and on-demand titles. Changes apply right away.',
 			'iptvCategories.hiddenTotal' => ({required Object count}) => '${count} categories hidden',

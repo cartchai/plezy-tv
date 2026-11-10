@@ -13,6 +13,7 @@ import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../media/iptv_live_tv.dart';
 import '../../services/iptv/iptv_catalog_cache.dart';
+import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/iptv/iptv_search_index.dart';
 import '../../services/iptv/xtream_api.dart';
 import '../../profiles/active_profile_provider.dart';
@@ -29,6 +30,7 @@ import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_section.dart';
 import 'add_connection_screen.dart';
 import 'iptv_categories_screen.dart';
+import 'iptv_refusals_screen.dart';
 import 'playback_settings_screen.dart';
 import 'settings_utils.dart';
 
@@ -191,6 +193,11 @@ class IptvSettingsScreen extends StatelessWidget {
                       );
                     },
                   ),
+                  // The refusal log is about the Xtream connection, so its
+                  // row lives in this section (not its own group — a group
+                  // titled "Connection refusals" holding a row titled the
+                  // same would say it twice).
+                  const _RefusalsTile(),
                 ],
               ),
             ),
@@ -407,6 +414,39 @@ class IptvSettingsScreen extends StatelessWidget {
     }
     if (!context.mounted) return;
     showSuccessSnackBar(context, t.iptv.epgCleared);
+  }
+}
+
+/// "Connection refusals" row (build #27): opens the refusal log. The
+/// subtitle is the count (or the empty line); it rebuilds when a refusal
+/// lands because it listens to the log's notifier.
+class _RefusalsTile extends StatefulWidget {
+  const _RefusalsTile();
+
+  @override
+  State<_RefusalsTile> createState() => _RefusalsTileState();
+}
+
+class _RefusalsTileState extends State<_RefusalsTile> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(IptvRefusalLog.instance.ensureLoaded());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<IptvRefusalEntry>>(
+      valueListenable: IptvRefusalLog.instance.entriesNotifier,
+      builder: (context, entries, _) {
+        return SettingNavigationTile(
+          icon: Symbols.block_rounded,
+          title: t.iptv.refusalsTitle,
+          subtitle: entries.isEmpty ? t.iptv.refusalsEmpty : t.iptv.refusalsCount(n: entries.length),
+          destinationBuilder: (context) => const IptvRefusalsScreen(),
+        );
+      },
+    );
   }
 }
 

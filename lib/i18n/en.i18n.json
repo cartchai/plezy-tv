@@ -1563,6 +1563,10 @@
       "M3U and Xtream Codes import: Add connection → M3U / Xtream Codes",
       "Live TV from IPTV in the Live TV section; movies and series in the Library",
       "Country/region filter on each connection's edit screen"
+    ],
+    "changelog2272": [
+      "Settings → IPTV has a new \"Connection refusals\" row: every time the provider refuses a request, the app now records what it answered — the status, the response headers and the first bit of the response body — so the cause can be read off the phone instead of guessed at",
+      "Nothing about the refusal itself changed — same banner, same retries; this only writes down what the app already saw. No usernames or passwords are ever stored in the log"
     ]
   },
   "serverSelection": {
@@ -2931,7 +2935,26 @@
     "miniPlayerMissingRecordingNoProgramme": "No recording available for this programme on ${channel}",
     "miniPlayerLineBusy": "Line busy — another stream is using your connection",
     "miniPlayerWatchLive": "Watch live",
-    "groupsOff": "${count} groups off"
+    "groupsOff": "${count} groups off",
+    "refusalsTitle": "Connection refusals",
+    "refusalsDescription": "Every time the provider refuses a request — what it answered and when. No usernames or passwords are stored here.",
+    "refusalsEmpty": "No refusals recorded yet.",
+    "refusalsCount": {
+      "one": "1 refusal recorded",
+      "other": "${n} refusals recorded"
+    },
+    "refusalsCopy": "Copy refusals",
+    "refusalsCopied": "Refusals copied to clipboard",
+    "refusalsClear": "Clear refusals",
+    "refusalsCleared": "Refusals cleared",
+    "refusalsStatus": "Status",
+    "refusalsTime": "Time",
+    "refusalsConnection": "Connection",
+    "refusalsNetwork": "Network",
+    "refusalsUserAgent": "User-Agent",
+    "refusalsHeaders": "Response headers",
+    "refusalsBody": "Response body",
+    "refusalsNoStatus": "No HTTP status"
   },
   "iptvCategories": {
     "title": "${name} categories",
