@@ -1407,6 +1407,11 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2267": [
+      "Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept",
+      "Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update",
+      "If Trex still refuses access after this update, the provider only allows specific names for this account — that one needs the provider to allow it"
+    ],
     "changelog2265": [
       "Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters",
       "Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again",
@@ -2834,6 +2839,15 @@
     "epgNeverUpdated": "Never",
     "epgUpdated": "Guide updated",
     "epgCleared": "Guide cleared",
+    "xtreamSection": "Xtream Codes",
+    "xtreamUserAgent": "Xtream User-Agent",
+    "xtreamUserAgentVlc": "VLC",
+    "xtreamUserAgentSmarters": "IPTVSmartersPro",
+    "xtreamUserAgentBrowser": "Browser (Chrome)",
+    "xtreamUserAgentCustom": "Custom",
+    "xtreamUserAgentCustomTitle": "Custom User-Agent",
+    "xtreamUserAgentCustomHint": "Tap to enter a User-Agent",
+    "xtreamUserAgentCustomEmpty": "Enter a User-Agent first",
     "initialsLoading": "Loading initials…",
     "initialsLoadFailed": "Could not load the category initials. Check the connection and try again.",
     "initialsNoneFound": "No repeating initials found in this connection’s categories.",

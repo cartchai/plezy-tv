@@ -31,6 +31,7 @@ import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
+import '../services/settings_service.dart';
 import '../services/playback_initialization_types.dart';
 import '../services/scrub_preview_source.dart';
 import '../utils/app_logger.dart';
@@ -153,7 +154,24 @@ class IptvClient implements MediaServerClient {
     serverUrl: _xtream.serverUrl,
     username: _xtream.username,
     password: _xtream.password,
+    // Build #20: the User-Agent is re-read from Settings on every request,
+    // so changing Settings → IPTV → Xtream User-Agent applies to the next
+    // request without rebuilding the client (or restarting the app).
+    userAgentProvider: _xtreamUserAgent,
   );
+
+  /// The configured Xtream User-Agent for this client's requests (build
+  /// #20). Falls back to VLC when Settings is not initialized yet (tests)
+  /// or the stored choice is unknown — a request must never go out with
+  /// no User-Agent.
+  static String _xtreamUserAgent() {
+    final settings = SettingsService.instanceOrNull;
+    if (settings == null) return XtreamUserAgent.vlc;
+    return XtreamUserAgent.resolve(
+      settings.read(SettingsService.iptvXtreamUserAgent),
+      settings.read(SettingsService.iptvXtreamUserAgentCustom),
+    );
+  }
 
   /// Public view of the Xtream API for the live-TV support (EPG fetches).
   XtreamApi get xtreamApi => _xtreamApi;

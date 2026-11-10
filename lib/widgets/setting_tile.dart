@@ -317,6 +317,50 @@ class SettingRegexTile extends StatelessWidget {
   }
 }
 
+/// ListTile that opens [showPlainTextInputDialog] for a [Pref<String>].
+/// The subtitle shows the current value, or [emptyHint] when blank.
+class SettingTextTile extends StatelessWidget {
+  final Pref<String> pref;
+  final IconData icon;
+  final String title;
+  final String emptyHint;
+  final String emptyError;
+  final String defaultValue;
+  final FutureOr<void> Function(String)? onAfterWrite;
+
+  const SettingTextTile({
+    super.key,
+    required this.pref,
+    required this.icon,
+    required this.title,
+    required this.emptyHint,
+    required this.emptyError,
+    this.defaultValue = '',
+    this.onAfterWrite,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: SettingsService.instance.listenable(pref),
+      builder: (_, value, _) => _SettingRow(
+        icon: icon,
+        title: title,
+        subtitle: Text(value.isEmpty ? emptyHint : value),
+        onTap: () => showPlainTextInputDialog(
+          context: context,
+          title: title,
+          currentValue: value,
+          defaultValue: defaultValue,
+          fieldLabel: title,
+          emptyError: emptyError,
+          onSave: (v) => _writeAndNotify(context, pref, v, onAfterWrite),
+        ),
+      ),
+    );
+  }
+}
+
 /// SegmentedSetting bound to a [Pref<T>].
 class SettingSegmentedTile<T> extends StatelessWidget {
   final Pref<T> pref;

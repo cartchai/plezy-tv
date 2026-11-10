@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2267 => [
+		'Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept',
+		'Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update',
+		'If Trex still refuses access after this update, the provider only allows specific names for this account — that one needs the provider to allow it',
+	];
 	List<String> get changelog2265 => [
 		'Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters',
 		'Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again',
@@ -6659,6 +6664,33 @@ class Translations$iptv$en {
 
 	/// en: 'Guide cleared'
 	String get epgCleared => 'Guide cleared';
+
+	/// en: 'Xtream Codes'
+	String get xtreamSection => 'Xtream Codes';
+
+	/// en: 'Xtream User-Agent'
+	String get xtreamUserAgent => 'Xtream User-Agent';
+
+	/// en: 'VLC'
+	String get xtreamUserAgentVlc => 'VLC';
+
+	/// en: 'IPTVSmartersPro'
+	String get xtreamUserAgentSmarters => 'IPTVSmartersPro';
+
+	/// en: 'Browser (Chrome)'
+	String get xtreamUserAgentBrowser => 'Browser (Chrome)';
+
+	/// en: 'Custom'
+	String get xtreamUserAgentCustom => 'Custom';
+
+	/// en: 'Custom User-Agent'
+	String get xtreamUserAgentCustomTitle => 'Custom User-Agent';
+
+	/// en: 'Tap to enter a User-Agent'
+	String get xtreamUserAgentCustomHint => 'Tap to enter a User-Agent';
+
+	/// en: 'Enter a User-Agent first'
+	String get xtreamUserAgentCustomEmpty => 'Enter a User-Agent first';
 
 	/// en: 'Loading initials…'
 	String get initialsLoading => 'Loading initials…';
@@ -10140,6 +10172,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2267.0' => 'Trex was refusing the app while TiviMate worked — the app sent no name with its requests, so the provider saw an unknown player. It now sends VLC, the name most providers accept',
+			'about.changelog2267.1' => 'Settings → IPTV → Xtream User-Agent lets you change that name — VLC, IPTVSmartersPro, a browser name, or your own — without waiting for an update',
+			'about.changelog2267.2' => 'If Trex still refuses access after this update, the provider only allows specific names for this account — that one needs the provider to allow it',
 			'about.changelog2265.0' => 'Scoped search is fixed: searching inside Trex — Series no longer shows Plex movies — the app was hiding other libraries by name, and a movie with no library attached slipped through both filters',
 			'about.changelog2265.1' => 'Series search: when a search comes up empty it now checks the missing categories faster, and a repair that finds missing shows saves them, so the next search does not have to look again',
 			'about.changelog2265.2' => 'A half-empty list from the provider can no longer overwrite the good saved list on the phone',
@@ -10384,11 +10419,11 @@ extension on Translations {
 			'explore.sourceMaterial.webComic' => 'Web comic',
 			'explore.sourceMaterial.musicRelease' => 'Music',
 			'explore.sourceMaterial.otherMedia' => 'Other',
+			_ => null,
+		} ?? switch (path) {
 			'explore.creditRole.actor' => 'Actor',
 			'explore.creditRole.director' => 'Director',
 			'explore.creditRole.writer' => 'Writer',
-			_ => null,
-		} ?? switch (path) {
 			'explore.creditRole.producer' => 'Producer',
 			'explore.creditRole.creator' => 'Creator',
 			'explore.creditRole.composer' => 'Composer',
@@ -10898,11 +10933,11 @@ extension on Translations {
 			'downloads.reasonDeviceStorageFull' => 'this device is out of storage',
 			'downloads.notificationDownloading' => 'Downloading...',
 			'downloads.notificationComplete' => 'Download complete',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.notificationPaused' => 'Download paused',
 			'shaders.title' => 'Shaders',
 			'shaders.noShaderDescription' => 'No video enhancement',
-			_ => null,
-		} ?? switch (path) {
 			'shaders.nvscalerDescription' => 'NVIDIA image scaling for sharper video',
 			'shaders.artcnnVariantNeutral' => 'Neutral',
 			'shaders.artcnnVariantDenoise' => 'Denoise',
@@ -11397,12 +11432,23 @@ extension on Translations {
 			'iptv.epgNeverUpdated' => 'Never',
 			'iptv.epgUpdated' => 'Guide updated',
 			'iptv.epgCleared' => 'Guide cleared',
+			'iptv.xtreamSection' => 'Xtream Codes',
+			'iptv.xtreamUserAgent' => 'Xtream User-Agent',
+			'iptv.xtreamUserAgentVlc' => 'VLC',
+			'iptv.xtreamUserAgentSmarters' => 'IPTVSmartersPro',
+			'iptv.xtreamUserAgentBrowser' => 'Browser (Chrome)',
+			'iptv.xtreamUserAgentCustom' => 'Custom',
+			'iptv.xtreamUserAgentCustomTitle' => 'Custom User-Agent',
+			'iptv.xtreamUserAgentCustomHint' => 'Tap to enter a User-Agent',
+			'iptv.xtreamUserAgentCustomEmpty' => 'Enter a User-Agent first',
 			'iptv.initialsLoading' => 'Loading initials…',
 			'iptv.initialsLoadFailed' => 'Could not load the category initials. Check the connection and try again.',
 			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s categories.',
 			'iptv.catalogDiagnosticsTitle' => 'Series catalog',
 			'iptv.catalogDiagnosticsHint' => 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.',
 			'iptv.catalogDiagnosticsLoading' => 'Loading catalog…',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.catalogDiagnosticsFailed' => 'Could not load the catalog details.',
 			'iptv.catalogDiagnosticsUnfilteredRows' => ({required Object count}) => 'Series loaded (all categories): ${count}',
 			'iptv.catalogDiagnosticsCategoryCount' => ({required Object count}) => 'Series categories: ${count}',
@@ -11415,8 +11461,6 @@ extension on Translations {
 			'iptv.guideCoverageSplit' => ({required Object byId, required Object byName, required Object shortEpg, required Object none}) => 'From feed by channel id: ${byId} · by name: ${byName} · short guide: ${shortEpg} · no data: ${none}',
 			'iptv.guideCoverageUnknown' => ({required Object count}) => '${count} from an older cache (source unknown)',
 			'iptv.guideCoverageFeedIds' => ({required Object count}) => 'Feed lists ${count} channel ids',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.lastSearchTitle' => 'Last search',
 			'iptv.lastSearchNone' => 'No search yet — search for something, then check back here.',
 			'iptv.lastSearchQuery' => ({required Object query, required Object totalMs, required Object scoped}) => '“${query}” · ${totalMs} ms${scoped}',

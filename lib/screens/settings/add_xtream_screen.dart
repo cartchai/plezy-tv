@@ -10,6 +10,7 @@ import '../../i18n/strings.g.dart';
 import '../../mixins/controller_disposer_mixin.dart';
 import '../../profiles/profile.dart';
 import '../../services/iptv/xtream_api.dart';
+import '../../services/settings_service.dart';
 import '../../utils/app_logger.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
@@ -62,8 +63,29 @@ class _AddXtreamScreenState extends State<AddXtreamScreen> with AsyncFormStateMi
 
   /// Auth probe: `player_api.php` with no action. A `user_info` object
   /// means the login works; null means the server rejected it.
+  ///
+  /// The probe sends the configured Xtream User-Agent (build #20): a panel
+  /// that 403s the bare Dart UA would fail sign-in here even though the
+  /// app itself would work, so the probe must present the same signature
+  /// the app will use.
+  /// The configured Xtream User-Agent for the sign-in probe (build #20).
+  /// Falls back to VLC when Settings is not initialized yet.
+  static String _configuredUserAgent() {
+    final settings = SettingsService.instanceOrNull;
+    if (settings == null) return XtreamUserAgent.vlc;
+    return XtreamUserAgent.resolve(
+      settings.read(SettingsService.iptvXtreamUserAgent),
+      settings.read(SettingsService.iptvXtreamUserAgentCustom),
+    );
+  }
+
   Future<bool> _probe(String serverUrl, String username, String password) async {
-    final api = XtreamApi(serverUrl: serverUrl, username: username, password: password);
+    final api = XtreamApi(
+      serverUrl: serverUrl,
+      username: username,
+      password: password,
+      userAgent: _configuredUserAgent(),
+    );
     try {
       final info = await api.getUserInfo();
       return info != null;

@@ -421,6 +421,66 @@ void _showNumericInputDialogStandard({
   );
 }
 
+/// Plain text input dialog for a free-text string setting — same shape as
+/// [showRegexInputDialog] but with no pattern validation: only a blank
+/// value is rejected (a blank value has no meaning to save, and "Reset to
+/// default" is the intentional way to clear the setting).
+void showPlainTextInputDialog({
+  required BuildContext context,
+  required String title,
+  required String currentValue,
+  required String defaultValue,
+  required String fieldLabel,
+  required String emptyError,
+  required Future<void> Function(String value) onSave,
+}) {
+  final controller = TextEditingController(text: currentValue);
+  String? errorText;
+
+  String? validationError(String value) => value.trim().isEmpty ? emptyError : null;
+
+  StateSetter? dialogState;
+
+  _showSettingsInputDialog(
+    context: context,
+    title: title,
+    contentBuilder: (_, _, setDialogState, saveFocusNode) {
+      dialogState = setDialogState;
+      return FocusableTextField(
+        controller: controller,
+        decoration: InputDecoration(labelText: fieldLabel, errorText: errorText),
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        onEditingComplete: () => saveFocusNode.requestFocus(),
+        onChanged: (value) {
+          setDialogState(() => errorText = validationError(value));
+        },
+      );
+    },
+    leadingActionsBuilder: (_, setDialogState) => [
+      DialogActionButton(
+        onPressed: () {
+          controller.text = defaultValue;
+          setDialogState(() => errorText = null);
+        },
+        label: t.settings.resetToDefault,
+      ),
+    ],
+    onSave: (_) async {
+      // Save is the persistence boundary: re-validate here so an
+      // already-persisted blank value cannot be saved back untouched.
+      final error = validationError(controller.text);
+      if (error != null) {
+        dialogState?.call(() => errorText = error);
+        return false;
+      }
+      await onSave(controller.text);
+      return true;
+    },
+    onDispose: controller.dispose,
+  );
+}
+
 /// Convert `#RRGGBB` (or `#AARRGGBB`) hex to [Color]. Defaults to black on parse error.
 Color hexToColor(String hex) {
   final buffer = StringBuffer();

@@ -12,6 +12,7 @@ import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../media/iptv_live_tv.dart';
+import '../../services/iptv/xtream_api.dart';
 import '../../profiles/active_profile_provider.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../screens/livetv/live_tv_mini_player.dart';
@@ -104,6 +105,59 @@ class IptvSettingsScreen extends StatelessWidget {
                   subtitle: t.iptv.showCatchUpBadgeDescription,
                 ),
               ],
+            ),
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: 24)),
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverToBoxAdapter(
+            child: ValueListenableBuilder<String>(
+              // The User-Agent row's subtitle shows the resolved value, so
+              // it must rebuild when the custom text changes too — not
+              // just when the choice changes (the selection tile only
+              // listens to the choice pref).
+              valueListenable: settings.SettingsService.instance.listenable(
+                settings.SettingsService.iptvXtreamUserAgentCustom,
+              ),
+              builder: (_, _, _) => SettingsGroup(
+                title: t.iptv.xtreamSection,
+                children: [
+                  SettingSelectionTile<String>(
+                    pref: settings.SettingsService.iptvXtreamUserAgent,
+                    icon: Symbols.badge_rounded,
+                    title: t.iptv.xtreamUserAgent,
+                    subtitleBuilder: _xtreamUserAgentSubtitle,
+                    options: [
+                      DialogOption(value: XtreamUserAgent.choiceVlc, title: t.iptv.xtreamUserAgentVlc),
+                      DialogOption(
+                        value: XtreamUserAgent.choiceSmarters,
+                        title: t.iptv.xtreamUserAgentSmarters,
+                      ),
+                      DialogOption(
+                        value: XtreamUserAgent.choiceBrowser,
+                        title: t.iptv.xtreamUserAgentBrowser,
+                      ),
+                      DialogOption(value: XtreamUserAgent.choiceCustom, title: t.iptv.xtreamUserAgentCustom),
+                    ],
+                  ),
+                  ValueListenableBuilder<String>(
+                    valueListenable: settings.SettingsService.instance.listenable(
+                      settings.SettingsService.iptvXtreamUserAgent,
+                    ),
+                    builder: (_, choice, _) {
+                      if (choice != XtreamUserAgent.choiceCustom) return const SizedBox.shrink();
+                      return SettingTextTile(
+                        pref: settings.SettingsService.iptvXtreamUserAgentCustom,
+                        icon: Symbols.edit_rounded,
+                        title: t.iptv.xtreamUserAgentCustomTitle,
+                        emptyHint: t.iptv.xtreamUserAgentCustomHint,
+                        emptyError: t.iptv.xtreamUserAgentCustomEmpty,
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -221,6 +275,19 @@ class IptvSettingsScreen extends StatelessWidget {
         const SliverPadding(padding: EdgeInsets.only(bottom: 24)),
       ],
     );
+  }
+
+  /// Subtitle for the Xtream User-Agent row: the UA string that will
+  /// actually be sent, so Custom shows the custom text — or "Custom · VLC"
+  /// when the custom text is blank, which is the fallback the resolver
+  /// applies. Reads the custom pref synchronously; the row rebuilds when
+  /// the choice or the custom text changes (see the group wrapper above).
+  String _xtreamUserAgentSubtitle(String choice) {
+    final custom = settings.SettingsService.instance.read(settings.SettingsService.iptvXtreamUserAgentCustom);
+    final resolved = XtreamUserAgent.resolve(choice, custom);
+    return choice == XtreamUserAgent.choiceCustom && custom.trim().isEmpty
+        ? '${t.iptv.xtreamUserAgentCustom} · $resolved'
+        : resolved;
   }
 
   /// Drop every IPTV client's in-memory catalog so the next Live TV /

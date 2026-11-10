@@ -954,6 +954,22 @@ class SettingsService extends BaseSharedPreferencesService {
   /// Empty before the first load. Shown as "Last updated" in IPTV settings.
   static const iptvEpgLastUpdated = StringPref('iptv_epg_last_updated', defaultValue: '');
 
+  /// Xtream User-Agent (build #20): the User-Agent sent on every Xtream
+  /// panel request. Trex 403s the app's default Dart UA while TiviMate
+  /// works — panels enforce per-user allowed-UA lists, so the name the app
+  /// sends is a setting, not a constant. Stored choice key, resolved by
+  /// XtreamUserAgent.resolve in services/iptv/xtream_api.dart: 'vlc'
+  /// (default, the most widely reported accepted value), 'smarters',
+  /// 'browser', or 'custom' (takes [iptvXtreamUserAgentCustom]). In
+  /// `_portableOnlyPrefs`, so it rides settings export/import like the
+  /// other IPTV settings.
+  static const iptvXtreamUserAgent = StringPref('iptv_xtream_user_agent', defaultValue: 'vlc');
+
+  /// Custom Xtream User-Agent text, used when [iptvXtreamUserAgent] is
+  /// 'custom'. Blank falls back to VLC at resolve time. Backed up with
+  /// the choice above.
+  static const iptvXtreamUserAgentCustom = StringPref('iptv_xtream_user_agent_custom', defaultValue: '');
+
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();
@@ -1641,6 +1657,8 @@ class SettingsService extends BaseSharedPreferencesService {
     musicQualityPreset,
     liveTvDefaultFavorites,
     iptvShowCatchUpBadge,
+    iptvXtreamUserAgent,
+    iptvXtreamUserAgentCustom,
     matchRefreshRate,
     matchDynamicRange,
     displaySwitchDelay,

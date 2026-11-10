@@ -7,6 +7,46 @@ import '../../exceptions/media_server_exceptions.dart';
 import '../../utils/app_logger.dart';
 import '../../utils/json_utils.dart';
 
+/// The User-Agent values the Xtream panel sees (build #20).
+///
+/// Trex returns HTTP 403 to PlezTV's requests while TiviMate works with the
+/// same account on the same phone: the app sent no User-Agent, so the panel
+/// saw Dart's default `Dart/3.13 (dart:io)` — a distinctive, non-player
+/// signature. Xtream panels enforce per-user allowed-UA lists and global
+/// blocked-UA patterns as a first-class feature (USER_AGENT_BAN / EMPTY_UA),
+/// and `VLC` is the most widely reported accepted value for 403s. The value
+/// is a setting (Settings → IPTV → Xtream User-Agent), stored as a choice
+/// key + custom text in SettingsService and resolved here so every caller
+/// (client, sign-in probe, tests) agrees on the wire value.
+class XtreamUserAgent {
+  /// The default: the most widely reported accepted value for 403s.
+  static const String vlc = 'VLC';
+
+  /// Second most reported fallback.
+  static const String smarters = 'IPTVSmartersPro';
+
+  /// Full browser UA, the third documented fallback.
+  static const String browser = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
+
+  /// Stored choice keys for the Settings preference.
+  static const String choiceVlc = 'vlc';
+  static const String choiceSmarters = 'smarters';
+  static const String choiceBrowser = 'browser';
+  static const String choiceCustom = 'custom';
+
+  static const String defaultChoice = choiceVlc;
+
+  /// Resolve a stored choice + custom text to the UA string sent on the
+  /// wire. Unknown choices and a blank custom value fall back to VLC —
+  /// a request must never go out with no User-Agent again.
+  static String resolve(String choice, String custom) => switch (choice) {
+    choiceSmarters => smarters,
+    choiceBrowser => browser,
+    choiceCustom => custom.trim().isEmpty ? vlc : custom.trim(),
+    _ => vlc,
+  };
+}
+
 /// Minimal Xtream Codes API client (player_api.php / get.php / xmltv.php).
 ///
 /// Xtream has no canonical spec; the shapes below are the ones this
@@ -23,13 +63,31 @@ class XtreamApi {
   final String password;
   final http.Client _http;
 
+  /// The default User-Agent sent on every request (build #20).
+  static const String defaultUserAgent = XtreamUserAgent.vlc;
+
+  /// Fixed User-Agent for this client, when one is given.
+  final String? _userAgent;
+
+  /// Provider for the User-Agent, re-read on every request when given —
+  /// the Settings-backed one in IptvClient reads the preference per
+  /// request, so changing Settings → IPTV → Xtream User-Agent applies to
+  /// the next request without rebuilding the client. Wins over [_userAgent].
+  final String Function()? _userAgentProvider;
+
   XtreamApi({
     required String serverUrl,
     required this.username,
     required this.password,
     http.Client? httpClient,
+    this._userAgent,
+    this._userAgentProvider,
   }) : serverUrl = serverUrl.endsWith('/') ? serverUrl.substring(0, serverUrl.length - 1) : serverUrl,
        _http = httpClient ?? http.Client();
+
+  /// The User-Agent for the next request: provider, then fixed value,
+  /// then the VLC default. Never null, never empty.
+  String get _effectiveUserAgent => _userAgentProvider?.call() ?? _userAgent ?? defaultUserAgent;
 
   void close() => _http.close();
 
@@ -63,10 +121,13 @@ class XtreamApi {
   /// Fetch a response body with status checks. Shared by [_getJson] and the
   /// big catalog calls, which hand the body to an isolate for parsing
   /// instead of decoding it here (see [_parseLiveStreams] etc.).
+  ///
+  /// Every request carries the configured User-Agent (build #20): the panel
+  /// 403s the bare Dart default, so a request must never go out without one.
   Future<String> _fetchBody(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
     http.Response response;
     try {
-      response = await _http.get(uri).timeout(timeout);
+      response = await _http.get(uri, headers: {'User-Agent': _effectiveUserAgent}).timeout(timeout);
     } catch (e) {
       throw MediaServerHttpException.from(e, uri: uri);
     }
@@ -106,10 +167,12 @@ class XtreamApi {
     }
   }
 
+  /// Same User-Agent rule as [_fetchBody] (build #20): the EPG feed and the
+  /// M3U export go through here, and the panel sees them too.
   Future<String> _getText(Uri uri, {Duration timeout = const Duration(seconds: 30)}) async {
     http.Response response;
     try {
-      response = await _http.get(uri).timeout(timeout);
+      response = await _http.get(uri, headers: {'User-Agent': _effectiveUserAgent}).timeout(timeout);
     } catch (e) {
       throw MediaServerHttpException.from(e, uri: uri);
     }
