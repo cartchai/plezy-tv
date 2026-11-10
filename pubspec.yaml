@@ -1,7 +1,7 @@
 name: plezy
 description: "A beautiful Plex and Jellyfin client for Flutter"
 publish_to: "none"
-version: 1.0.5-2.25.0+177
+version: 1.0.6-2.25.0+178
 
 environment:
   # Dart floor stays 3.12: freezed 3.x emits `final` constructor parameters,
@@ -48,6 +48,11 @@ dependencies:
   path: ^1.9.0
   universal_gamepad: ^1.5.7
   drift: ^2.31.0
+  # Build #23: the local search index opens SQLite directly (the index is
+  # derived cache data in its own file, not the Drift AppDatabase). Pinned
+  # to the version already in the lock (3.5.0, via drift) — do not bump
+  # without re-checking the FTS5 trigram behaviour in-harness.
+  sqlite3: ^3.5.0
   crypto: ^3.0.7
   cryptography: ^2.9.0
   file_picker: ^11.0.2

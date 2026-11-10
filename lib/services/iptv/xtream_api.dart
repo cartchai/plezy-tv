@@ -47,6 +47,19 @@ class XtreamUserAgent {
   };
 }
 
+/// Thrown when an unfiltered catalog response exceeds the 300 MB cap
+/// (build #23, [XtreamApi.maxCatalogResponseChars]). The sync reports
+/// it as 'oversize' and keeps the old index rows — a bad sync never
+/// wipes good data.
+class XtreamCatalogTooLargeException implements Exception {
+  const XtreamCatalogTooLargeException(this.chars);
+
+  final int chars;
+
+  @override
+  String toString() => 'Xtream catalog response too large: $chars chars';
+}
+
 /// Minimal Xtream Codes API client (player_api.php / get.php / xmltv.php).
 ///
 /// Xtream has no canonical spec; the shapes below are the ones this
@@ -65,6 +78,13 @@ class XtreamApi {
 
   /// The default User-Agent sent on every request (build #20).
   static const String defaultUserAgent = XtreamUserAgent.vlc;
+
+  /// Hostile-response cap (build #23, IPTVMac SyncService shape): an
+  /// unfiltered catalog response larger than this is refused before
+  /// parsing ([XtreamCatalogTooLargeException]), so a bad sync can't
+  /// blow up storage. Counted in UTF-16 code units (≈ bytes for JSON,
+  /// which is mostly ASCII).
+  static const int maxCatalogResponseChars = 300000000;
 
   /// Fixed User-Agent for this client, when one is given.
   final String? _userAgent;
@@ -257,6 +277,14 @@ class XtreamApi {
       timeout: const Duration(seconds: 120),
       abortTrigger: abortTrigger,
     );
+    // Build #23: hostile-response cap (IPTVMac SyncService shape) — an
+    // unfiltered catalog over 300 MB is refused BEFORE parsing, so a bad
+    // sync can't blow up storage or the parse isolate. Per-category
+    // bodies are small and uncapped. Counted in UTF-16 code units
+    // (≈ bytes for JSON, which is mostly ASCII).
+    if (categoryId == null && body.length > maxCatalogResponseChars) {
+      throw XtreamCatalogTooLargeException(body.length);
+    }
     lastLiveStreamsBody = categoryId == null ? body : null;
     return compute(_parseLiveStreams, body);
   }
@@ -270,6 +298,9 @@ class XtreamApi {
       timeout: const Duration(seconds: 120),
       abortTrigger: abortTrigger,
     );
+    if (categoryId == null && body.length > maxCatalogResponseChars) {
+      throw XtreamCatalogTooLargeException(body.length);
+    }
     lastVodStreamsBody = categoryId == null ? body : null;
     return compute(_parseVodStreams, body);
   }
@@ -280,6 +311,9 @@ class XtreamApi {
       timeout: const Duration(seconds: 120),
       abortTrigger: abortTrigger,
     );
+    if (categoryId == null && body.length > maxCatalogResponseChars) {
+      throw XtreamCatalogTooLargeException(body.length);
+    }
     lastSeriesBody = categoryId == null ? body : null;
     return compute(_parseSeries, body);
   }

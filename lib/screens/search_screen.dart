@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
 import '../connection/connection.dart';
 import '../exceptions/media_server_exceptions.dart';
 import '../focus/focusable_text_field.dart';
+import '../i18n/app_locale_utils.dart';
 import '../i18n/strings.g.dart';
 import '../media/ids.dart';
 import '../media/iptv_client.dart';
@@ -23,6 +25,7 @@ import '../providers/hidden_libraries_provider.dart';
 import '../providers/libraries_provider.dart';
 import '../providers/multi_server_provider.dart';
 import '../services/data_aggregation_service.dart';
+import '../services/iptv/iptv_search_index.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/platform_detector.dart';
@@ -781,7 +784,8 @@ class _SearchScreenState extends State<SearchScreen>
             if (visibleLibraries.isNotEmpty) _buildLibraryScopeStrip(visibleLibraries, effectiveScopeKey),
             if (isSearching)
               LoadingIndicatorBox.sliver
-            else if (!hasSearched)
+            else if (!hasSearched) ...[
+              const _CatalogHealthLine(),
               SliverFillRemaining(
                 child: StateMessageWidget(
                   message: t.search.searchYourMedia,
@@ -789,7 +793,8 @@ class _SearchScreenState extends State<SearchScreen>
                   icon: Symbols.search_rounded,
                   iconSize: 80,
                 ),
-              )
+              ),
+            ]
             else if (lastSearchFailed)
               SliverFillRemaining(
                 child: StateMessageWidget(message: t.explore.searchFailed, icon: Symbols.error_rounded, iconSize: 80),
@@ -832,6 +837,68 @@ class _SearchScreenState extends State<SearchScreen>
 
 final class _SearchUnavailableException implements Exception {
   const _SearchUnavailableException();
+}
+
+/// Catalog health line (build #23): under the search field before the
+/// first keystroke — the synced catalog's row counts + last sync, or
+/// "syncing" / "not synced yet". The search screen is kept alive in an
+/// IndexedStack, so it does not rebuild on tab switch — this rebuilds
+/// from the IPTV clients' index-state notifiers instead, and the state
+/// is re-read whenever a search completes.
+class _CatalogHealthLine extends StatelessWidget {
+  const _CatalogHealthLine();
+
+  @override
+  Widget build(BuildContext context) {
+    // The provider is optional: the search screen is also pumped in
+    // widget tests that only provide the hidden/libraries providers.
+    // The health line is informational — it must never crash the screen
+    // when the provider is absent, it just stays hidden.
+    MultiServerProvider? multiServer;
+    try {
+      multiServer = context.watch<MultiServerProvider>();
+    } on ProviderNotFoundException {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+    final clients = [
+      for (final id in multiServer.serverIds)
+        multiServer.getClientForServer(ServerId(id)),
+    ].whereType<IptvClient>().toList();
+    if (clients.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
+    final client = clients.first;
+    return ValueListenableBuilder<IptvSearchIndexState>(
+      valueListenable: client.searchIndexStateNotifier,
+      builder: (context, state, _) {
+        final theme = Theme.of(context);
+        return SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Text(
+              _healthText(state),
+              style: theme.textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _healthText(IptvSearchIndexState state) {
+    if (state.isBusy) return t.iptv.catalogSyncing;
+    if (state.isEmpty) return t.iptv.catalogNotSynced;
+    final synced = state.lastSync.values.whereType<DateTime>().toList();
+    final lastSync = synced.isEmpty ? null : synced.reduce((a, b) => a.isAfter(b) ? a : b);
+    final date = lastSync == null
+        ? ''
+        : DateFormat.MMMd(LocaleSettings.currentLocale.intlLocaleName).format(lastSync);
+    return t.iptv.catalogUpdated(
+      channels: state.rowCounts[IptvSearchIndex.typeLive] ?? 0,
+      movies: state.rowCounts[IptvSearchIndex.typeMovie] ?? 0,
+      series: state.rowCounts[IptvSearchIndex.typeSeries] ?? 0,
+      date: date,
+    );
+  }
 }
 
 /// One chip of the search results filter strip.

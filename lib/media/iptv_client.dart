@@ -32,6 +32,7 @@ import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
+import '../services/iptv/iptv_search_index.dart';
 import '../services/settings_service.dart';
 import '../services/playback_initialization_types.dart';
 import '../services/scrub_preview_source.dart';
@@ -281,6 +282,403 @@ class IptvClient implements MediaServerClient {
     if (libraryId == _moviesLibraryId) return diagnostics.movies.hiddenMatches;
     return 0;
   }
+
+  // -- Local search index (build #23) -------------------------------------
+  //
+  // The whole catalog is synced once into a local SQLite FTS5 trigram
+  // index ([IptvSearchIndex]), and search queries it instead of the
+  // provider — zero panel requests during a search when the index is
+  // warm. The index is derived/rebuildable cache data in its own file,
+  // so it can never touch the main database; a broken index just reads
+  // as cold and the search falls back to the old disk/sweep paths.
+  //
+  // The index is opened lazily (first search/sync/seed) and shared by
+  // the client's search, sync and seed paths. Writes (sync + disk seed)
+  // run in a background isolate via compute and are serialized by
+  // [_runIndexWrite] — the seed and the sync never write at once.
+
+  Future<IptvSearchIndex?>? _searchIndexFuture;
+  IptvSearchIndex? _searchIndexInstance;
+
+  /// True once [close] has run: in-flight seeds/syncs must not touch
+  /// the notifier (or re-open the index) after teardown.
+  bool _closed = false;
+
+  /// The single in-flight index write (seed or sync), if any. A second
+  /// writer joins this future instead of starting its own — the seed
+  /// (warm-up) and the sync (bind/manual refresh) serialize through it.
+  Future<void>? _indexWriteInFlight;
+
+  /// The index state the search screen's catalog-health line and the
+  /// settings cache-size row read. Updated when the index opens, when a
+  /// seed/sync starts, and when one lands.
+  final ValueNotifier<IptvSearchIndexState> searchIndexStateNotifier =
+      ValueNotifier(const IptvSearchIndexState.empty());
+
+  /// The current index state (same value as [searchIndexStateNotifier]).
+  IptvSearchIndexState get searchIndexState => searchIndexStateNotifier.value;
+
+  /// The index, opened on first use. Null when this client is M3U (no
+  /// VOD/series catalog to index — its playlist search is already
+  /// local-only) or when the index is disabled for tests.
+  Future<IptvSearchIndex?> _searchIndex() {
+    final existing = _searchIndexFuture;
+    if (existing != null) return existing;
+    final future = () async {
+      if (_closed) return null;
+      if (!_isXtream || IptvSearchIndex.debugDisableDisk || IptvCatalogDiskCache.debugDisableDisk) return null;
+      try {
+        final index = await IptvSearchIndex.open();
+        _searchIndexInstance = index;
+        _refreshSearchIndexState();
+        return index;
+      } catch (e) {
+        appLogger.w('IPTV: search index unavailable, search falls back to disk/sweep: $e');
+        return null;
+      }
+    }();
+    _searchIndexFuture = future;
+    return future;
+  }
+
+  /// Re-read the index meta (row counts + last sync) into the notifier.
+  /// Never throws — a broken index reads as empty. No-op after [close]
+  /// (an in-flight seed/sync's finally must not touch a disposed
+  /// notifier).
+  void _refreshSearchIndexState({bool syncing = false, bool seeding = false}) {
+    if (_closed) return;
+    final index = _searchIndexInstance;
+    if (index == null) return;
+    try {
+      searchIndexStateNotifier.value = IptvSearchIndexState(
+        rowCounts: index.rowCounts(connection.id),
+        lastSync: index.lastSync(connection.id),
+        syncing: syncing,
+        seeding: seeding,
+      );
+    } catch (e) {
+      appLogger.w('IPTV: search index state unreadable', error: e);
+    }
+  }
+
+  /// Run [work] as the single index write (seed or sync). A second
+  /// caller waits for the in-flight write, then runs its own work (and
+  /// re-checks the warm/interval state then — the first write may have
+  /// made it unnecessary). The seed (warm-up) and the sync (bind/manual
+  /// refresh) serialize through this, so they can never write the index
+  /// at once. Callers already inside a write call the private work
+  /// functions directly, never this — re-entering the mutex would
+  /// deadlock.
+  Future<T> _runIndexWrite<T>(Future<T> Function() work) async {
+    while (_indexWriteInFlight != null) {
+      await _indexWriteInFlight;
+    }
+    final future = work();
+    _indexWriteInFlight = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_indexWriteInFlight, future)) _indexWriteInFlight = null;
+    }
+  }
+
+  /// A future that completes when the current index write (seed or sync)
+  /// finishes, or immediately when none is running. Tests await this
+  /// after a warm-up instead of sleeping for the background seed.
+  @visibleForTesting
+  Future<void> get searchIndexReady => _indexWriteInFlight ?? Future.value();
+
+  /// Seed the index from the disk catalog (build #23, the upgrade path).
+  /// The warm-ups call this fire-and-forget: on the first run after
+  /// upgrading to 1.0.6 the disk catalog already holds the full lists,
+  /// so the index is warm within seconds with NO network at all, and
+  /// search is local-only from the first search. A type that is already
+  /// warm is skipped (the sync owns refreshes); a type with no disk
+  /// file is skipped (the sync fetches it). The isolate refuses a
+  /// partial / category-less source (see [IndexWriteResult]), so a
+  /// crawl-shaped disk file can never seed an incomplete index — the
+  /// type stays cold and the fallback sweep still heals it.
+  Future<void> seedSearchIndexFromDisk() => _runIndexWrite(_seedSearchIndexFromDisk);
+
+  Future<void> _maybeSeedSearchIndexFromDisk() => _runIndexWrite(_seedSearchIndexFromDisk);
+
+  Future<void> _seedSearchIndexFromDisk() async {
+    if (!_isXtream) return;
+    final index = await _searchIndex();
+    if (index == null) return;
+    final dbPath = await IptvSearchIndex.dbFilePath();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final counts = index.rowCounts(connection.id);
+    _refreshSearchIndexState(seeding: true);
+    try {
+      for (final type in IptvSearchIndex.types) {
+        if ((counts[type] ?? 0) > 0) continue;
+        final dataset = _diskDatasetFor(type);
+        final catDataset = _diskCategoryDatasetFor(type);
+        final catalog = await _catalogCache.read(connection.id, dataset);
+        final categories = await _catalogCache.read(connection.id, catDataset);
+        if (catalog == null || categories == null) continue;
+        if (catalog.body.isEmpty || categories.body.isEmpty) continue;
+        try {
+          final result = await compute(
+            writeIndexTypeInBackground,
+            IndexWriteParams(
+              dbPath: dbPath,
+              connectionId: connection.id,
+              type: type,
+              catalogBody: catalog.body,
+              categoryBody: categories.body,
+              syncStampMs: nowMs,
+            ),
+          );
+          if (result.skippedReason != null) {
+            appLogger.i(
+              'IPTV: search index seed skipped $type (${result.skippedReason}) — the sync will fetch it',
+            );
+          }
+        } catch (e) {
+          appLogger.w('IPTV: search index seed failed for $type', error: e);
+        }
+      }
+    } finally {
+      _refreshSearchIndexState();
+    }
+  }
+
+  static String _diskDatasetFor(String type) => switch (type) {
+        IptvSearchIndex.typeLive => IptvCatalogDiskCache.liveDataset,
+        IptvSearchIndex.typeMovie => IptvCatalogDiskCache.vodDataset,
+        _ => IptvCatalogDiskCache.seriesDataset,
+      };
+
+  static String _diskCategoryDatasetFor(String type) => switch (type) {
+        IptvSearchIndex.typeLive => IptvCatalogDiskCache.liveCategoriesDataset,
+        IptvSearchIndex.typeMovie => IptvCatalogDiskCache.vodCategoriesDataset,
+        _ => IptvCatalogDiskCache.seriesCategoriesDataset,
+      };
+
+  /// Hours between catalog syncs (Settings → IPTV, default once a week,
+  /// 0 = manual only). Falls back to weekly when Settings is not
+  /// initialized yet (tests).
+  int _catalogSyncIntervalHours() {
+    final settings = SettingsService.instanceOrNull;
+    if (settings == null) return SettingsService.iptvCatalogSyncIntervalHours.defaultValue;
+    return settings.read(SettingsService.iptvCatalogSyncIntervalHours);
+  }
+
+  /// Sync the whole catalog into the local search index (build #23).
+  /// Fetches each type's category list + unfiltered catalog from the
+  /// panel (6 requests total — the only panel traffic search ever
+  /// causes), applies the sync-time guards as one choke point, and
+  /// replaces that type's index rows atomically. The guards (OpenTV
+  /// `replaceCatalogue` + IPTVMac SyncService, generalising build #19's
+  /// P5a): an empty response keeps the old rows; a partial response
+  /// (fewer than half the indexed rows, when the index has rows) keeps
+  /// the old rows; a response over the 300 MB cap is refused before
+  /// parsing; a write never deletes all rows. A type whose interval has
+  /// not elapsed is skipped ('up-to-date') unless [force] (manual
+  /// refresh). [onProgress] drives the "refreshing Trex details" popup;
+  /// [abort] (the popup's Cancel) stops the sync between types — types
+  /// already synced stay synced.
+  Future<IptvSearchSyncResult> syncSearchIndex({
+    bool force = false,
+    void Function(IptvSearchSyncProgress)? onProgress,
+    AbortController? abort,
+  }) async {
+    if (!_isXtream) return const IptvSearchSyncResult(rows: {}, skipped: {});
+    return _runIndexWrite(() => _syncSearchIndex(force: force, onProgress: onProgress, abort: abort));
+  }
+
+  Future<IptvSearchSyncResult> _syncSearchIndex({
+    required bool force,
+    void Function(IptvSearchSyncProgress)? onProgress,
+    AbortController? abort,
+  }) async {
+    final index = await _searchIndex();
+    if (index == null) {
+      return const IptvSearchSyncResult(rows: {}, skipped: {
+        IptvSearchIndex.typeLive: 'failed',
+        IptvSearchIndex.typeMovie: 'failed',
+        IptvSearchIndex.typeSeries: 'failed',
+      });
+    }
+    final rows = <String, int>{};
+    final skipped = <String, String>{};
+    final intervalHours = _catalogSyncIntervalHours();
+    final dbPath = await IptvSearchIndex.dbFilePath();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    _refreshSearchIndexState(syncing: true);
+    try {
+      for (final type in IptvSearchIndex.types) {
+        abort?.throwIfAborted();
+        final lastSync = index.lastSync(connection.id)[type];
+        final indexedCount = index.rowCounts(connection.id)[type] ?? 0;
+        if (!force && intervalHours > 0 && lastSync != null && indexedCount > 0) {
+          final ageHours = DateTime.now().difference(lastSync).inHours;
+          if (ageHours < intervalHours) {
+            skipped[type] = 'up-to-date';
+            onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'up-to-date'));
+            continue;
+          }
+        }
+        if (!force && intervalHours == 0 && indexedCount > 0) {
+          // Manual-only interval and the index already has rows: only
+          // an explicit manual refresh (force) syncs.
+          skipped[type] = 'up-to-date';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'up-to-date'));
+          continue;
+        }
+        onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'fetching'));
+        List<XtreamCategory> categories;
+        int fetchedCount;
+        String? catalogBody;
+        // Hoisted out of the fetch try so the disk write + memoized
+        // publish below can use the parsed rows after the guards pass.
+        List<Object>? fetchedRows;
+        try {
+          categories = await _fetchCategoriesFor(type, abort);
+          // The unfiltered getters store the raw body on the api (see
+          // lastXxxStreamsBody) — read it synchronously right after the
+          // await, before any other await, so a concurrent browse load
+          // cannot swap it underneath this sync.
+          final List<Object> fetched;
+          switch (type) {
+            case IptvSearchIndex.typeLive:
+              fetched = await _xtreamApi.getLiveStreams(abortTrigger: abort?.trigger);
+              catalogBody = _xtreamApi.lastLiveStreamsBody;
+            case IptvSearchIndex.typeMovie:
+              fetched = await _xtreamApi.getVodStreams(abortTrigger: abort?.trigger);
+              catalogBody = _xtreamApi.lastVodStreamsBody;
+            default:
+              fetched = await _xtreamApi.getSeries(abortTrigger: abort?.trigger);
+              catalogBody = _xtreamApi.lastSeriesBody;
+          }
+          fetchedRows = fetched;
+          fetchedCount = fetched.length;
+        } on XtreamCatalogTooLargeException {
+          skipped[type] = 'oversize';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'oversize'));
+          continue;
+        } catch (e) {
+          appLogger.w('IPTV: catalog sync fetch failed for $type', error: e);
+          skipped[type] = 'failed';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
+          continue;
+        }
+        // Sync-time guards (the choke point): empty keeps the old rows;
+        // partial (< half the indexed rows, when the index has rows)
+        // keeps the old rows — a partial list must never overwrite a
+        // good index (the P5a class).
+        final body = catalogBody;
+        if (fetchedCount == 0 || body == null || body.isEmpty) {
+          skipped[type] = 'empty-response';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'empty-response'));
+          continue;
+        }
+        if (indexedCount > 0 && fetchedCount < indexedCount ~/ 2) {
+          skipped[type] = 'partial';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'partial'));
+          continue;
+        }
+        onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'writing', rows: fetchedCount));
+        try {
+          final result = await compute(
+            writeIndexTypeInBackground,
+            IndexWriteParams(
+              dbPath: dbPath,
+              connectionId: connection.id,
+              type: type,
+              catalogBody: body,
+              categoryBody: jsonEncode(categories.map((c) => c.toJson()).toList()),
+              syncStampMs: nowMs,
+            ),
+          );
+          if (result.skippedReason != null) {
+            skipped[type] = result.skippedReason!;
+            onProgress?.call(
+              IptvSearchSyncProgress(type: type, phase: 'skipped', reason: result.skippedReason),
+            );
+            continue;
+          }
+          rows[type] = result.rowCount;
+          // Build #23 (startup rule): the sync is the ONLY catalog
+          // fetcher, so it also refreshes the disk catalog the browse
+          // screens and the warm-ups read from (raw body + category
+          // list), and publishes the fresh rows into the memoized
+          // futures so the session sees them without a restart. A
+          // guarded-out sync leaves both the disk file and the index
+          // untouched. A disk-write failure never fails the sync — the
+          // index is the primary store.
+          try {
+            await _catalogCache.write(connection.id, _diskDatasetFor(type), body);
+            await _catalogCache.write(
+              connection.id,
+              _diskCategoryDatasetFor(type),
+              jsonEncode(categories.map((c) => c.toJson()).toList()),
+            );
+            // fetchedRows is set by the fetch try above; every failure
+            // path (throw, empty, partial, oversize) continues past here.
+            _publishSyncedCatalog(type, fetchedRows);
+          } catch (e) {
+            appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
+          }
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'done', rows: result.rowCount));
+        } catch (e) {
+          appLogger.w('IPTV: catalog sync write failed for $type', error: e);
+          skipped[type] = 'failed';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
+        }
+      }
+      return IptvSearchSyncResult(rows: rows, skipped: skipped);
+    } finally {
+      _refreshSearchIndexState();
+    }
+  }
+
+  /// Publish freshly synced rows into the memoized catalog futures
+  /// (build #23): the warm-up may have populated them with the stale
+  /// disk rows, and the sync is the newer truth — browse/search must
+  /// see the refreshed catalog without a restart.
+  void _publishSyncedCatalog(String type, List<Object> rows) {
+    switch (type) {
+      case IptvSearchIndex.typeLive:
+        _liveStreamsFuture = Future.value(rows.cast<XtreamLiveStream>());
+        _liveStreamsLoaded = true;
+        _liveLoadSource = 'network';
+      case IptvSearchIndex.typeMovie:
+        _vodStreamsFuture = Future.value(rows.cast<XtreamVodStream>());
+        _vodStreamsLoaded = true;
+        _vodLoadSource = 'network';
+      default:
+        _seriesFuture = Future.value(rows.cast<XtreamSeries>());
+        _seriesListLoaded = true;
+        _seriesLoadSource = 'network';
+    }
+  }
+
+  Future<List<XtreamCategory>> _fetchCategoriesFor(String type, AbortController? abort) {
+    return switch (type) {
+      IptvSearchIndex.typeLive => _xtreamApi.getLiveCategories(abortTrigger: abort?.trigger),
+      IptvSearchIndex.typeMovie => _xtreamApi.getVodCategories(abortTrigger: abort?.trigger),
+      _ => _xtreamApi.getSeriesCategories(abortTrigger: abort?.trigger),
+    };
+  }
+
+  /// Make sure the search index is populated and fresh (build #23).
+  /// Called at bind ([MultiServerManager.addIptvConnection]): seeds the
+  /// index from the disk catalog when it is cold, then runs the network
+  /// sync when the interval has elapsed. Fire-and-forget — binding must
+  /// not wait for a catalog sync. A manual refresh calls
+  /// [syncSearchIndex] with force: true instead.
+  void ensureSearchIndexSynced() {
+    if (!_isXtream) return;
+    unawaited(
+      _runIndexWrite(() async {
+        await _seedSearchIndexFromDisk();
+        await _syncSearchIndex(force: false, onProgress: null, abort: null);
+      }),
+    );
+  }
   Future<List<XtreamCategory>>? _vodCategoriesFuture;
   Future<List<XtreamCategory>>? _seriesCategoriesFuture;
   Future<List<XtreamCategory>>? _liveCategoriesFuture;
@@ -499,8 +897,19 @@ class IptvClient implements MediaServerClient {
 
   @override
   void close() {
+    // Idempotent: tests (and the manager's graceful close) can close
+    // the same client twice (explicit close + tearDown) — disposing the
+    // notifier twice throws, so the second close is a no-op.
+    if (_closed) return;
+    _closed = true;
     _api?.close();
     _http.close();
+    // Build #23: close the search index connection (the file stays —
+    // it is the synced catalog, re-opened on the next bind).
+    _searchIndexInstance?.close();
+    _searchIndexInstance = null;
+    _searchIndexFuture = null;
+    searchIndexStateNotifier.dispose();
   }
 
   /// Cancel every search currently in flight on this client (build #21,
@@ -557,9 +966,41 @@ class IptvClient implements MediaServerClient {
     _xtreamChannelByKey.clear();
     _m3uChannelByKey.clear();
     unawaited(_catalogCache.clear(connection.id));
+    // Build #23: the search index is derived from the catalog, so a
+    // clear rebuilds it too — the next search falls back to the
+    // disk/sweep paths until the next sync seeds it again. The index
+    // file itself is NOT deleted (the rows are, per connection), so the
+    // schema and the other connections' rows survive.
+    unawaited(_clearSearchIndex());
     // A manual clear is the user's own action: the tabs must refresh
     // promptly, not at the pacer cooldown's trailing edge (build #14).
     notifyCatalogRefreshed(userInitiated: true);
+  }
+
+  /// Clear the disk catalog + search index rows for this connection
+  /// (build #23): called by the manager when it replaces the client
+  /// for a data-source change (new server URL / credentials), so the new
+  /// client never serves the old source's data. Awaited before the
+  /// warm-ups — the new client starts cold and the background sync
+  /// fetches the new source. Unlike [clearCatalogCache] this deletes the
+  /// index rows even when this client never opened the index (the rows
+  /// belong to the connection id, shared across client instances).
+  Future<void> clearCatalogForNewDataSource() async {
+    await _catalogCache.clear(connection.id);
+    final index = await _searchIndex();
+    if (index != null) {
+      await _runIndexWrite(() => index.deleteConnection(connection.id));
+      _refreshSearchIndexState();
+    }
+  }
+
+  Future<void> _clearSearchIndex() async {
+    // Only when the index was already opened: opening it just to delete
+    // rows that cannot exist yet would create the file for nothing.
+    final index = _searchIndexInstance;
+    if (index == null) return;
+    await _runIndexWrite(() => index.deleteConnection(connection.id));
+    _refreshSearchIndexState();
   }
 
   /// Tell the app's library views that this connection's catalog changed
@@ -1827,36 +2268,82 @@ class IptvClient implements MediaServerClient {
   /// warming the 199k-row VOD catalog on every rebind is unnecessary cost.
   void warmUpSeriesCatalog() {
     if (!_isXtream || _seriesListLoaded) return;
-    unawaited(
-      _seriesList().catchError((Object e) {
-        appLogger.w('IPTV: background series catalog warm-up failed: $e');
-        return const <XtreamSeries>[];
-      }),
+    // Build #23: the warm-up also seeds the search index from the disk
+    // catalog (fire-and-forget, once per client — the three warm-ups
+    // share one seed through the index-write mutex). On the first run
+    // after upgrading, the disk already holds the full lists, so the
+    // index is warm within seconds with no network at all.
+    unawaited(_maybeSeedSearchIndexFromDisk());
+    // Build #23 (startup rule): disk only — the warm-up NEVER fetches
+    // from the panel. The old path called _seriesList(), whose
+    // stale-disk background refresh re-downloaded the whole catalog on
+    // every start once the 24h TTL lapsed. The only catalog traffic is
+    // the weekly sync (ensureSearchIndexSynced) and a manual refresh.
+    unawaited(_warmSeriesCatalogFromDisk());
+  }
+
+  /// Disk-only catalog warm-up (build #23, startup rule): read the disk
+  /// catalog into the memoized future so browse/search serve it
+  /// immediately, and never fetch from the panel. If there is no disk
+  /// file yet (fresh install), this is a no-op — the background sync
+  /// populates the disk + index, and a browse/search load fetches as
+  /// before (the cold fallback).
+  Future<void> _warmSeriesCatalogFromDisk() async {
+    if (_seriesListLoaded) return;
+    final disk = await _readDiskCatalog<XtreamSeries>(
+      IptvCatalogDiskCache.seriesDataset,
+      XtreamApi.parseSeriesBody,
     );
+    if (disk == null) return;
+    _seriesFuture = Future.value(disk.rows);
+    _seriesListLoaded = true;
+    _seriesLoadSource = 'disk';
   }
 
   /// Same warm-up for the VOD catalog (build #13): the first Movies
   /// browse/search after app start otherwise races the 199k-row load.
   void warmUpVodCatalog() {
     if (!_isXtream || _vodStreamsLoaded) return;
-    unawaited(
-      _vodStreams().catchError((Object e) {
-        appLogger.w('IPTV: background VOD catalog warm-up failed: $e');
-        return const <XtreamVodStream>[];
-      }),
+    unawaited(_maybeSeedSearchIndexFromDisk());
+    // Build #23 (startup rule): disk only — see [warmUpSeriesCatalog].
+    unawaited(_warmVodCatalogFromDisk());
+  }
+
+  /// Disk-only VOD warm-up (build #23, startup rule) — see
+  /// [_warmSeriesCatalogFromDisk].
+  Future<void> _warmVodCatalogFromDisk() async {
+    if (_vodStreamsLoaded) return;
+    final disk = await _readDiskCatalog<XtreamVodStream>(
+      IptvCatalogDiskCache.vodDataset,
+      XtreamApi.parseVodStreamsBody,
     );
+    if (disk == null) return;
+    _vodStreamsFuture = Future.value(disk.rows);
+    _vodStreamsLoaded = true;
+    _vodLoadSource = 'disk';
   }
 
   /// Same warm-up for the live catalog (build #13): the first Live TV
   /// search after app start otherwise races the 55k-row load.
   void warmUpLiveCatalog() {
     if (!_isXtream || _liveStreamsLoaded) return;
-    unawaited(
-      _liveStreams().catchError((Object e) {
-        appLogger.w('IPTV: background live catalog warm-up failed: $e');
-        return const <XtreamLiveStream>[];
-      }),
+    unawaited(_maybeSeedSearchIndexFromDisk());
+    // Build #23 (startup rule): disk only — see [warmUpSeriesCatalog].
+    unawaited(_warmLiveCatalogFromDisk());
+  }
+
+  /// Disk-only live warm-up (build #23, startup rule) — see
+  /// [_warmSeriesCatalogFromDisk].
+  Future<void> _warmLiveCatalogFromDisk() async {
+    if (_liveStreamsLoaded) return;
+    final disk = await _readDiskCatalog<XtreamLiveStream>(
+      IptvCatalogDiskCache.liveDataset,
+      XtreamApi.parseLiveStreamsBody,
     );
+    if (disk == null) return;
+    _liveStreamsFuture = Future.value(disk.rows);
+    _liveStreamsLoaded = true;
+    _liveLoadSource = 'disk';
   }
 
   /// On-device series catalog diagnostics (build #10, diagnosis
@@ -2297,6 +2784,17 @@ class IptvClient implements MediaServerClient {
   }) async {
     final searchStarted = DateTime.now();
     if (_isXtream) {
+      // Build #23 — scope inversion (global first): the three sections
+      // always run, and the scope is a filter over the already-fetched
+      // global result (the aggregation drops rows outside the scope, and
+      // the hidden-library filter drops hidden ones). The client no
+      // longer skips a section for a scoped search — when the local
+      // index is warm that costs nothing (three FTS queries, zero panel
+      // requests), and it means a wrong scope can never hide a row the
+      // index has. The [include] flag still matters for the FALLBACK
+      // paths: when the index is cold for a section, an excluded section
+      // is skipped instead of sweeping the panel for rows the caller
+      // will drop (build #21's request minimisation stands).
       final includeMovies = !excludedLibraryIds.contains(_moviesLibraryId);
       final includeSeries = !excludedLibraryIds.contains(_seriesLibraryId);
       // Live TV is not a real library, so it can never appear in
@@ -2306,9 +2804,9 @@ class IptvClient implements MediaServerClient {
       // TV" was empty by construction before this — Xtream live channels
       // had no search leg at all, only M3U channels did).
       final includeLive = excludedLibraryIds.isEmpty;
-      final moviesTrace = _SectionTrace()..skipped = !includeMovies;
-      final seriesTrace = _SectionTrace()..skipped = !includeSeries;
-      final liveTrace = _SectionTrace()..skipped = !includeLive;
+      final moviesTrace = _SectionTrace();
+      final seriesTrace = _SectionTrace();
+      final liveTrace = _SectionTrace();
       // Sections fetch concurrently and fail open on their own: a movies
       // failure must not kill series results (and vice versa), and a cold
       // search costs max(movies, series, live), not the sum — the old sequential
@@ -2352,33 +2850,42 @@ class IptvClient implements MediaServerClient {
       }
       try {
         final sections = await Future.wait([
-          if (includeMovies)
-            _searchMovies(needle, limit, moviesTrace, burst: _searchBurst, sectionAbort: moviesAbort)
-                .timeout(searchSectionBudget, onTimeout: () {
-              // Hard-cancel the section's in-flight requests: the budget
-              // expired, so the search already returned — those sockets
-              // must stop, not keep downloading for a dead search.
-              moviesAbort.abort();
-              return moviesTrace.partialOut;
-            })
-          else
-            Future.value(const <MediaItem>[]),
-          if (includeSeries)
-            _searchSeries(needle, limit, seriesTrace, burst: _searchBurst, sectionAbort: seriesAbort)
-                .timeout(searchSectionBudget, onTimeout: () {
-              seriesAbort.abort();
-              return seriesTrace.partialOut;
-            })
-          else
-            Future.value(const <MediaItem>[]),
-          if (includeLive)
-            _searchLive(needle, limit, liveTrace, burst: _searchBurst, sectionAbort: liveAbort)
-                .timeout(searchSectionBudget, onTimeout: () {
-              liveAbort.abort();
-              return liveTrace.partialOut;
-            })
-          else
-            Future.value(const <MediaItem>[]),
+          _searchMovies(
+            needle,
+            limit,
+            moviesTrace,
+            burst: _searchBurst,
+            sectionAbort: moviesAbort,
+            include: includeMovies,
+          ).timeout(searchSectionBudget, onTimeout: () {
+            // Hard-cancel the section's in-flight requests: the budget
+            // expired, so the search already returned — those sockets
+            // must stop, not keep downloading for a dead search.
+            moviesAbort.abort();
+            return moviesTrace.partialOut;
+          }),
+          _searchSeries(
+            needle,
+            limit,
+            seriesTrace,
+            burst: _searchBurst,
+            sectionAbort: seriesAbort,
+            include: includeSeries,
+          ).timeout(searchSectionBudget, onTimeout: () {
+            seriesAbort.abort();
+            return seriesTrace.partialOut;
+          }),
+          _searchLive(
+            needle,
+            limit,
+            liveTrace,
+            burst: _searchBurst,
+            sectionAbort: liveAbort,
+            include: includeLive,
+          ).timeout(searchSectionBudget, onTimeout: () {
+            liveAbort.abort();
+            return liveTrace.partialOut;
+          }),
         ]);
         _lastSearchDiagnostics = IptvSearchDiagnostics(
           query: needle,
@@ -2693,15 +3200,122 @@ class IptvClient implements MediaServerClient {
   DateTime _sweepDeadline(DateTime sectionStarted) =>
       sectionStarted.add(searchSectionBudget * 0.98);
 
+  /// Search one section from the local index (build #23). Returns the
+  /// section's matches when the index is warm for [type] — zero panel
+  /// requests, regardless of [include] (global first; the aggregation
+  /// filters by scope) — or null when the index is cold for the type,
+  /// so the caller falls through to the disk/sweep paths. The
+  /// category names come from the index alone (no panel round trip),
+  /// and the rows are mapped back to Xtream models so the existing
+  /// append builders (hidden-category filter, prefix strip, favourites)
+  /// run unchanged.
+  Future<List<MediaItem>?> _searchMoviesFromIndex(
+    String needle,
+    int limit,
+    _SectionTrace trace,
+    DateTime sectionStarted,
+  ) async {
+    final index = await _searchIndex();
+    if (index == null) return null;
+    final totalRows = index.rowCounts(connection.id)[IptvSearchIndex.typeMovie] ?? 0;
+    if (totalRows == 0) return null;
+    final favorites = await _favoriteItems();
+    final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeMovie);
+    final rows = index
+        .search(connection.id, IptvSearchIndex.typeMovie, needle)
+        .map((r) => r.toVodStream())
+        .toList(growable: false);
+    final out = <MediaItem>[];
+    trace.partialOut = out;
+    _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
+    trace.loadRows = totalRows;
+    trace.loadSource = 'index';
+    trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
+    trace.loadMatches = out.length;
+    trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+    return out;
+  }
+
+  /// Same as [_searchMoviesFromIndex], for series.
+  Future<List<MediaItem>?> _searchSeriesFromIndex(
+    String needle,
+    int limit,
+    _SectionTrace trace,
+    DateTime sectionStarted,
+  ) async {
+    final index = await _searchIndex();
+    if (index == null) return null;
+    final totalRows = index.rowCounts(connection.id)[IptvSearchIndex.typeSeries] ?? 0;
+    if (totalRows == 0) return null;
+    final favorites = await _favoriteItems();
+    final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeSeries);
+    final rows = index
+        .search(connection.id, IptvSearchIndex.typeSeries, needle)
+        .map((r) => r.toSeries())
+        .toList(growable: false);
+    final out = <MediaItem>[];
+    trace.partialOut = out;
+    _appendSeriesMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
+    trace.loadRows = totalRows;
+    trace.loadSource = 'index';
+    trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
+    trace.loadMatches = out.length;
+    trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+    return out;
+  }
+
+  /// Same as [_searchMoviesFromIndex], for live channels. The hidden
+  /// channels set is loaded first (a prefs read, local) so
+  /// [_appendLiveMatches] skips hidden channels exactly as the warm
+  /// path does.
+  Future<List<MediaItem>?> _searchLiveFromIndex(
+    String needle,
+    int limit,
+    _SectionTrace trace,
+    DateTime sectionStarted,
+  ) async {
+    final index = await _searchIndex();
+    if (index == null) return null;
+    final totalRows = index.rowCounts(connection.id)[IptvSearchIndex.typeLive] ?? 0;
+    if (totalRows == 0) return null;
+    final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeLive);
+    await _liveTv.loadHiddenChannels();
+    final rows = index
+        .search(connection.id, IptvSearchIndex.typeLive, needle)
+        .map((r) => r.toLiveStream())
+        .toList(growable: false);
+    final out = <MediaItem>[];
+    trace.partialOut = out;
+    _appendLiveMatches(rows, needle, limit, categoryNames, out, <int>{}, trace);
+    trace.loadRows = totalRows;
+    trace.loadSource = 'index';
+    trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
+    trace.loadMatches = out.length;
+    trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+    return out;
+  }
+
   Future<List<MediaItem>> _searchMovies(
     String needle,
     int limit,
     _SectionTrace trace, {
     required _SearchRequestSemaphore burst,
     required AbortController sectionAbort,
+    required bool include,
   }) async {
     try {
       final sectionStarted = DateTime.now();
+      // Build #23: the local index answers first — zero panel requests
+      // when warm, regardless of scope. When it is cold, an excluded
+      // section is skipped (no sweep for rows the caller drops) and an
+      // included one falls through to the warm/cold disk/sweep paths.
+      final indexOut = await _searchMoviesFromIndex(needle, limit, trace, sectionStarted);
+      if (indexOut != null) return indexOut;
+      if (!include) {
+        trace.skipped = true;
+        trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+        return const [];
+      }
       final favorites = await _favoriteItems();
       final categoryNames = await _vodCategoryNames();
       if (_vodStreamsLoaded) {
@@ -2889,9 +3503,18 @@ class IptvClient implements MediaServerClient {
     _SectionTrace trace, {
     required _SearchRequestSemaphore burst,
     required AbortController sectionAbort,
+    required bool include,
   }) async {
     try {
       final sectionStarted = DateTime.now();
+      // Build #23: the local index answers first (see _searchMovies).
+      final indexOut = await _searchSeriesFromIndex(needle, limit, trace, sectionStarted);
+      if (indexOut != null) return indexOut;
+      if (!include) {
+        trace.skipped = true;
+        trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+        return const [];
+      }
       final favorites = await _favoriteItems();
       final categoryNames = await _seriesCategoryNames();
       if (_seriesListLoaded) {
@@ -3076,9 +3699,18 @@ class IptvClient implements MediaServerClient {
     _SectionTrace trace, {
     required _SearchRequestSemaphore burst,
     required AbortController sectionAbort,
+    required bool include,
   }) async {
     try {
       final sectionStarted = DateTime.now();
+      // Build #23: the local index answers first (see _searchMovies).
+      final indexOut = await _searchLiveFromIndex(needle, limit, trace, sectionStarted);
+      if (indexOut != null) return indexOut;
+      if (!include) {
+        trace.skipped = true;
+        trace.ms = DateTime.now().difference(sectionStarted).inMilliseconds;
+        return const [];
+      }
       final categoryNames = await _liveCategoryNames();
       // Hidden channels (build #17, §9) never match in Live TV search:
       // load the set once, then [_appendLiveMatches] skips them in both

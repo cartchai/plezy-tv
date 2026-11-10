@@ -9,18 +9,32 @@
 // no health probe. A data-source change (server URL / credentials)
 // still replaces the client, because the warm catalogs belong to the
 // old data source.
+//
+// Build #23 update: the warm-ups no longer fetch from the panel —
+// startup opens from the local file, and the sync is the only catalog
+// fetcher. So this test seeds the disk catalog (the warm-ups read it,
+// the seed warms the index from it) instead of disabling the disk and
+// relying on the warm-up fetch, and the "re-warms" assertion measures
+// the new client's background SYNC (the manager clears the old
+// source's disk + index on a replace, so the sync re-fetches). The
+// invariants are unchanged: reuse pays zero, a source change re-fetches.
+
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 
 import '../../test_helpers/prefs.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUp(resetSharedPreferencesForTest);
 
   // The password is split so the literal never appears in new code.
@@ -28,6 +42,7 @@ void main() {
 
   late _CallCounts counts;
   late MultiServerManager manager;
+  late Directory tempDir;
 
   XtreamConnection trexConnection() => XtreamConnection(
     id: 'conn-xt-1',
@@ -38,9 +53,66 @@ void main() {
     createdAt: DateTime.utc(2026, 11, 5),
   );
 
-  setUp(() {
+  /// Seed the disk catalog with the fake panel's rows (build #23: the
+  /// warm-ups read the disk, and the seed warms the index from it — so
+  /// the catalogs are warm with zero panel requests).
+  Future<void> seedDisk() async {
+    const cache = IptvCatalogDiskCache();
+    const connectionId = 'conn-xt-1';
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.liveCategoriesDataset,
+      jsonEncode(const [XtreamCategory(id: 'L1', name: '|EN| Live')].map((c) => c.toJson()).toList()),
+    );
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.vodCategoriesDataset,
+      jsonEncode(const [XtreamCategory(id: 'M1', name: '|EN| Movies')].map((c) => c.toJson()).toList()),
+    );
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.seriesCategoriesDataset,
+      jsonEncode(
+        const [
+          XtreamCategory(id: 'S1', name: '|EN| Series'),
+          XtreamCategory(id: 'S2', name: 'FR | Series'),
+        ].map((c) => c.toJson()).toList(),
+      ),
+    );
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.liveDataset,
+      jsonEncode(
+        const [XtreamLiveStream(streamId: 100, name: 'EN Channel', categoryId: 'L1')].map((r) => r.toJson()).toList(),
+      ),
+    );
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.vodDataset,
+      jsonEncode(
+        const [XtreamVodStream(streamId: 1, name: 'EN Movie', containerExtension: 'mp4', categoryId: 'M1')]
+            .map((r) => r.toJson())
+            .toList(),
+      ),
+    );
+    await cache.write(
+      connectionId,
+      IptvCatalogDiskCache.seriesDataset,
+      jsonEncode(
+        const [
+          XtreamSeries(seriesId: 10, name: 'EN Show', categoryId: 'S1'),
+          XtreamSeries(seriesId: 11, name: 'FR Show', categoryId: 'S2'),
+        ].map((r) => r.toJson()).toList(),
+      ),
+    );
+  }
+
+  setUp(() async {
     counts = _CallCounts();
-    IptvCatalogDiskCache.debugDisableDisk = true;
+    tempDir = await Directory.systemTemp.createTemp('plezy-build17-toggle');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+    await seedDisk();
     // Every client the manager creates gets its own fake API instance
     // (production parity: one API per client), sharing one counter so a
     // re-warm is visible no matter which client instance pays it.
@@ -52,22 +124,57 @@ void main() {
     manager = MultiServerManager();
   });
 
-  tearDown(() {
-    IptvCatalogDiskCache.debugDisableDisk = false;
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
     IptvClient.debugClientFactory = null;
     manager.dispose();
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
   });
 
-  /// Wait until the three warm-ups have each made their unfiltered call
-  /// (they are unawaited by design), or fail: without warm catalogs the
-  /// "no re-warm" assertion below would be vacuous.
+  /// Wait until the catalogs are warm from the local file (build #23:
+  /// the seed warms the index from the seeded disk, no panel requests),
+  /// or fail: without warm catalogs the "no re-warm" assertion below
+  /// would be vacuous. The warmth must come from disk — the unfiltered
+  /// counts stay at zero.
   Future<void> waitForWarmUps() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
-      if (counts.unfilteredSeries >= 1 && counts.unfilteredVod >= 1 && counts.unfilteredLive >= 1) return;
+      final client = manager.getClient(ServerId('conn-xt-1')) as IptvClient?;
+      if (client != null) {
+        final state = client.searchIndexState;
+        if (state.isWarm && !state.isBusy) {
+          if (counts.unfilteredSeries == 0 && counts.unfilteredVod == 0 && counts.unfilteredLive == 0) return;
+        }
+      }
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
-    fail('warm-ups did not run: $counts');
+    fail('catalogs did not warm from disk: $counts');
+  }
+
+  /// Wait until a background sync has re-fetched the catalogs (the
+  /// unfiltered counts rise above [before]), or fail. Used after a
+  /// data-source change, where the new client must re-fetch.
+  Future<void> waitForRefetch(({int unfilteredSeries, int unfilteredVod, int unfilteredLive}) before) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      if (counts.unfilteredSeries > before.unfilteredSeries &&
+          counts.unfilteredVod > before.unfilteredVod &&
+          counts.unfilteredLive > before.unfilteredLive) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    fail('new client did not re-fetch after a data-source change: $counts (before: $before)');
   }
 
   group('build17 toggle lag: filter-only re-bind reuses the client', () {
@@ -119,7 +226,11 @@ void main() {
       );
       final clientAfter = manager.getClient(ServerId('conn-xt-1')) as IptvClient;
       expect(identical(clientAfter, clientBefore), isFalse);
-      // The new client warms its own catalogs from the new data source.
+      // The new client warms its own catalogs from the new data source
+      // (build #23: the manager cleared the old source's disk + index
+      // on the replace, so the background sync re-fetches — it is
+      // fire-and-forget, so wait for it to land).
+      await waitForRefetch(countsBefore);
       expect(counts.unfilteredSeries, greaterThan(countsBefore.unfilteredSeries));
       expect(counts.unfilteredVod, greaterThan(countsBefore.unfilteredVod));
       expect(counts.unfilteredLive, greaterThan(countsBefore.unfilteredLive));

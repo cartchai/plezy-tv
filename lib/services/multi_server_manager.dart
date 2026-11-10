@@ -986,6 +986,17 @@ class MultiServerManager {
       _iptvByConnectionId[connection.id] = client;
       _clients[connection.id] = client;
 
+      // Build #23: a replace is a data-source change (new server URL /
+      // credentials — the filter-only path returned early above), so the
+      // old source's cached catalog must not serve the new client. Clear
+      // the disk + index for this connection and await it, so the new
+      // client starts cold and the background sync fetches the new
+      // source. (A first bind has no old client, so nothing is cleared
+      // — the previous session's cache is valid for the same URL.)
+      if (oldClient != null) {
+        await client.clearCatalogForNewDataSource();
+      }
+
       // Warm the catalogs in the background (build #10 series, build #13
       // VOD + live): the unfiltered loads take a while on a cold
       // connection, and the first search/browse after app start would
@@ -995,6 +1006,14 @@ class MultiServerManager {
       client.warmUpSeriesCatalog();
       client.warmUpVodCatalog();
       client.warmUpLiveCatalog();
+
+      // Build #23: populate/refresh the local search index in the
+      // background — seed it from the disk catalog when cold, then sync
+      // from the panel when the interval has elapsed. Fire-and-forget;
+      // search falls back to the disk/sweep paths until the index is
+      // warm. M3U connections return immediately (no VOD/series catalog
+      // to index).
+      client.ensureSearchIndexSynced();
 
       final health = await client.checkHealth();
       final healthy = health == HealthStatus.online;

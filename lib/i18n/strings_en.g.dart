@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2270 => [
+		'Search now reads from a catalog downloaded to your phone instead of asking Trex every time — a search makes no provider requests at all once the catalog is synced, so it is faster and stops looking like a flood of requests',
+		'The catalog syncs once a week by default (change it in Settings → IPTV → Catalog sync interval) or whenever you tap Sync catalog now — and the app no longer re-downloads the whole catalog every time it starts, it opens from the file on your phone',
+		'Settings → IPTV shows how big the IPTV cache is, and the search screen shows when the catalog was last synced',
+	];
 	List<String> get changelog2269 => [
 		'Live TV, movies and shows now introduce themselves to Trex with the same name as the rest of the app — VLC — instead of showing up nameless, so the provider stops refusing the video while letting the browsing through',
 		'Posters and channel logos use that same name too, so Trex sees one app everywhere, not three',
@@ -6572,6 +6577,54 @@ class Translations$iptv$en {
 
 	/// en: 'Playlists refreshed'
 	String get refreshDone => 'Playlists refreshed';
+
+	/// en: 'Catalog sync interval'
+	String get catalogSyncInterval => 'Catalog sync interval';
+
+	/// en: 'How often the catalog (channels, movies and series) re-downloads for search'
+	String get catalogSyncIntervalDescription => 'How often the catalog (channels, movies and series) re-downloads for search';
+
+	/// en: 'Once a week'
+	String get catalogSyncWeekly => 'Once a week';
+
+	/// en: 'Sync catalog now'
+	String get catalogSyncNow => 'Sync catalog now';
+
+	/// en: 'Download all titles for movies, TV and channels now'
+	String get catalogSyncNowDescription => 'Download all titles for movies, TV and channels now';
+
+	/// en: 'Refreshing Trex details'
+	String get catalogSyncTitle => 'Refreshing Trex details';
+
+	/// en: 'Live TV'
+	String get catalogSyncLive => 'Live TV';
+
+	/// en: 'Movies'
+	String get catalogSyncMovies => 'Movies';
+
+	/// en: 'TV / Series'
+	String get catalogSyncSeries => 'TV / Series';
+
+	/// en: 'Catalog synced'
+	String get catalogSyncDone => 'Catalog synced';
+
+	/// en: 'Catalog sync failed'
+	String get catalogSyncFailed => 'Catalog sync failed';
+
+	/// en: 'IPTV cache size'
+	String get catalogCacheSize => 'IPTV cache size';
+
+	/// en: 'No catalog downloaded yet'
+	String get catalogCacheEmpty => 'No catalog downloaded yet';
+
+	/// en: 'Catalog not synced yet — syncing in background'
+	String get catalogNotSynced => 'Catalog not synced yet — syncing in background';
+
+	/// en: 'Catalog syncing…'
+	String get catalogSyncing => 'Catalog syncing…';
+
+	/// en: 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}'
+	String catalogUpdated({required Object channels, required Object movies, required Object series, required Object date}) => 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}';
 
 	/// en: 'Guide & catch-up'
 	String get guideAndCatchUp => 'Guide & catch-up';
@@ -10182,6 +10235,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2270.0' => 'Search now reads from a catalog downloaded to your phone instead of asking Trex every time — a search makes no provider requests at all once the catalog is synced, so it is faster and stops looking like a flood of requests',
+			'about.changelog2270.1' => 'The catalog syncs once a week by default (change it in Settings → IPTV → Catalog sync interval) or whenever you tap Sync catalog now — and the app no longer re-downloads the whole catalog every time it starts, it opens from the file on your phone',
+			'about.changelog2270.2' => 'Settings → IPTV shows how big the IPTV cache is, and the search screen shows when the catalog was last synced',
 			'about.changelog2269.0' => 'Live TV, movies and shows now introduce themselves to Trex with the same name as the rest of the app — VLC — instead of showing up nameless, so the provider stops refusing the video while letting the browsing through',
 			'about.changelog2269.1' => 'Posters and channel logos use that same name too, so Trex sees one app everywhere, not three',
 			'about.changelog2269.2' => 'If Trex still refuses a stream after this update, try a different name in Settings → IPTV → Xtream User-Agent — VLC, IPTVSmartersPro, a browser name, or your own',
@@ -10426,14 +10482,14 @@ extension on Translations {
 			'explore.format.ona' => 'ONA',
 			'explore.format.music' => 'Music',
 			'explore.format.other' => 'Other',
+			_ => null,
+		} ?? switch (path) {
 			'explore.sourceMaterial.original' => 'Original',
 			'explore.sourceMaterial.manga' => 'Manga',
 			'explore.sourceMaterial.lightNovel' => 'Light novel',
 			'explore.sourceMaterial.novel' => 'Novel',
 			'explore.sourceMaterial.visualNovel' => 'Visual novel',
 			'explore.sourceMaterial.game' => 'Game',
-			_ => null,
-		} ?? switch (path) {
 			'explore.sourceMaterial.webComic' => 'Web comic',
 			'explore.sourceMaterial.musicRelease' => 'Music',
 			'explore.sourceMaterial.otherMedia' => 'Other',
@@ -10940,14 +10996,14 @@ extension on Translations {
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
 			'downloads.errorDownloadNotAllowed' => 'Download not allowed by the server (403)',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.errorDownloadFailed' => 'Download failed',
 			'downloads.errorDownloadFailedWithReason' => ({required Object reason}) => 'Download failed: ${reason}',
 			'downloads.errorHttpStatus' => ({required Object status}) => 'Download failed (HTTP ${status})',
 			'downloads.errorPostProcessing' => ({required Object reason}) => 'Post-processing failed: ${reason}',
 			'downloads.reasonFileNotSaved' => 'the file could not be saved on this device',
 			'downloads.reasonCannotResume' => 'the partial download could not be resumed',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.reasonDeviceStorageFull' => 'this device is out of storage',
 			'downloads.notificationDownloading' => 'Downloading...',
 			'downloads.notificationComplete' => 'Download complete',
@@ -11417,6 +11473,22 @@ extension on Translations {
 			'iptv.refreshPlaylists' => 'Refresh playlists',
 			'iptv.refreshPlaylistsDescription' => 'Re-fetch channels, movies and series from your providers',
 			'iptv.refreshDone' => 'Playlists refreshed',
+			'iptv.catalogSyncInterval' => 'Catalog sync interval',
+			'iptv.catalogSyncIntervalDescription' => 'How often the catalog (channels, movies and series) re-downloads for search',
+			'iptv.catalogSyncWeekly' => 'Once a week',
+			'iptv.catalogSyncNow' => 'Sync catalog now',
+			'iptv.catalogSyncNowDescription' => 'Download all titles for movies, TV and channels now',
+			'iptv.catalogSyncTitle' => 'Refreshing Trex details',
+			'iptv.catalogSyncLive' => 'Live TV',
+			'iptv.catalogSyncMovies' => 'Movies',
+			'iptv.catalogSyncSeries' => 'TV / Series',
+			'iptv.catalogSyncDone' => 'Catalog synced',
+			'iptv.catalogSyncFailed' => 'Catalog sync failed',
+			'iptv.catalogCacheSize' => 'IPTV cache size',
+			'iptv.catalogCacheEmpty' => 'No catalog downloaded yet',
+			'iptv.catalogNotSynced' => 'Catalog not synced yet — syncing in background',
+			'iptv.catalogSyncing' => 'Catalog syncing…',
+			'iptv.catalogUpdated' => ({required Object channels, required Object movies, required Object series, required Object date}) => 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}',
 			'iptv.guideAndCatchUp' => 'Guide & catch-up',
 			'iptv.showCatchUpBadge' => 'Show catch-up badge',
 			'iptv.showCatchUpBadgeDescription' => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.',
@@ -11438,6 +11510,8 @@ extension on Translations {
 			'iptv.epgUpdateOnStartDescription' => 'Refresh the guide when the app starts',
 			'iptv.epgTimeOffset' => 'Time offset',
 			'iptv.epgTimeOffsetDescription' => 'Shift guide times when listings are out by whole hours',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.epgNoOffset' => 'No offset',
 			'iptv.epgOffsetMinutes' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} minute', other: '${n} minutes', ), 
 			'iptv.epgUpdateNow' => 'Update now',
@@ -11460,8 +11534,6 @@ extension on Translations {
 			'iptv.initialsLoading' => 'Loading initials…',
 			'iptv.initialsLoadFailed' => 'Could not load the category initials. Check the connection and try again.',
 			'iptv.initialsNoneFound' => 'No repeating initials found in this connection’s categories.',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.catalogDiagnosticsTitle' => 'Series catalog',
 			'iptv.catalogDiagnosticsHint' => 'What this phone loaded from the series catalog — send a screenshot if TV search still finds nothing.',
 			'iptv.catalogDiagnosticsLoading' => 'Loading catalog…',

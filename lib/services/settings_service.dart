@@ -970,6 +970,16 @@ class SettingsService extends BaseSharedPreferencesService {
   /// the choice above.
   static const iptvXtreamUserAgentCustom = StringPref('iptv_xtream_user_agent_custom', defaultValue: '');
 
+  /// Hours between IPTV catalog syncs (build #23): how often the whole
+  /// catalog (live channels, movies, series) is re-downloaded into the
+  /// local search index. 6 / 12 / 24 / 168 (once a week), or 0 for
+  /// manual only. Default 168 — Matt: "once a week as default but we
+  /// may change that". The tradeoff: weekly means new content takes up
+  /// to a week to appear in search. A manual refresh (Settings → IPTV)
+  /// syncs on demand regardless. In `_portableOnlyPrefs`, so it rides
+  /// settings export/import like the other IPTV settings.
+  static const iptvCatalogSyncIntervalHours = IntPref('iptv_catalog_sync_interval_hours', defaultValue: 168);
+
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();
@@ -1659,6 +1669,7 @@ class SettingsService extends BaseSharedPreferencesService {
     iptvShowCatchUpBadge,
     iptvXtreamUserAgent,
     iptvXtreamUserAgentCustom,
+    iptvCatalogSyncIntervalHours,
     matchRefreshRate,
     matchDynamicRange,
     displaySwitchDelay,

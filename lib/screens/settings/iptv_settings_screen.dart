@@ -12,12 +12,15 @@ import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../media/iptv_live_tv.dart';
+import '../../services/iptv/iptv_catalog_cache.dart';
+import '../../services/iptv/iptv_search_index.dart';
 import '../../services/iptv/xtream_api.dart';
 import '../../profiles/active_profile_provider.dart';
 import '../../providers/multi_server_provider.dart';
 import '../../screens/livetv/live_tv_mini_player.dart';
 import '../../services/settings_service.dart' as settings;
 import '../../utils/formatters.dart';
+import '../../utils/media_server_http_client.dart' show AbortController;
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focusable_list_tile.dart';
@@ -87,6 +90,38 @@ class IptvSettingsScreen extends StatelessWidget {
                   subtitle: t.iptv.refreshPlaylistsDescription,
                   onTap: () => _refreshPlaylists(context),
                 ),
+                // Build #23: the catalog (channels, movies, series) is
+                // synced to a local index once and searched locally —
+                // how often it re-downloads, plus a manual refresh.
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvCatalogSyncIntervalHours,
+                  icon: Symbols.schedule_rounded,
+                  title: t.iptv.catalogSyncInterval,
+                  subtitleBuilder: (hours) => hours == 0
+                      ? t.iptv.epgManualOnly
+                      : hours == 168
+                          ? t.iptv.catalogSyncWeekly
+                          : t.iptv.epgHoursCount(n: hours),
+                  options: [6, 12, 24, 168, 0]
+                      .map(
+                        (hours) => DialogOption(
+                          value: hours,
+                          title: hours == 0
+                              ? t.iptv.epgManualOnly
+                              : hours == 168
+                                  ? t.iptv.catalogSyncWeekly
+                                  : t.iptv.epgHoursCount(n: hours),
+                        ),
+                      )
+                      .toList(),
+                ),
+                SettingNavigationTile(
+                  icon: Symbols.sync_rounded,
+                  title: t.iptv.catalogSyncNow,
+                  subtitle: t.iptv.catalogSyncNowDescription,
+                  onTap: () => _syncCatalogNow(context),
+                ),
+                const _CatalogCacheSizeTile(),
               ],
             ),
           ),
@@ -296,6 +331,34 @@ class IptvSettingsScreen extends StatelessWidget {
   /// Plex/Jellyfin); this only touches IPTV. The EPG cache is busted too
   /// (TiviMate's "update on playlist change": a refreshed playlist gets a
   /// fresh guide with it).
+  /// "Sync catalog now" (build #23): a manual refresh of the local
+  /// search index — the popup Matt asked for, "refreshing Trex details"
+  /// while it loads all the titles for movies, TV (series) and
+  /// channels. The dialog shows per-type progress, Cancel stops it
+  /// (already-synced types stay), and dismissing it leaves the sync
+  /// running in the background.
+  Future<void> _syncCatalogNow(BuildContext context) async {
+    final registry = context.read<ConnectionRegistry>();
+    final multiServer = context.read<MultiServerProvider>();
+    final connections = await registry.list();
+    final clients = <IptvClient>[];
+    for (final connection in connections) {
+      if (connection is! XtreamConnection) continue;
+      final client = multiServer.getClientForServer(ServerId(connection.id));
+      if (client is IptvClient) clients.add(client);
+    }
+    if (!context.mounted) return;
+    if (clients.isEmpty) {
+      showSuccessSnackBar(context, t.iptv.noConnections);
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _CatalogSyncDialog(clients: clients),
+    );
+  }
+
   Future<void> _refreshPlaylists(BuildContext context) async {
     final registry = context.read<ConnectionRegistry>();
     final multiServer = context.read<MultiServerProvider>();
@@ -344,6 +407,189 @@ class IptvSettingsScreen extends StatelessWidget {
     }
     if (!context.mounted) return;
     showSuccessSnackBar(context, t.iptv.epgCleared);
+  }
+}
+
+/// "Refreshing Trex details" popup (build #23): a manual catalog sync
+/// with per-type progress (Live TV / Movies / TV Series) and a Cancel
+/// button. The sync runs in the background even if the dialog is
+/// dismissed (barrier-dismissible); Cancel aborts between types and
+/// already-synced types stay. Done closes it once every type has
+/// finished or been skipped.
+class _CatalogSyncDialog extends StatefulWidget {
+  const _CatalogSyncDialog({required this.clients});
+
+  final List<IptvClient> clients;
+
+  @override
+  State<_CatalogSyncDialog> createState() => _CatalogSyncDialogState();
+}
+
+class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
+  final _abort = AbortController();
+  final _progress = <String, IptvSearchSyncProgress>{};
+  bool _done = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_run());
+  }
+
+  Future<void> _run() async {
+    var failed = false;
+    for (final client in widget.clients) {
+      if (_abort.isAborted) break;
+      try {
+        await client.syncSearchIndex(
+          force: true,
+          abort: _abort,
+          onProgress: (p) {
+            if (!mounted) return;
+            setState(() => _progress[p.type] = p);
+          },
+        );
+      } catch (_) {
+        // Aborted between types, or a client-level failure: the other
+        // types/clients keep their last state; the dialog reports it.
+        failed = true;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _done = true;
+      _failed = failed;
+    });
+  }
+
+  String _typeLabel(String type) => switch (type) {
+    IptvSearchIndex.typeLive => t.iptv.catalogSyncLive,
+    IptvSearchIndex.typeMovie => t.iptv.catalogSyncMovies,
+    _ => t.iptv.catalogSyncSeries,
+  };
+
+  String _phaseText(IptvSearchSyncProgress p) {
+    if (p.phase == 'done') return '${p.rows}';
+    if (p.phase == 'skipped') return p.reason ?? '';
+    if (p.phase == 'fetching') return '…';
+    if (p.phase == 'writing') return '${p.rows}…';
+    return '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(t.iptv.catalogSyncTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final type in IptvSearchIndex.types)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(_typeLabel(type)),
+              trailing: _progress[type] == null
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(_phaseText(_progress[type]!), style: theme.textTheme.bodyMedium),
+            ),
+          if (_done)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _failed ? t.iptv.catalogSyncFailed : t.iptv.catalogSyncDone,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        if (!_done)
+          TextButton(
+            onPressed: () {
+              _abort.abort();
+              Navigator.of(context).pop();
+            },
+            child: Text(MaterialLocalizations.of(context).cancelButtonLabel),
+          )
+        else
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(MaterialLocalizations.of(context).okButtonLabel),
+          ),
+      ],
+    );
+  }
+}
+
+/// "IPTV cache size" status row (build #23): how big the local catalog
+/// is — the search index file plus the disk catalogs across all IPTV
+/// connections. Not tappable — it is a status, not an action. Rebuilds
+/// when the first Xtream client's index state changes (a sync finishing
+/// updates the size).
+class _CatalogCacheSizeTile extends StatefulWidget {
+  const _CatalogCacheSizeTile();
+
+  @override
+  State<_CatalogCacheSizeTile> createState() => _CatalogCacheSizeTileState();
+}
+
+class _CatalogCacheSizeTileState extends State<_CatalogCacheSizeTile> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final multiServer = context.watch<MultiServerProvider>();
+    final clients = [
+      for (final id in multiServer.serverIds)
+        multiServer.getClientForServer(ServerId(id)),
+    ].whereType<IptvClient>().toList();
+    final notifier = clients.isNotEmpty ? clients.first.searchIndexStateNotifier : null;
+    return ValueListenableBuilder<IptvSearchIndexState>(
+      valueListenable: notifier ?? ValueNotifier(const IptvSearchIndexState.empty()),
+      builder: (context, state, _) {
+        return FutureBuilder<int>(
+          future: _totalCacheBytes(clients),
+          builder: (context, snapshot) {
+            final bytes = snapshot.data ?? 0;
+            final size = bytes == 0 ? t.iptv.catalogCacheEmpty : ByteFormatter.formatBytes(bytes);
+            final counts = state.totalRows == 0
+                ? ''
+                : ' · ${state.rowCounts[IptvSearchIndex.typeLive] ?? 0} / '
+                    '${state.rowCounts[IptvSearchIndex.typeMovie] ?? 0} / '
+                    '${state.rowCounts[IptvSearchIndex.typeSeries] ?? 0}';
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                crossAxisAlignment: .start,
+                children: [
+                  AppIcon(Symbols.storage_rounded, fill: 1),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: .start,
+                      children: [
+                        Text(t.iptv.catalogCacheSize, style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 2),
+                        Text('$size$counts', style: theme.textTheme.bodyMedium),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<int> _totalCacheBytes(List<IptvClient> clients) async {
+    var total = await IptvSearchIndex.totalFileSizeBytes();
+    const cache = IptvCatalogDiskCache();
+    for (final client in clients) {
+      total += await cache.sizeBytes(client.connection.id);
+    }
+    return total;
   }
 }
 
