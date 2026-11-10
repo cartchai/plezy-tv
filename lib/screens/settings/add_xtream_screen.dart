@@ -61,13 +61,6 @@ class _AddXtreamScreenState extends State<AddXtreamScreen> with AsyncFormStateMi
     super.dispose();
   }
 
-  /// Auth probe: `player_api.php` with no action. A `user_info` object
-  /// means the login works; null means the server rejected it.
-  ///
-  /// The probe sends the configured Xtream User-Agent (build #20): a panel
-  /// that 403s the bare Dart UA would fail sign-in here even though the
-  /// app itself would work, so the probe must present the same signature
-  /// the app will use.
   /// The configured Xtream User-Agent for the sign-in probe (build #20).
   /// Falls back to VLC when Settings is not initialized yet.
   static String _configuredUserAgent() {
@@ -79,6 +72,13 @@ class _AddXtreamScreenState extends State<AddXtreamScreen> with AsyncFormStateMi
     );
   }
 
+  /// Auth probe: `player_api.php` with no action. A `user_info` object
+  /// means the login works; null means the server rejected it.
+  ///
+  /// The probe sends the configured Xtream User-Agent (build #20): a panel
+  /// that 403s the bare Dart UA would fail sign-in here even though the
+  /// app itself would work, so the probe must present the same signature
+  /// the app will use.
   Future<bool> _probe(String serverUrl, String username, String password) async {
     final api = XtreamApi(
       serverUrl: serverUrl,
