@@ -3829,6 +3829,11 @@ class Translations$about$en {
 		'Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved',
 		'After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app',
 	];
+	List<String> get changelog2274 => [
+		'Browsing a stale catalog no longer re-downloads it on its own — the refresh now goes through the weekly catalog sync, so one fetch updates the saved copy, the search index and what you see, and a partial answer from the provider can no longer overwrite a good saved list',
+		'Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once',
+		'The category names now update when the catalog refreshes, instead of staying as they were until the next restart',
+	];
 }
 
 // Path: serverSelection
@@ -10420,6 +10425,9 @@ extension on Translations {
 			'about.changelog2273.1' => 'A refused stream is never retried any more — it goes straight to the access-denied message instead of re-opening again and again, which reads as an attack. A busy line (458) can still retry once, after waiting',
 			'about.changelog2273.2' => 'Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved',
 			'about.changelog2273.3' => 'After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app',
+			'about.changelog2274.0' => 'Browsing a stale catalog no longer re-downloads it on its own — the refresh now goes through the weekly catalog sync, so one fetch updates the saved copy, the search index and what you see, and a partial answer from the provider can no longer overwrite a good saved list',
+			'about.changelog2274.1' => 'Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once',
+			'about.changelog2274.2' => 'The category names now update when the catalog refreshes, instead of staying as they were until the next restart',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
 			'serverSelection.noValidServers' => 'No usable servers were found on this account',
@@ -10545,11 +10553,11 @@ extension on Translations {
 			'explore.stats.onHold' => ({required Object n}) => '${n} on hold',
 			'explore.stats.dropped' => ({required Object n}) => '${n} dropped',
 			'explore.season.winter' => 'Winter',
+			_ => null,
+		} ?? switch (path) {
 			'explore.season.spring' => 'Spring',
 			'explore.season.summer' => 'Summer',
 			'explore.season.fall' => 'Fall',
-			_ => null,
-		} ?? switch (path) {
 			'explore.season.withYear' => ({required Object season, required Object year}) => '${season} ${year}',
 			'explore.format.tv' => 'TV',
 			'explore.format.tvShort' => 'TV Short',
@@ -11059,11 +11067,11 @@ extension on Translations {
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
 			'downloads.backgroundWarning.statusDegraded' => 'Limited by system settings',
 			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
 			'downloads.options' => 'Downloads options',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.groupings.library' => 'Library',
 			'downloads.groupings.collections' => 'Collections',
 			'downloads.unknownLibrary' => 'Unknown library',
@@ -11573,11 +11581,11 @@ extension on Translations {
 			'iptv.epgSection' => 'EPG / TV guide',
 			'iptv.epgDaysToLoad' => 'Days to load',
 			'iptv.epgDaysToLoadDescription' => 'How many days of guide to load ahead',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.epgDaysCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} day', other: '${n} days', ), 
 			'iptv.epgUpdateInterval' => 'Update interval',
 			'iptv.epgUpdateIntervalDescription' => 'How often the guide refreshes',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.epgHoursCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Every ${n} hour', other: 'Every ${n} hours', ), 
 			'iptv.epgManualOnly' => 'Manual only',
 			'iptv.epgPastDays' => 'Past days to keep',

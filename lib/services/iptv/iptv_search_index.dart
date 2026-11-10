@@ -80,11 +80,26 @@ class IptvSearchIndex {
   /// (the response lives there); forwarded here for the index/sync.
   static const int maxCatalogResponseChars = XtreamApi.maxCatalogResponseChars;
 
-  /// Candidate cap for an FTS query: the trigram index returns its best
-  /// matches first, and the per-section limit is 100 — 5000 candidates
-  /// leaves room for the hidden-category filter to remove rows without
-  /// starving the result.
-  static const int ftsCandidateLimit = 5000;
+  /// Query cap for [search] (build v1.0.10): the FTS arm returns its
+  /// best-ranked rows and the LIKE arm its first rows, both capped here
+  /// in SQL — a short needle can never materialize the whole table, and
+  /// the caller only ever keeps its per-section limit (100 by default).
+  /// 200 = 2x that limit, headroom for the caller's RegExp + hidden-
+  /// category filtering to remove rows without starving the result.
+  /// (Build #23's 5000 was the same headroom idea without rank order;
+  /// without ORDER BY rank the cap kept the first 100 *inserted* rows,
+  /// which could cut the exact match — M2.)
+  static const int ftsQueryLimit = 200;
+
+  /// Rank window for [search] (build v1.0.10): the FTS arm re-runs
+  /// ranked only when the match set fits in this many rows. Ranking
+  /// means scoring every match (measured: ~420 ms for 200k matches),
+  /// and past ~1000 near-identical rows the rank order is noise — the
+  /// caller still scores the 200 it gets. The probe fetches one row
+  /// past the window (1001) so the overflow case is detected without
+  /// counting the whole set (a count of 200k matches costs ~260 ms;
+  /// the probe stops after 1001 rows).
+  static const int ftsRankWindow = 1000;
 
   /// Test seam (same pattern as [IptvCatalogDiskCache]): when set, the
   /// index file lives under here instead of the app documents directory.
@@ -305,8 +320,21 @@ class IptvSearchIndex {
   /// full needle contains every normalized token); LIKE scan otherwise.
   /// Returns index rows in FTS rank order (or rowid order for the LIKE
   /// fallback); the caller applies its authoritative RegExp + hidden
-  /// filters and the per-section limit.
-  List<IptvSearchIndexRow> search(String connectionId, String type, String needle) {
+  /// filters and the per-section limit. At most [limit] rows are
+  /// returned (build v1.0.10: the cap lives in SQL, so a needle with
+  /// thousands of matches materializes at most [limit] rows).
+  ///
+  /// Rank window (build v1.0.10): the FTS arm first probes up to
+  /// [ftsRankWindow] + 1 rows in natural order. A set that fits in the
+  /// window is re-run ranked (the sort is cheap there, and it is what
+  /// keeps the exact match from being cut by the cap); a set that
+  /// overflows the window returns its first [limit] probe rows
+  /// unranked — ranking 200k near-identical rows costs ~420 ms and
+  /// the order is noise among them, while the caller still scores the
+  /// 200 it gets. See the M2 group note in
+  /// iptv_build29_freshness_test for the BM25 length-bias limit of
+  /// the rank guarantee.
+  List<IptvSearchIndexRow> search(String connectionId, String type, String needle, {int limit = ftsQueryLimit}) {
     if (_closed) return const [];
     final needleNorm = normalizeSearchText(needle);
     final pattern = ftsPattern(needleNorm);
@@ -315,29 +343,57 @@ class IptvSearchIndex {
         // The conn/type filter is on the FTS table itself (see the class
         // doc): filtering after the join makes the planner scan the whole
         // index per query at Trex scale.
-        final rows = _db.select(
-          'SELECT i.connection_id, i.type, i.stream_id, i.category_id, i.name, '
-          'i.thumb, i.rating, i.container_ext, i.summary, i.epg_channel_id, '
-          'i.has_archive, i.archive_duration '
+        const columns =
+            'i.connection_id, i.type, i.stream_id, i.category_id, i.name, '
+            'i.thumb, i.rating, i.container_ext, i.summary, i.epg_channel_id, '
+            'i.has_archive, i.archive_duration ';
+        // Probe: natural order, one row past the rank window. A LIMIT
+        // with no ORDER BY stops after that many rows — it never scans
+        // the whole match set.
+        final probe = _db.select(
+          'SELECT $columns'
           'FROM iptv_search_fts '
           'JOIN iptv_search_item i ON i.rowid = iptv_search_fts.rowid '
           'WHERE iptv_search_fts MATCH ? AND iptv_search_fts.conn = ? AND iptv_search_fts.type = ? '
           'LIMIT ?',
-          [pattern, connectionId, type, ftsCandidateLimit],
+          [pattern, connectionId, type, ftsRankWindow + 1],
         );
-        return rows.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        if (probe.length <= limit) {
+          // The whole match set fits: return it; the caller re-scores.
+          return probe.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        }
+        if (probe.length <= ftsRankWindow) {
+          // Moderate set: re-run ranked — the sort is cheap here, and
+          // rank order is what keeps the exact match in the cap.
+          final rows = _db.select(
+            'SELECT $columns'
+            'FROM iptv_search_fts '
+            'JOIN iptv_search_item i ON i.rowid = iptv_search_fts.rowid '
+            'WHERE iptv_search_fts MATCH ? AND iptv_search_fts.conn = ? AND iptv_search_fts.type = ? '
+            'ORDER BY iptv_search_fts.rank '
+            'LIMIT ?',
+            [pattern, connectionId, type, limit],
+          );
+          return rows.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        }
+        // Huge set: return the first [limit] probe rows unranked.
+        return probe.take(limit).map(IptvSearchIndexRow.fromDb).toList(growable: false);
       }
       // No trigram-matchable token (e.g. "of", "a&e"): LIKE scan of the
       // normalized name — still local-only. The LIKE is on the normalized
       // text (already lowercased), so SQLite's ASCII-only case folding
-      // cannot miss a row the RegExp would catch.
+      // cannot miss a row the RegExp would catch. Bounded like the FTS
+      // arm (build v1.0.10): without a LIMIT a 2-letter needle
+      // materialized tens of thousands of rows across the 300k-row table.
       final like = '%${needleNorm.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
       final rows = _db.select(
         'SELECT connection_id, type, stream_id, category_id, name, thumb, '
         'rating, container_ext, summary, epg_channel_id, has_archive, '
         'archive_duration FROM iptv_search_item '
-        'WHERE connection_id = ? AND type = ? AND name_norm LIKE ? ESCAPE ?',
-        [connectionId, type, like, r'\'],
+        'WHERE connection_id = ? AND type = ? AND name_norm LIKE ? ESCAPE ? '
+        'ORDER BY rowid '
+        'LIMIT ?',
+        [connectionId, type, like, r'\', limit],
       );
       return rows.map(IptvSearchIndexRow.fromDb).toList(growable: false);
     } catch (e) {

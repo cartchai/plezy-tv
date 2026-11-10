@@ -354,13 +354,21 @@ void main() {
         IptvCatalogDiskCache.liveCategoriesDataset,
         jsonEncode(_liveCategories().map((c) => c.toJson()).toList()),
       );
-      // Any disk entry is stale with a zero TTL.
-      IptvCatalogDiskCache.catalogCacheTtl = Duration.zero;
+      // Build v1.0.10 (M3): freshness follows the sync interval, not
+      // the 24 h disk TTL — a just-written disk is fresh, so backdate
+      // the files 8 days to make the sync due.
+      for (final entry in await tempDir.list(recursive: true).toList()) {
+        if (entry.path.endsWith('.json')) {
+          await (entry as File).setLastModified(
+            DateTime.now().subtract(const Duration(days: 8)),
+          );
+        }
+      }
       IptvPlaybackActivity.instance.markPlaying();
       final channels = await client.iptvChannels();
-      expect(channels, hasLength(2), reason: 'the stale disk rows are still served while the refresh waits');
+      expect(channels, hasLength(2), reason: 'the stale disk rows are still served while the sync waits');
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      expect(panel.liveRequests, 0, reason: 'the stale-disk refresh must not fetch while a stream is playing');
+      expect(panel.liveRequests, 0, reason: 'the stale-disk sync must not fetch while a stream is playing');
       IptvPlaybackActivity.instance.markIdle();
       await _waitFor(() => panel.liveRequests > 0);
       expect(panel.liveRequests, 1);

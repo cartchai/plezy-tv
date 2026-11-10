@@ -112,6 +112,7 @@ import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/media/search_hit.dart';
 import 'package:plezy/services/data_aggregation_service.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/jellyfin_api_cache.dart';
 import 'package:plezy/services/multi_server_manager.dart';
@@ -327,8 +328,10 @@ Future<List<XtreamSeries>> readDiskSeriesRows() async {
   return decoded.map((e) => XtreamSeries.fromJson(e as Map<String, dynamic>)).toList();
 }
 
-/// Make the seeded disk file STALE (older than the 24 h TTL) by pushing
-/// its mtime back, so the next warm-up triggers the background refresh.
+/// Make the seeded disk file STALE (older than the sync interval) by
+/// pushing its mtime back, so the next browse triggers the sync.
+/// Build v1.0.10 (M3): freshness follows the sync interval (168 h),
+/// not the old 24 h disk TTL — 25 h is no longer stale.
 Future<void> makeDiskSeriesStale() async {
   final tempDir = await IptvCatalogDiskCache.debugDirectoryProvider!();
   final files = await tempDir
@@ -337,7 +340,7 @@ Future<void> makeDiskSeriesStale() async {
       .toList();
   expect(files, hasLength(1));
   await (files.single as File).setLastModified(
-    DateTime.now().subtract(const Duration(hours: 25)),
+    DateTime.now().subtract(const Duration(days: 8)),
   );
 }
 
@@ -746,6 +749,14 @@ void main() {
         jsonEncode(allSeriesRows().map((r) => r.toJson()).toList()),
       );
       await makeDiskSeriesStale();
+      // Build v1.0.10 (M3): the browse refresh is the sync, and the
+      // sync needs the search index — without a debug directory the
+      // index cannot open in a plain test (no path_provider plugin),
+      // the sync bails, and the refresh never fires. On the phone the
+      // index opens normally. Scoped to THIS test only: the other
+      // probes model a cold index (P4-slow's heal-timing premise), so
+      // the provider must stay unset for them.
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
       final api = _Build19FakeApi(
         unfilteredSeriesOverride: netflixOnlySeriesRows(),
         includeNetflixCategories: true,
@@ -753,8 +764,8 @@ void main() {
       final client = clientWith(api: api);
       try {
         await warmSeries(client);
-        // The stale disk triggers a background refresh; the refresh's
-        // unfiltered call returns the 635-row partial list.
+        // The stale disk triggers the sync; the sync's unfiltered call
+        // returns the 635-row partial list.
         final diskRows = await waitForDiskSeriesChange(46527);
         // ignore: avoid_print
         print(
@@ -765,13 +776,14 @@ void main() {
         expect(api.unfilteredSeriesCalls, greaterThan(0));
         // FAILING-FIRST: _loadSeries() treats ANY non-empty unfiltered
         // response as complete, so the 635-row partial list overwrites
-        // the 46,527-row good file — poisoning the disk for the 24 h TTL
-        // even after the panel recovers. Build #18 only guards
+        // the 46,527-row good file — poisoning the disk for the sync
+        // interval even after the panel recovers. Build #18 only guards
         // crawl-shaped writes, not partial unfiltered ones.
         expect(diskRows.length, 46527);
         expect(diskRows.any((r) => r.seriesId == _gotSeriesId), isTrue);
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 

@@ -1573,6 +1573,11 @@
       "A refused stream is never retried any more — it goes straight to the access-denied message instead of re-opening again and again, which reads as an attack. A busy line (458) can still retry once, after waiting",
       "Catalog, guide and search-index work now waits until nothing is playing, and a guide row scrolled away stops its fetch instead of finishing unobserved",
       "After a refusal the app waits five minutes before asking the provider again, instead of re-probing it on every return to the app"
+    ],
+    "changelog2274": [
+      "Browsing a stale catalog no longer re-downloads it on its own — the refresh now goes through the weekly catalog sync, so one fetch updates the saved copy, the search index and what you see, and a partial answer from the provider can no longer overwrite a good saved list",
+      "Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once",
+      "The category names now update when the catalog refreshes, instead of staying as they were until the next restart"
     ]
   },
   "serverSelection": {

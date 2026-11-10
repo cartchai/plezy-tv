@@ -54,6 +54,9 @@ class IptvCatalogDiskCache {
   /// How long a cached catalog counts as fresh. A fresh cache is served
   /// with no network at all; a stale one is still served immediately,
   /// and a background refresh lands the new rows. Tests shrink it.
+  /// Build v1.0.10 (M3, one freshness rule): this TTL now gates only
+  /// the M3U playlist refresh — the Xtream catalogs follow the sync
+  /// interval instead.
   @visibleForTesting
   static Duration catalogCacheTtl = const Duration(hours: 24);
 

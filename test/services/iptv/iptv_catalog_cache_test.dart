@@ -32,6 +32,7 @@ import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/library_change_event.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/utils/library_content_notifier.dart';
 
@@ -106,24 +107,40 @@ class _CacheFakeApi extends XtreamApi {
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     liveCalls++;
     _maybeFail();
-    if (categoryId != null) return liveRows.where((r) => r.categoryId == categoryId).toList();
-    return liveRows;
+    // Build v1.0.10: the sync writes the RAW body to disk and skips the
+    // write when it is null, so the fake must store it like the real
+    // XtreamApi does (xtream_api.dart:372) — the old background refresh
+    // fell back to re-encoding the rows, which masked the missing body.
+    if (categoryId == null) {
+      lastLiveStreamsBody = jsonEncode(liveRows.map((r) => r.toJson()).toList());
+      return liveRows;
+    }
+    lastLiveStreamsBody = null;
+    return liveRows.where((r) => r.categoryId == categoryId).toList();
   }
 
   @override
   Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
     vodCalls++;
     _maybeFail();
-    if (categoryId != null) return vodRows.where((r) => r.categoryId == categoryId).toList();
-    return vodRows;
+    if (categoryId == null) {
+      lastVodStreamsBody = jsonEncode(vodRows.map((r) => r.toJson()).toList());
+      return vodRows;
+    }
+    lastVodStreamsBody = null;
+    return vodRows.where((r) => r.categoryId == categoryId).toList();
   }
 
   @override
   Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     seriesCalls++;
     _maybeFail();
-    if (categoryId != null) return seriesRows.where((r) => r.categoryId == categoryId).toList();
-    return seriesRows;
+    if (categoryId == null) {
+      lastSeriesBody = jsonEncode(seriesRows.map((r) => r.toJson()).toList());
+      return seriesRows;
+    }
+    lastSeriesBody = null;
+    return seriesRows.where((r) => r.categoryId == categoryId).toList();
   }
 
   @override
@@ -205,11 +222,56 @@ void main() {
   }
 
   Future<void> waitFor(bool Function() condition, String message) async {
-    for (var i = 0; i < 100; i++) {
+    for (var i = 0; i < 500; i++) {
       if (condition()) return;
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     fail('timed out waiting for $message');
+  }
+
+  /// Seed one catalog type's disk files fresh (catalog + categories),
+  /// build v1.0.10: the sync skips types whose disk file is fresh, so
+  /// seeding the OTHER types fresh keeps a stale-type test to a
+  /// single-type sync (one fetch, one publish, one event) — the shape
+  /// the phone is in after the bind sync, where only the stale type is
+  /// due.
+  Future<void> seedFreshType(String type) async {
+    const cache = IptvCatalogDiskCache();
+    switch (type) {
+      case IptvSearchIndex.typeLive:
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.liveDataset,
+          jsonEncode(api.liveRows.map((r) => r.toJson()).toList()),
+        );
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.liveCategoriesDataset,
+          jsonEncode(api.liveCategories.map((c) => c.toJson()).toList()),
+        );
+      case IptvSearchIndex.typeMovie:
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.vodDataset,
+          jsonEncode(api.vodRows.map((r) => r.toJson()).toList()),
+        );
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.vodCategoriesDataset,
+          jsonEncode(api.vodCategories.map((c) => c.toJson()).toList()),
+        );
+      default:
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.seriesDataset,
+          jsonEncode(api.seriesRows.map((r) => r.toJson()).toList()),
+        );
+        await cache.write(
+          'conn-xt-1',
+          IptvCatalogDiskCache.seriesCategoriesDataset,
+          jsonEncode(api.seriesCategories.map((c) => c.toJson()).toList()),
+        );
+    }
   }
 
   group('IptvCatalogDiskCache (repository)', () {
@@ -352,14 +414,31 @@ void main() {
   });
 
   group('TTL: stale cache is shown while the background refresh lands', () {
+    // Build v1.0.10 (M3): the browse refresh is the sync, and the sync
+    // needs the search index — without a debug directory the index
+    // cannot open in a plain test (no path_provider plugin) and the
+    // refresh never fires. On the phone the index opens normally.
+    // Scoped to this group: the other groups model a cold index.
+    setUp(() {
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+    });
+    tearDown(() {
+      IptvSearchIndex.debugDirectoryProvider = null;
+    });
+
     test('stale movies are served immediately, then replaced by fresh rows', () async {
       final first = xtreamClient();
       await first.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
       await waitForDataset(IptvCatalogDiskCache.vodDataset);
+      // The other types are fresh, so the sync refreshes VOD only.
+      await seedFreshType(IptvSearchIndex.typeLive);
+      await seedFreshType(IptvSearchIndex.typeSeries);
 
-      // Age the cache past the 24h TTL.
+      // Age the cache past the sync interval (build v1.0.10: freshness
+      // follows the sync interval, not the old 24 h TTL — 25 h is no
+      // longer stale).
       final file = datasetFile('conn-xt-1', IptvCatalogDiskCache.vodDataset);
-      await file.setLastModified(DateTime.now().subtract(const Duration(hours: 25)));
+      await file.setLastModified(DateTime.now().subtract(const Duration(days: 8)));
 
       // The provider has a new movie since the cache was written.
       api.vodRows = const [
@@ -565,14 +644,27 @@ https://example.com/cnn.ts
   });
 
   group('background refresh events carry the live flag (build #14, SA-4)', () {
+    // Build v1.0.10 (M3): same index note as the TTL group above.
+    setUp(() {
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+    });
+    tearDown(() {
+      IptvSearchIndex.debugDirectoryProvider = null;
+    });
+
     test('a stale VOD refresh emits liveCatalogChanged=false', () async {
       final first = xtreamClient();
       await first.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
       await waitForDataset(IptvCatalogDiskCache.vodDataset);
+      // The other types are fresh, so the sync refreshes VOD only and
+      // emits exactly one event.
+      await seedFreshType(IptvSearchIndex.typeLive);
+      await seedFreshType(IptvSearchIndex.typeSeries);
 
-      // Age the cache past the 24h TTL.
+      // Age the cache past the sync interval (build v1.0.10: freshness
+      // follows the sync interval, not the old 24 h TTL).
       final file = datasetFile('conn-xt-1', IptvCatalogDiskCache.vodDataset);
-      await file.setLastModified(DateTime.now().subtract(const Duration(hours: 25)));
+      await file.setLastModified(DateTime.now().subtract(const Duration(days: 8)));
 
       final events = <LibraryChangeEvent>[];
       final subscription = LibraryContentNotifier().stream.listen(events.add);
@@ -593,9 +685,14 @@ https://example.com/cnn.ts
       final first = xtreamClient();
       await first.iptvChannels();
       await waitForDataset(IptvCatalogDiskCache.liveDataset);
+      // The other types are fresh, so the sync refreshes live only and
+      // emits exactly one event.
+      await seedFreshType(IptvSearchIndex.typeMovie);
+      await seedFreshType(IptvSearchIndex.typeSeries);
 
+      // Age the cache past the sync interval (build v1.0.10).
       final file = datasetFile('conn-xt-1', IptvCatalogDiskCache.liveDataset);
-      await file.setLastModified(DateTime.now().subtract(const Duration(hours: 25)));
+      await file.setLastModified(DateTime.now().subtract(const Duration(days: 8)));
 
       final events = <LibraryChangeEvent>[];
       final subscription = LibraryContentNotifier().stream.listen(events.add);

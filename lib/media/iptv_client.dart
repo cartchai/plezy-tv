@@ -232,7 +232,7 @@ class IptvClient implements MediaServerClient {
   // Disk catalog cache (build #11): raw API payloads under the app
   // documents directory, per connection — a cold start reads these
   // instead of re-fetching tens of thousands of rows. See
-  // [_readDiskCatalog] / [_refreshCatalogInBackground].
+  // [_readDiskCatalog] / [_refreshCatalogViaSyncIfDue].
   static const _catalogCache = IptvCatalogDiskCache();
 
   /// Generation guard for background refreshes: bumped by
@@ -408,6 +408,11 @@ class IptvClient implements MediaServerClient {
   /// partial / category-less source (see [IndexWriteResult]), so a
   /// crawl-shaped disk file can never seed an incomplete index — the
   /// type stays cold and the fallback sweep still heals it.
+  ///
+  /// Build v1.0.10 (M1): the seed stamps each type with its disk file's
+  /// real fetchedAt, not now — the sync that follows reads the stamp to
+  /// decide whether the type is due, so a stale disk must still sync
+  /// instead of being stamped fresh and skipped for a week.
   Future<void> seedSearchIndexFromDisk() => _runIndexWrite(_seedSearchIndexFromDisk);
 
   Future<void> _maybeSeedSearchIndexFromDisk() => _runIndexWrite(_seedSearchIndexFromDisk);
@@ -417,7 +422,6 @@ class IptvClient implements MediaServerClient {
     final index = await _searchIndex();
     if (index == null) return;
     final dbPath = await IptvSearchIndex.dbFilePath();
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
     final counts = index.rowCounts(connection.id);
     _refreshSearchIndexState(seeding: true);
     try {
@@ -438,7 +442,10 @@ class IptvClient implements MediaServerClient {
               type: type,
               catalogBody: catalog.body,
               categoryBody: categories.body,
-              syncStampMs: nowMs,
+              // Build v1.0.10 (M1): the disk file's real age, not now —
+              // stamping now told the sync this type was just synced, so
+              // a days-old disk was never refreshed for a week.
+              syncStampMs: catalog.fetchedAt.millisecondsSinceEpoch,
             ),
           );
           if (result.skippedReason != null) {
@@ -641,7 +648,7 @@ class IptvClient implements MediaServerClient {
             );
             // fetchedRows is set by the fetch try above; every failure
             // path (throw, empty, partial, oversize) continues past here.
-            _publishSyncedCatalog(type, fetchedRows);
+            _publishSyncedCatalog(type, fetchedRows, categories);
           } catch (e) {
             appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
           }
@@ -682,21 +689,43 @@ class IptvClient implements MediaServerClient {
   /// (build #23): the warm-up may have populated them with the stale
   /// disk rows, and the sync is the newer truth — browse/search must
   /// see the refreshed catalog without a restart.
-  void _publishSyncedCatalog(String type, List<Object> rows) {
+  ///
+  /// Build v1.0.10 (M5): the synced categories are published too — the
+  /// index is the single source for them (the sync just wrote this same
+  /// list into the index's category table), so the memoized category
+  /// futures copy from it and the derived id -> name maps are cleared
+  /// to re-derive from the fresh lists. Before, a sync left the pre-
+  /// sync category names in place until restart, so the hidden-category
+  /// filter and the title-prefix strip used stale names. The library
+  /// views are told the catalog changed (the old background refresh did
+  /// this after its swap; the sync is the refresh now).
+  void _publishSyncedCatalog(String type, List<Object> rows, List<XtreamCategory> categories) {
     switch (type) {
       case IptvSearchIndex.typeLive:
         _liveStreamsFuture = Future.value(rows.cast<XtreamLiveStream>());
         _liveStreamsLoaded = true;
         _liveLoadSource = 'network';
+        _liveCategoriesFuture = Future.value(categories);
+        _liveCategoryNamesFuture = null;
       case IptvSearchIndex.typeMovie:
         _vodStreamsFuture = Future.value(rows.cast<XtreamVodStream>());
         _vodStreamsLoaded = true;
         _vodLoadSource = 'network';
+        _vodCategoriesFuture = Future.value(categories);
+        _vodCategoryNamesFuture = null;
       default:
         _seriesFuture = Future.value(rows.cast<XtreamSeries>());
         _seriesListLoaded = true;
         _seriesLoadSource = 'network';
+        _seriesCategoriesFuture = Future.value(categories);
+        _seriesCategoryNamesFuture = null;
     }
+    // The Live TV guide subscribes to the same notifier: it must only
+    // reload for live rows / live categories. A VOD- or series-only
+    // sync landing used to rebuild the whole 55k-channel guide and
+    // re-fetch EPG for the visible channels (build #14, SA-4 partial),
+    // so the event carries which catalog actually changed.
+    notifyCatalogRefreshed(liveCatalogChanged: type == IptvSearchIndex.typeLive);
   }
 
   Future<List<XtreamCategory>> _fetchCategoriesFor(String type, AbortController? abort) {
@@ -1372,79 +1401,41 @@ class IptvClient implements MediaServerClient {
     );
   }
 
-  /// Fetch a catalog in the background after serving a stale disk copy
-  /// (build #11): the fresh rows replace the disk file and the memoized
-  /// in-memory future, and the library views are told the catalog
-  /// changed. Dropped silently when the fetch fails or when a
-  /// [clearCatalogCache] landed first (generation guard) — the stale
-  /// rows stay on screen either way.
-  void _refreshCatalogInBackground<T>({
-    required String dataset,
-    required Future<List<T>> Function(Future<void>? abortTrigger) fetch,
-    required Map<String, dynamic> Function(T row) toJson,
-    required void Function(List<T> rows) swap,
-    // Raw response body of the fetch, when it has one (build #13) —
-    // see [_writeCatalogRows]. Read after fetch() returns; null falls
-    // back to re-encoding the rows.
-    String? Function()? rawBody,
-  }) {
-    final generation = _catalogGeneration;
-    // Build #28: the refresh owns an AbortController, registered so
-    // [cancelBackgroundWork] can stop it when the app backgrounds.
-    final abort = AbortController();
-    _activeBackgroundAborts.add(abort);
+  /// Build v1.0.10 (M3, one freshness rule): the browse refresh IS the
+  /// sync. After serving disk rows, fire [ensureSearchIndexSynced] when
+  /// this type is due under the sync interval — the sync fetches the
+  /// catalog + categories once, under the guards, and writes disk +
+  /// index together, so one fetch feeds both stores and a partial panel
+  /// answer can never clobber a good disk file through a side door.
+  /// When the type is not due (or the interval is manual-only) nothing
+  /// is fetched: the disk file's age follows the index's last sync, not
+  /// a separate 24 h clock. The due check is coarse (the sync itself
+  /// re-checks per type and skips what is up-to-date), and several
+  /// browse loads firing at once serialize through the index-write
+  /// mutex — the second run finds everything up-to-date and fetches
+  /// nothing. The sync keeps build #28's gating (it waits for idle
+  /// while a stream is playing and is cancellable on backgrounding),
+  /// and the seed that runs first stamps the disk's real age (M1), so
+  /// the due check here reads true ages.
+  ///
+  /// This replaces [_refreshCatalogInBackground] (deleted with it): the
+  /// old side door bypassed the sync guards, never wrote the index, and
+  /// had no partial guard for live at all (M4 — the sync's guard covers
+  /// live too).
+  void _refreshCatalogViaSyncIfDue(String type) {
+    if (!_isXtream) return;
     unawaited(
       () async {
-        try {
-          // Build #28: a stale-disk refresh is background work — it
-          // waits while a stream is playing instead of stacking on top
-          // of viewing traffic on a one-connection line. The browse
-          // already served the stale disk rows, so nothing waits on
-          // this; when playback stops, the refresh runs and swaps in
-          // the fresh rows. The wait races the abort, so a background
-          // cancel still stops a refresh parked on playback.
-          await _waitForIdleUnlessAborted(abort);
-          final rows = await fetch(abort.trigger);
-          // The VOD/series fetch is the crawl-capable loader, which does
-          // not take an abort trigger (build #21: the crawl is a bounded
-          // batch walk that finishes on its own) — so a cancel that lands
-          // mid-fetch is honoured here, before any disk write or swap:
-          // the panel calls already happened, but the cancelled refresh
-          // writes nothing.
-          abort.throwIfAborted();
-          if (generation != _catalogGeneration || rows.isEmpty) return;
-          final body = rawBody?.call();
-          if (body != null && body.isNotEmpty) {
-            await _catalogCache.write(connection.id, dataset, body);
-          } else {
-            await _catalogCache.write(connection.id, dataset, jsonEncode(rows.map(toJson).toList()));
-          }
-          if (generation != _catalogGeneration) {
-            // A clear landed during the write: drop the resurrected file
-            // instead of serving pre-clear rows as fresh.
-            await _catalogCache.delete(connection.id, dataset);
-            return;
-          }
-          swap(rows);
-          // The Live TV guide subscribes to the same notifier: it must only
-          // reload for live rows / live categories. A VOD- or series-only
-          // refresh landing used to rebuild the whole 55k-channel guide and
-          // re-fetch EPG for the visible channels (build #14, SA-4 partial),
-          // so the event carries which catalog actually changed.
-          final liveCatalogChanged = dataset == IptvCatalogDiskCache.liveDataset ||
-              dataset == IptvCatalogDiskCache.liveCategoriesDataset;
-          notifyCatalogRefreshed(liveCatalogChanged: liveCatalogChanged);
-        } on MediaServerHttpException catch (e) {
-          // A background cancel is not a failure — it is the user
-          // walking away. Swallow it silently; anything else is logged.
-          if (!e.isCancellation) {
-            appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
-          }
-        } catch (e) {
-          appLogger.w('IPTV: background $dataset catalog refresh failed', error: e);
-        } finally {
-          _activeBackgroundAborts.remove(abort);
-        }
+        final index = await _searchIndex();
+        if (index == null) return;
+        final intervalHours = _catalogSyncIntervalHours();
+        if (intervalHours == 0) return; // Manual-only: no automatic refresh.
+        final lastSync = index.lastSync(connection.id)[type];
+        final rows = index.rowCounts(connection.id)[type] ?? 0;
+        final due = lastSync == null ||
+            rows == 0 ||
+            DateTime.now().difference(lastSync).inHours >= intervalHours;
+        if (due) ensureSearchIndexSynced();
       }(),
     );
   }
@@ -1468,9 +1459,11 @@ class IptvClient implements MediaServerClient {
     return result;
   }
 
-  /// Disk first (build #11): a cached live list is served immediately; a
-  /// stale one is served and refreshed in the background. No disk cache
-  /// (first run, cleared, corrupt) falls back to the network fetch.
+  /// Disk first (build #11): a cached live list is served immediately;
+  /// a due one is served and refreshed by the sync (build v1.0.10, one
+  /// freshness rule — the sync interval, not a separate 24 h clock).
+  /// No disk cache (first run, cleared, corrupt) falls back to the
+  /// network fetch.
   Future<List<XtreamLiveStream>> _loadLiveStreamsCached() async {
     final disk = await _readDiskCatalog<XtreamLiveStream>(
       IptvCatalogDiskCache.liveDataset,
@@ -1478,19 +1471,7 @@ class IptvClient implements MediaServerClient {
     );
     if (disk != null) {
       _liveLoadSource = 'disk';
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        _refreshCatalogInBackground<XtreamLiveStream>(
-          dataset: IptvCatalogDiskCache.liveDataset,
-          fetch: (abortTrigger) async {
-            final rows = await _xtreamApi.getLiveStreams(abortTrigger: abortTrigger);
-            if (rows.isNotEmpty) _liveLoadSource = 'network';
-            return rows;
-          },
-          toJson: (r) => r.toJson(),
-          swap: (rows) => _liveStreamsFuture = Future.value(rows),
-          rawBody: () => _xtreamApi.lastLiveStreamsBody,
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeLive);
       return disk.rows;
     }
     final rows = await _xtreamApi.getLiveStreams();
@@ -1540,43 +1521,7 @@ class IptvClient implements MediaServerClient {
     );
     if (disk != null) {
       _vodLoadSource = 'disk';
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        // Build #19: the P5a guard needs the file's row count inside
-        // the refresh closure (captured before the call so the null
-        // promotion survives into the closure).
-        final diskRowCount = disk.rows.length;
-        _refreshCatalogInBackground<XtreamVodStream>(
-          dataset: IptvCatalogDiskCache.vodDataset,
-          fetch: (abortTrigger) async {
-            final loaded = await _loadVodStreams();
-            // A crawl-shaped refresh must not overwrite the disk file:
-            // return [] so the refresh skips, and the served rows stay
-            // the disk rows (the source stays 'disk' with them).
-            if (loaded.complete) {
-              // Build #19: a PARTIAL unfiltered list must not overwrite
-              // a larger good disk file — same poison as series (P5a):
-              // the panel can answer the unfiltered call with a small
-              // partial list while the file holds the full catalog, and
-              // accepting it poisons the disk for the 24 h TTL even after
-              // the panel recovers. Refuse the write when the new list
-              // is under half the file's size; the stale file keeps
-              // serving and the next warm-up retries the refresh.
-              if (loaded.rows.length * 2 < diskRowCount) {
-                return const <XtreamVodStream>[];
-              }
-              _vodLoadSource = 'network';
-              return loaded.rows;
-            }
-            return const <XtreamVodStream>[];
-          },
-          toJson: (r) => r.toJson(),
-          swap: (rows) {
-            _vodStreamsFuture = Future.value(rows);
-            _vodStreamsLoaded = true;
-          },
-          rawBody: () => _xtreamApi.lastVodStreamsBody,
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeMovie);
       return disk.rows;
     }
     final loaded = await _loadVodStreams();
@@ -1676,44 +1621,7 @@ class IptvClient implements MediaServerClient {
     );
     if (disk != null) {
       _seriesLoadSource = 'disk';
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        // Build #19: the P5a guard needs the file's row count inside
-        // the refresh closure (captured before the call so the null
-        // promotion survives into the closure).
-        final diskRowCount = disk.rows.length;
-        _refreshCatalogInBackground<XtreamSeries>(
-          dataset: IptvCatalogDiskCache.seriesDataset,
-          fetch: (abortTrigger) async {
-            final loaded = await _loadSeries();
-            // A crawl-shaped refresh must not overwrite the disk file:
-            // return [] so the refresh skips, and the served rows stay
-            // the disk rows (the source stays 'disk' with them).
-            if (loaded.complete) {
-              // Build #19 (P5a): a PARTIAL unfiltered list must not
-              // overwrite a larger good disk file — the panel currently
-              // answers get_series with 635 Netflix rows while the file
-              // holds 46,527, and accepting the partial list poisons the
-              // disk for the 24 h TTL even after the panel recovers.
-              // Refuse the write when the new list is under half the
-              // file's size (a genuine catalog shrink that large
-              // overnight is implausible); the stale file keeps serving
-              // and the next warm-up retries the refresh.
-              if (loaded.rows.length * 2 < diskRowCount) {
-                return const <XtreamSeries>[];
-              }
-              _seriesLoadSource = 'network';
-              return loaded.rows;
-            }
-            return const <XtreamSeries>[];
-          },
-          toJson: (r) => r.toJson(),
-          swap: (rows) {
-            _seriesFuture = Future.value(rows);
-            _seriesListLoaded = true;
-          },
-          rawBody: () => _xtreamApi.lastSeriesBody,
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeSeries);
       return disk.rows;
     }
     final loaded = await _loadSeries();
@@ -1895,14 +1803,7 @@ class IptvClient implements MediaServerClient {
       (body) async => XtreamApi.parseCategoriesBody(body),
     );
     if (disk != null) {
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        _refreshCatalogInBackground<XtreamCategory>(
-          dataset: IptvCatalogDiskCache.liveCategoriesDataset,
-          fetch: (abortTrigger) => _xtreamApi.getLiveCategories(abortTrigger: abortTrigger),
-          toJson: (r) => r.toJson(),
-          swap: (rows) => _liveCategoriesFuture = Future.value(rows),
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeLive);
       return disk.rows;
     }
     final rows = await _xtreamApi.getLiveCategories();
@@ -1928,14 +1829,7 @@ class IptvClient implements MediaServerClient {
       (body) async => XtreamApi.parseCategoriesBody(body),
     );
     if (disk != null) {
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        _refreshCatalogInBackground<XtreamCategory>(
-          dataset: IptvCatalogDiskCache.vodCategoriesDataset,
-          fetch: (abortTrigger) => _xtreamApi.getVodCategories(abortTrigger: abortTrigger),
-          toJson: (r) => r.toJson(),
-          swap: (rows) => _vodCategoriesFuture = Future.value(rows),
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeMovie);
       return disk.rows;
     }
     final rows = await _xtreamApi.getVodCategories();
@@ -1961,14 +1855,7 @@ class IptvClient implements MediaServerClient {
       (body) async => XtreamApi.parseCategoriesBody(body),
     );
     if (disk != null) {
-      if (IptvCatalogDiskCache.isStale(disk.fetchedAt)) {
-        _refreshCatalogInBackground<XtreamCategory>(
-          dataset: IptvCatalogDiskCache.seriesCategoriesDataset,
-          fetch: (abortTrigger) => _xtreamApi.getSeriesCategories(abortTrigger: abortTrigger),
-          toJson: (r) => r.toJson(),
-          swap: (rows) => _seriesCategoriesFuture = Future.value(rows),
-        );
-      }
+      _refreshCatalogViaSyncIfDue(IptvSearchIndex.typeSeries);
       return disk.rows;
     }
     final rows = await _xtreamApi.getSeriesCategories();
@@ -3392,7 +3279,7 @@ class IptvClient implements MediaServerClient {
     final favorites = await _favoriteItems();
     final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeMovie);
     final rows = index
-        .search(connection.id, IptvSearchIndex.typeMovie, needle)
+        .search(connection.id, IptvSearchIndex.typeMovie, needle, limit: limit * 2)
         .map((r) => r.toVodStream())
         .toList(growable: false);
     final out = <MediaItem>[];
@@ -3420,7 +3307,7 @@ class IptvClient implements MediaServerClient {
     final favorites = await _favoriteItems();
     final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeSeries);
     final rows = index
-        .search(connection.id, IptvSearchIndex.typeSeries, needle)
+        .search(connection.id, IptvSearchIndex.typeSeries, needle, limit: limit * 2)
         .map((r) => r.toSeries())
         .toList(growable: false);
     final out = <MediaItem>[];
@@ -3451,7 +3338,7 @@ class IptvClient implements MediaServerClient {
     final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeLive);
     await _liveTv.loadHiddenChannels();
     final rows = index
-        .search(connection.id, IptvSearchIndex.typeLive, needle)
+        .search(connection.id, IptvSearchIndex.typeLive, needle, limit: limit * 2)
         .map((r) => r.toLiveStream())
         .toList(growable: false);
     final out = <MediaItem>[];
