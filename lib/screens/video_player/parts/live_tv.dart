@@ -52,7 +52,19 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     _live.fallbackLevel++;
     _live.retrying = true;
     appLogger.w('Live stream failed, retrying with fallback level ${_live.fallbackLevel}');
-    unawaited(_retryLiveStream());
+    unawaited(_retryLiveStreamAfterBackoff());
+  }
+
+  /// Waits out the ladder backoff, then retries — unless a zap superseded
+  /// the wait (it clears [_live.retrying]) or the screen went away. The
+  /// panel that just refused the stream (403/429) needs a beat to recover,
+  /// and an immediate re-open reads as another knock on a closed door.
+  /// Play-pressed retries ([_retryLiveStreamForPlayIntent]) stay immediate:
+  /// the viewer asked for it now.
+  Future<void> _retryLiveStreamAfterBackoff() async {
+    await Future.delayed(liveRetryBackoff(_live.fallbackLevel));
+    if (!mounted || _shuttingDown || !_live.retrying) return;
+    await _retryLiveStream();
   }
 
   /// Play pressed while the live stream is dead: reuse the ladder retry
@@ -183,6 +195,24 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       return null;
     }
     return client.liveTv.startPlayback(channel.key, dvrKey: serverInfo.dvrKey, quality: _selectedQualityPreset);
+  }
+
+  /// (Re)starts background tunes for the channels adjacent to the one
+  /// playing, after a launch commits or a zap lands. The pretuner is created
+  /// lazily and only ever runs for live TV; the probe runs for IPTV sessions
+  /// only (a Plex/Jellyfin session negotiates a transcode, and GETting its
+  /// URL would pull transcode output — a second stream).
+  void _refreshLivePretune() {
+    final channels = widget.live?.channels;
+    if (channels == null || channels.isEmpty) return;
+    _livePretuner ??= LiveChannelPretuner(
+      startSession: (channel) => _startLiveSession(channel),
+      resolveUrl: (session) => session.streamUrlAt(),
+      discardSession: (session) => _abandonLiveSession(session),
+      shouldProbe: (session) => session is IptvLiveTvPlaybackSession,
+      probePlaylist: probeIptvPlaylist,
+    );
+    _livePretuner!.refresh(channels, _live.channelIndex);
   }
 
   /// The item that stands in for [channel] once a zap adopts its session.
@@ -700,25 +730,46 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
     _FrameRateStartupPlan? frameRatePlan;
     int? openedStream;
     try {
-      // Channel switch IS a fresh start: same resolution path as launch. Keep
-      // the old session alive until the replacement stream is actually open so
-      // a failed zap does not tell the server to reclaim the still-playing
-      // tuner/transcode session.
-      session = await _startLiveSession(channel);
-      if (session == null) {
-        // Jellyfin's negotiation returns null instead of throwing, so this
-        // is not covered by the catch below; without feedback a failed zap
-        // looks like a dead remote (#2198).
-        if (mounted) showErrorSnackBar(context, t.liveTv.failedToStartChannel);
-        return;
+      // A neighbour the launch (or the previous zap) pre-tuned is already
+      // started with its URL resolved: the zap skips the session-start round
+      // trip. A neighbour whose playlist already refused fails fast here —
+      // stay on the current channel instead of opening mpv onto a dead
+      // stream.
+      final pretuned = _livePretuner?.take(channel.key);
+      String? streamUrl;
+      if (pretuned != null) {
+        if (pretuned.isDead) {
+          _abandonLiveSession(pretuned.session);
+          if (mounted) showErrorSnackBar(context, t.liveTv.failedToStartChannel);
+          return;
+        }
+        session = pretuned.session;
+        streamUrl = pretuned.streamUrl;
+      } else {
+        // Channel switch IS a fresh start: same resolution path as launch. Keep
+        // the old session alive until the replacement stream is actually open so
+        // a failed zap does not tell the server to reclaim the still-playing
+        // tuner/transcode session.
+        session = await _startLiveSession(channel);
+        if (session == null) {
+          // Jellyfin's negotiation returns null instead of throwing, so this
+          // is not covered by the catch below; without feedback a failed zap
+          // looks like a dead remote (#2198).
+          if (mounted) showErrorSnackBar(context, t.liveTv.failedToStartChannel);
+          return;
+        }
+        if (!isCurrentChannelSwitch()) {
+          _abandonLiveSession(session);
+          return;
+        }
+
+        streamUrl = await session.streamUrlAt();
+        if (streamUrl == null || !isCurrentChannelSwitch()) {
+          _abandonLiveSession(session);
+          return;
+        }
       }
       if (!isCurrentChannelSwitch()) {
-        _abandonLiveSession(session);
-        return;
-      }
-
-      final streamUrl = await session.streamUrlAt();
-      if (streamUrl == null || !isCurrentChannelSwitch()) {
         _abandonLiveSession(session);
         return;
       }
@@ -730,7 +781,7 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
       final targetEpoch = session.captureBuffer == null ? null : _live.streamStartEpoch.round();
       // A zap starts no playback attempt, so it arms its own first-frame
       // signal; the deadline bounds a stream that stops moving before one.
-      zapOutcome = PlaybackOpenOutcome.arm(currentPlayer, deadline: VideoPlayerScreenState._openDeadline);
+      zapOutcome = PlaybackOpenOutcome.arm(currentPlayer, deadline: openDeadlineFor(isLive: true));
       frameRatePlan = _armLiveDisplayNegotiation(currentPlayer, zapOutcome);
       final opened = await _openLiveStream(
         currentPlayer,
@@ -773,6 +824,9 @@ extension _VideoPlayerLiveTvMethods on VideoPlayerScreenState {
         _live.channelName = channel.displayName;
         _currentMetadata = _liveChannelItem(channel);
       });
+
+      // The neighbours changed with the channel: pre-tune the new ones.
+      _refreshLivePretune();
 
       // The screen now describes a different channel: republish before the
       // heartbeats restart, or the OS controls, the client lookups and the

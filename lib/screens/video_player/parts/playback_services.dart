@@ -257,6 +257,8 @@ extension _VideoPlayerPlaybackServiceMethods on VideoPlayerScreenState {
         if (!mounted || player != currentPlayer) return;
         _lastLogError = null;
         _fatalHttpStatuses.clear();
+        _transientHttpStatuses.clear();
+        _transientRetryAttempts = 0;
         _resetLiveLadderOnPlaybackRestart();
         await _markFirstFrameReady(currentPlayer, settingsService);
       }),

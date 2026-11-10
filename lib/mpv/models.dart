@@ -17,6 +17,14 @@ final RegExp _httpStatusPattern = RegExp(r'\b(?:HTTP error |Response code: )(\d{
 /// open-phase watchdog bounds at open time instead of latching here (#1830).
 const Set<int> fatalPlaybackHttpStatuses = {403, 404, 500};
 
+/// Server statuses that are transient at open time: a rate limit (429) is
+/// the panel asking the client to wait, not a refusal of the account. Never
+/// latched as fatal — the player screen retries them with backoff before the
+/// failure policy runs (build #24). 403 stays in the fatal set: the retry
+/// policy treats a first 403 as possibly-transient and retries it once, but
+/// a persistent 403 still ends in the access-denied dialog, never "offline".
+const Set<int> transientPlaybackHttpStatuses = {429};
+
 /// The native player core failed to come up. Carries no message: the UI
 /// owns the wording so `lib/mpv` stays free of user-facing copy.
 class PlayerInitializationException implements Exception {

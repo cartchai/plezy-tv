@@ -1407,6 +1407,11 @@
     "appDescription": "A beautiful Plex, Jellyfin, and Emby client for Flutter",
     "viewLicensesDescription": "View licenses of third-party libraries",
     "changelogTitle": "What's new",
+    "changelog2271": [
+      "A dead channel no longer holds the spinner for 30 seconds — live TV gives up after 10 seconds and tells you, while movies and shows keep the 30 second wait",
+      "Changing channels is faster: the next and previous channels are tuned in the background while the current one plays, so a zap skips the wait — and a channel whose guide already said no fails straight away instead of opening a dead stream",
+      "A stream the provider briefly refuses (too many requests, or a 403 that may just be a busy moment) is now retried once after a short wait before the app gives up — a refusal that sticks still shows the access message, not an offline screen"
+    ],
     "changelog2270": [
       "Search now reads from a catalog downloaded to your phone instead of asking Trex every time — a search makes no provider requests at all once the catalog is synced, so it is faster and stops looking like a flood of requests",
       "The catalog syncs once a week by default (change it in Settings → IPTV → Catalog sync interval) or whenever you tap Sync catalog now — and the app no longer re-downloads the whole catalog every time it starts, it opens from the file on your phone",

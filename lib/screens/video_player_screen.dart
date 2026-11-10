@@ -113,6 +113,8 @@ import 'video_player/live_stream_retry.dart';
 import 'video_player/live_timeline_report.dart';
 import 'video_player/wakelock_controller.dart';
 import 'video_player/playback_failure_action.dart';
+import 'video_player/playback_open_deadline.dart';
+import 'video_player/live_channel_pretune.dart';
 import 'video_player/playback_transition_gate.dart';
 import 'video_player/open_http_503_watchdog.dart';
 import 'video_player/open_failure_log.dart';
@@ -1108,8 +1110,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   /// How long a started load may go without progress — no `file-loaded`, no
   /// demuxer progress, no failure, no death — before the attempt gives up on
-  /// it. A slow load that keeps moving is not bounded by this (#2635).
-  static const Duration _openDeadline = Duration(seconds: 30);
+  /// it. A slow load that keeps moving is not bounded by this (#2635). The
+  /// budget differs by kind — see [openDeadlineFor] (live 10 s, VOD 30 s).
 
   /// Start a new playback attempt: aborts the previous attempt's open,
   /// invalidates automatic track selection, bumps the generation, arms the
@@ -1146,7 +1148,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       // not just aborted waiters.
       PlaybackOpenOutcome.arm(
         currentPlayer,
-        deadline: _openDeadline,
+        deadline: openDeadlineFor(isLive: widget.isLive),
         onDeadline: () => _onOpenDeadlineExpired(currentPlayer, generation),
       ),
       Future.wait<void>([
@@ -2411,6 +2413,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       }(),
     );
     _retireLaunchObserver();
+    _livePretuner?.dispose();
+    _livePretuner = null;
     _playerInitializationGeneration++;
     _frameRate.dispose();
     WidgetsBinding.instance.removeObserver(this);
@@ -2726,6 +2730,22 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// transient status must never mask the fatal one that follows.
   final Set<int> _fatalHttpStatuses = <int>{};
 
+  /// Statuses in [transientPlaybackHttpStatuses] the player's own log stream
+  /// reported for this open (429: the panel asking the client to wait).
+  /// Latched beside the fatal set so the failure policy can retry them once
+  /// with backoff before the terminal path. Cleared with the fatal set.
+  final Set<int> _transientHttpStatuses = <int>{};
+
+  /// Automatic transient retries spent on this open (budget
+  /// [maxTransientPlaybackRetries]). Reset on every new open, like the
+  /// fatal latch — a fresh open gets a fresh retry.
+  int _transientRetryAttempts = 0;
+
+  /// Background pre-tuner for the channels adjacent to the one playing.
+  /// Created lazily on the first live refresh; discarded in [dispose]. Null
+  /// until the first live launch or zap — VOD never touches it.
+  LiveChannelPretuner? _livePretuner;
+
   /// Bounds an open the server keeps answering with HTTP 503 — that loop
   /// otherwise never raises an error (#1830). Armed from [_onPlayerLog],
   /// disarmed on first frame, on every new-open reset, and in [dispose].
@@ -2912,6 +2932,8 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
     // While the receipt can still tell this session apart from a replaced
     // one: the generation bump below would read as a replacement.
     _retireLaunchObserver();
+    _livePretuner?.dispose();
+    _livePretuner = null;
     _playerInitializationGeneration++;
     _transitionGate.bumpGeneration();
     _transitionGate.completeIdleWaiters();

@@ -8,6 +8,8 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
     bool isCurrentStart() => attempt.isCurrent;
     _firstFrame.resetRenderedForAttempt();
     _hasFatalPlaybackError = false;
+    _transientHttpStatuses.clear();
+    _transientRetryAttempts = 0;
     _dismissPlaybackFailure();
     // 503s observed from here on belong to this attempt's open.
     _http503Watchdog.disarm();
@@ -143,6 +145,11 @@ extension _VideoPlayerPlaybackStartMethods on VideoPlayerScreenState {
           await _playWithPlaybackIntent(currentPlayer);
         }
         committed = attempt.isCurrent;
+        // The launch committed: the neighbours of the tuned channel can
+        // pre-tune in the background while it plays, so the first zap is
+        // already warm. Runs after the open so a failed launch pre-tunes
+        // nothing.
+        if (committed) _refreshLivePretune();
       } catch (e, st) {
         appLogger.e('Failed to start live TV playback', error: e, stackTrace: st);
         unawaited(_sendLiveTimeline('stopped'));

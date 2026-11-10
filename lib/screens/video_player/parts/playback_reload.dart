@@ -427,6 +427,8 @@ extension _VideoPlayerReloadMethods on VideoPlayerScreenState {
       final previousOpenRequest = _currentOpenRequest;
       final previousPlaybackFailureMessage = _playbackFailureMessage;
       _hasFatalPlaybackError = false;
+      _transientHttpStatuses.clear();
+      _transientRetryAttempts = 0;
       _dismissPlaybackFailure();
       final isItemChange = previousMetadata.globalKey != metadata.globalKey;
       // Another file of the same stacked item: its streams carry their own

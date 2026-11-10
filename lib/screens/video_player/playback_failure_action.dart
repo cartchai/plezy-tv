@@ -26,9 +26,31 @@ enum PlaybackFailureAction {
   /// Live ladder is exhausted and its last retry failed.
   liveInterrupted,
 
+  /// Re-open the stream once after a backoff: a transient refusal (429, or
+  /// a 403 that may be transient) deserves one retry before the terminal
+  /// path. The failure view stays down until the retry also fails, so the
+  /// viewer never sees a flash of the error for a failure the retry clears.
+  retryTransient,
+
   /// Show the raw player error and leave the route.
   fatal,
 }
+
+/// How many automatic transient retries one open gets. One: a second retry
+/// would only re-knock on a door the panel already refused twice.
+const int maxTransientPlaybackRetries = 1;
+
+/// The wait before the one automatic transient retry. Short on purpose: the
+/// panel asked the client to wait, and a second is enough for a rate-limit
+/// window to clear without leaving the viewer on a spinner.
+const Duration transientRetryBackoff = Duration(seconds: 1);
+
+/// The wait before a live-ladder retry at [fallbackLevel]. A panel that just
+/// refused the stream (403/429) needs a beat to recover, and an immediate
+/// re-open reads as another knock on a closed door. Level 1 waits 1 s, level
+/// 2 (the ladder's last rung) waits 2 s.
+Duration liveRetryBackoff(int fallbackLevel) =>
+    fallbackLevel <= 1 ? const Duration(seconds: 1) : const Duration(seconds: 2);
 
 /// Decides what [cause] plus the statuses seen on this open mean for playback.
 ///
@@ -54,6 +76,15 @@ enum PlaybackFailureAction {
 /// so a latched status or the live ladder would only re-open a stream into the
 /// same dead output.
 ///
+/// A transient refusal gets one bounded retry before the terminal path — but
+/// only on-demand. Live TV already rides its fallback ladder, which owns
+/// retries (with backoff) there. The 403 retry applies because PlezTV cannot
+/// tell a UA-block 403 from a transient 403: a persistent 403 still ends in
+/// the access-denied dialog once the budget is spent. 429 is the transient
+/// case proper — the panel asking the client to wait, not refusing the
+/// account — and it is never latched as fatal, so with the budget spent it
+/// falls through to the raw error below.
+///
 /// [PlayerError.openTimedOut] and [PlayerError.streamInitFailed] name no
 /// status and no device fault, so they take the default path like any other
 /// failed open: live TV climbs its ladder (a different stream may well decode),
@@ -61,12 +92,20 @@ enum PlaybackFailureAction {
 PlaybackFailureAction resolvePlaybackFailureAction({
   required String? cause,
   required Set<int> fatalHttpStatuses,
+  Set<int> transientHttpStatuses = const <int>{},
+  int transientRetryAttempts = 0,
   required bool isLive,
   required bool liveRetrying,
   required int liveFallbackLevel,
   required bool liveRetryFailed,
 }) {
   if (cause == PlayerError.audioOutputFailed) return PlaybackFailureAction.fatal;
+
+  if (!isLive &&
+      transientRetryAttempts < maxTransientPlaybackRetries &&
+      (transientHttpStatuses.contains(429) || fatalHttpStatuses.contains(403))) {
+    return PlaybackFailureAction.retryTransient;
+  }
 
   if (!isLive && fatalHttpStatuses.contains(403)) return PlaybackFailureAction.playbackNotAllowedDialog;
 

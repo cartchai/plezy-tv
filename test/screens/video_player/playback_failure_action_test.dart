@@ -5,6 +5,8 @@ import 'package:plezy/screens/video_player/playback_failure_action.dart';
 PlaybackFailureAction resolve({
   String? cause,
   Set<int> statuses = const <int>{},
+  Set<int> transientStatuses = const <int>{},
+  int transientAttempts = 0,
   bool isLive = false,
   bool liveRetrying = false,
   int liveFallbackLevel = 0,
@@ -13,6 +15,30 @@ PlaybackFailureAction resolve({
   return resolvePlaybackFailureAction(
     cause: cause,
     fatalHttpStatuses: statuses,
+    transientHttpStatuses: transientStatuses,
+    transientRetryAttempts: transientAttempts,
+    isLive: isLive,
+    liveRetrying: liveRetrying,
+    liveFallbackLevel: liveFallbackLevel,
+    liveRetryFailed: liveRetryFailed,
+  );
+}
+
+// The 403-terminal assertions below pass the transient budget as spent:
+// with attempts remaining a 403 takes the one bounded retry first (build
+// #24), and only a persistent 403 ends in the dialog.
+PlaybackFailureAction resolveTerminal({
+  String? cause,
+  Set<int> statuses = const <int>{},
+  bool isLive = false,
+  bool liveRetrying = false,
+  int liveFallbackLevel = 0,
+  bool liveRetryFailed = false,
+}) {
+  return resolve(
+    cause: cause,
+    statuses: statuses,
+    transientAttempts: maxTransientPlaybackRetries,
     isLive: isLive,
     liveRetrying: liveRetrying,
     liveFallbackLevel: liveFallbackLevel,
@@ -22,19 +48,21 @@ PlaybackFailureAction resolve({
 
 void main() {
   group('HTTP 403', () {
-    test('on-demand playback treats the refusal as terminal', () {
+    test('on-demand playback treats the refusal as terminal once the retry budget is spent', () {
       // The server refused this account or connection (#2510); no retry,
-      // quality change, or backend switch gets past it.
-      expect(resolve(statuses: {403}), PlaybackFailureAction.playbackNotAllowedDialog);
+      // quality change, or backend switch gets past it. The one bounded
+      // retry (build #24) runs first; the dialog is what a persistent
+      // refusal ends in.
+      expect(resolveTerminal(statuses: {403}), PlaybackFailureAction.playbackNotAllowedDialog);
     });
 
     test('outranks a 404 or 500 latched on the same open', () {
       // Until the server lets this account stream, what it says about the file
       // or the session is moot.
-      expect(resolve(statuses: {403, 404}), PlaybackFailureAction.playbackNotAllowedDialog);
-      expect(resolve(statuses: {403, 500}), PlaybackFailureAction.playbackNotAllowedDialog);
+      expect(resolveTerminal(statuses: {403, 404}), PlaybackFailureAction.playbackNotAllowedDialog);
+      expect(resolveTerminal(statuses: {403, 500}), PlaybackFailureAction.playbackNotAllowedDialog);
       expect(
-        resolve(cause: PlayerError.serverHttp503, statuses: {403}),
+        resolveTerminal(cause: PlayerError.serverHttp503, statuses: {403}),
         PlaybackFailureAction.playbackNotAllowedDialog,
       );
     });

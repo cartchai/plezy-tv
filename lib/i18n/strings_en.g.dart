@@ -3662,6 +3662,11 @@ class Translations$about$en {
 	/// en: 'What's new'
 	String get changelogTitle => 'What\'s new';
 
+	List<String> get changelog2271 => [
+		'A dead channel no longer holds the spinner for 30 seconds — live TV gives up after 10 seconds and tells you, while movies and shows keep the 30 second wait',
+		'Changing channels is faster: the next and previous channels are tuned in the background while the current one plays, so a zap skips the wait — and a channel whose guide already said no fails straight away instead of opening a dead stream',
+		'A stream the provider briefly refuses (too many requests, or a 403 that may just be a busy moment) is now retried once after a short wait before the app gives up — a refusal that sticks still shows the access message, not an offline screen',
+	];
 	List<String> get changelog2270 => [
 		'Search now reads from a catalog downloaded to your phone instead of asking Trex every time — a search makes no provider requests at all once the catalog is synced, so it is faster and stops looking like a flood of requests',
 		'The catalog syncs once a week by default (change it in Settings → IPTV → Catalog sync interval) or whenever you tap Sync catalog now — and the app no longer re-downloads the whole catalog every time it starts, it opens from the file on your phone',
@@ -10235,6 +10240,9 @@ extension on Translations {
 			'about.appDescription' => 'A beautiful Plex, Jellyfin, and Emby client for Flutter',
 			'about.viewLicensesDescription' => 'View licenses of third-party libraries',
 			'about.changelogTitle' => 'What\'s new',
+			'about.changelog2271.0' => 'A dead channel no longer holds the spinner for 30 seconds — live TV gives up after 10 seconds and tells you, while movies and shows keep the 30 second wait',
+			'about.changelog2271.1' => 'Changing channels is faster: the next and previous channels are tuned in the background while the current one plays, so a zap skips the wait — and a channel whose guide already said no fails straight away instead of opening a dead stream',
+			'about.changelog2271.2' => 'A stream the provider briefly refuses (too many requests, or a 403 that may just be a busy moment) is now retried once after a short wait before the app gives up — a refusal that sticks still shows the access message, not an offline screen',
 			'about.changelog2270.0' => 'Search now reads from a catalog downloaded to your phone instead of asking Trex every time — a search makes no provider requests at all once the catalog is synced, so it is faster and stops looking like a flood of requests',
 			'about.changelog2270.1' => 'The catalog syncs once a week by default (change it in Settings → IPTV → Catalog sync interval) or whenever you tap Sync catalog now — and the app no longer re-downloads the whole catalog every time it starts, it opens from the file on your phone',
 			'about.changelog2270.2' => 'Settings → IPTV shows how big the IPTV cache is, and the search screen shows when the catalog was last synced',
@@ -10479,11 +10487,11 @@ extension on Translations {
 			'explore.format.movie' => 'Movie',
 			'explore.format.special' => 'Special',
 			'explore.format.ova' => 'OVA',
+			_ => null,
+		} ?? switch (path) {
 			'explore.format.ona' => 'ONA',
 			'explore.format.music' => 'Music',
 			'explore.format.other' => 'Other',
-			_ => null,
-		} ?? switch (path) {
 			'explore.sourceMaterial.original' => 'Original',
 			'explore.sourceMaterial.manga' => 'Manga',
 			'explore.sourceMaterial.lightNovel' => 'Light novel',
@@ -10993,11 +11001,11 @@ extension on Translations {
 			'downloads.unknownShow' => 'Unknown Show',
 			'downloads.unknownSeason' => 'Unknown Season',
 			'downloads.unknownAlbum' => 'Unknown Album',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.completedOfTotal' => ({required Object completed, required Object total}) => '${completed}/${total} completed',
 			'downloads.errorFileNotFound' => 'File not found (404)',
 			'downloads.errorDownloadNotAllowed' => 'Download not allowed by the server (403)',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.errorDownloadFailed' => 'Download failed',
 			'downloads.errorDownloadFailedWithReason' => ({required Object reason}) => 'Download failed: ${reason}',
 			'downloads.errorHttpStatus' => ({required Object status}) => 'Download failed (HTTP ${status})',
@@ -11507,11 +11515,11 @@ extension on Translations {
 			'iptv.epgPastDaysDescription' => 'Past guide days kept for catch-up scrolling',
 			'iptv.epgPastDaysNone' => 'None',
 			'iptv.epgUpdateOnStart' => 'Update on app start',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.epgUpdateOnStartDescription' => 'Refresh the guide when the app starts',
 			'iptv.epgTimeOffset' => 'Time offset',
 			'iptv.epgTimeOffsetDescription' => 'Shift guide times when listings are out by whole hours',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.epgNoOffset' => 'No offset',
 			'iptv.epgOffsetMinutes' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} minute', other: '${n} minutes', ), 
 			'iptv.epgUpdateNow' => 'Update now',

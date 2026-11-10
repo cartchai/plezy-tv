@@ -30,6 +30,8 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
     final action = resolvePlaybackFailureAction(
       cause: err.cause,
       fatalHttpStatuses: _fatalHttpStatuses,
+      transientHttpStatuses: _transientHttpStatuses,
+      transientRetryAttempts: _transientRetryAttempts,
       isLive: widget.isLive,
       liveRetrying: _live.retrying,
       liveFallbackLevel: _live.fallbackLevel,
@@ -42,6 +44,16 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       case PlaybackFailureAction.playbackNotAllowedDialog:
         _latchFatalPlaybackError(action);
         unawaited(_showPlaybackNotAllowedDialog());
+      // One bounded re-open after a backoff for a transient refusal (429, or
+      // a 403 that may be transient). The failure view stays down — the
+      // viewer never sees a flash of the error for a failure the retry may
+      // clear. If the retry also fails, the policy runs again with the
+      // budget spent and the terminal path owns it. Deliberately NOT
+      // latched as fatal: the open is still recoverable.
+      case PlaybackFailureAction.retryTransient:
+        _transientRetryAttempts++;
+        unawaited(_retryTransientPlayback());
+        return;
       case PlaybackFailureAction.serverLimitDialog:
         _latchFatalPlaybackError(action);
         unawaited(_showServerLimitDialog());
@@ -84,6 +96,20 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
         }
         _presentPlaybackFailure(message);
     }
+  }
+
+  /// One bounded re-open after [transientRetryBackoff] for a transient
+  /// refusal. The guards matter: a playback restart in the meantime means
+  /// the stream recovered on its own (the budget reset to 0 is the signal),
+  /// and a new attempt — the viewer pressing Retry, a reload — supersedes
+  /// this one. Either way the retry must not re-open a working stream.
+  Future<void> _retryTransientPlayback() async {
+    final attempt = _playbackAttempt;
+    await Future.delayed(transientRetryBackoff);
+    if (!mounted || _shuttingDown || _hasFatalPlaybackError) return;
+    if (_transientRetryAttempts == 0) return;
+    if (!identical(_playbackAttempt, attempt) || !(attempt?.isCurrent ?? false)) return;
+    _retryFailedPlayback();
   }
 
   /// A terminal player error: the attempt is no longer current, progress
@@ -217,6 +243,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
   void _onPlayerLog(PlayerLog log) {
     final status = PlayerError.httpStatusFromLog(log.text);
     if (status != null && fatalPlaybackHttpStatuses.contains(status)) _fatalHttpStatuses.add(status);
+    if (status != null && transientPlaybackHttpStatuses.contains(status)) _transientHttpStatuses.add(status);
     // An open the server answers with 503 never fails on its own: ffmpeg's
     // reconnect loop retries 503 forever and mpv just reports buffering
     // (#1830). Bound it. Live TV stays out — its ladder owns retries there.
@@ -267,7 +294,7 @@ extension _VideoPlayerErrorMethods on VideoPlayerScreenState {
       return;
     }
     appLogger.w(
-      'No load progress for ${VideoPlayerScreenState._openDeadline.inSeconds}s before the first frame — giving up on this open',
+      'No load progress for ${openDeadlineFor(isLive: widget.isLive).inSeconds}s before the first frame — giving up on this open',
     );
     _onPlayerError(PlayerError(t.messages.playbackFailed, cause: PlayerError.openTimedOut));
   }

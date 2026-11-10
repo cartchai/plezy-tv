@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:os_media_controls/os_media_controls.dart';
 import 'package:plezy/database/app_database.dart';
 import 'package:plezy/media/ids.dart';
@@ -29,6 +30,7 @@ import 'package:plezy/services/media_controls_manager.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/offline_watch_sync_service.dart';
 import 'package:plezy/services/settings_service.dart';
+import 'package:plezy/watch_together/providers/watch_together_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../test_helpers/media_items.dart';
@@ -53,6 +55,7 @@ void main() {
     resetSharedPreferencesForTest();
     SettingsService.resetForTesting();
     await SettingsService.getInstance();
+    await initializeDateFormatting('en');
     calls.clear();
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(mediaControlChannel, (call) async {
@@ -223,6 +226,11 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
         final state = key.currentState!..player = player;
+        // The recovery assertion below pumps after the launch, which builds
+        // the Video widget: seed the completed-startup state (volume
+        // controller) the way a real startup leaves it, or the build crashes
+        // on a null volume controller.
+        await state.debugMarkPlaybackStartedForTesting();
         await state.debugWirePlayerStreamsForTesting();
 
         // The stream the start opened fails while the start still holds the
@@ -231,6 +239,9 @@ void main() {
         await state.debugStartPlaybackForTesting();
 
         expect(player.opened, 1);
+        // The ladder waits out its backoff before retrying (build #24): the
+        // recovery lands 1 s after the start commits, not at once.
+        await tester.pump(const Duration(seconds: 2));
         expect(session.recoveries, 1, reason: 'the failed replacement stream must take the fallback ladder');
 
         await tester.pumpWidget(const SizedBox.shrink());
@@ -481,6 +492,7 @@ class _LiveShell {
         // quality preset; without it the shell fails on a provider error whose
         // message is a paragraph of framework prose.
         ChangeNotifierProvider<OfflineModeProvider>(create: (_) => OfflineModeProvider(serverManager)),
+        ChangeNotifierProvider(create: (_) => WatchTogetherProvider()),
       ],
       child: MaterialApp(
         home: VideoPlayerScreen(
@@ -540,6 +552,18 @@ class _FailingOpenLivePlayer extends _LiveMediaSessionPlayer {
 
   @override
   PlayerStreams get streams => emptyPlayerStreams(error: errors.stream);
+
+  @override
+  String get playerType => 'mpv';
+
+  @override
+  Future<void> updateFrame() async {}
+
+  @override
+  Future<void> setBoxFitMode(int mode) async {}
+
+  @override
+  Future<void> setVideoZoom(double zoom) async {}
 
   @override
   Future<void> open(
