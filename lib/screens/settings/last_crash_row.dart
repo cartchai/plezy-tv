@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '../../i18n/strings.g.dart';
 import '../../services/last_crash_store.dart';
+import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focusable_list_tile.dart';
+import 'crash_history_screen.dart';
 
 /// "Last crash" readout (build #14): what the phone recorded the last time
 /// the app died, so a crash can be figured out from the phone instead of
@@ -62,6 +65,16 @@ class _LastCrashRowState extends State<LastCrashRow> {
     setState(() => _record = null);
   }
 
+  /// Copy the exact text shown above, so the crash can be pasted into a
+  /// message instead of retyped or screenshotted (Matt, 2026-11-11).
+  void _copy() {
+    final record = _record;
+    if (record == null) return;
+    Clipboard.setData(ClipboardData(text: record.describe()));
+    if (!mounted) return;
+    showSuccessSnackBar(context, t.startup.detailsCopied);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -113,10 +126,31 @@ class _LastCrashRowState extends State<LastCrashRow> {
                           ),
                           Align(
                             alignment: Alignment.centerRight,
-                            child: TextButton(
-                              key: const Key('LastCrashClearButton'),
-                              onPressed: _clear,
-                              child: Text(t.settings.lastCrashClear),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton(
+                                  key: const Key('LastCrashHistoryButton'),
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const CrashHistoryScreen(),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(t.settings.lastCrashHistory),
+                                ),
+                                TextButton(
+                                  key: const Key('LastCrashCopyButton'),
+                                  onPressed: _copy,
+                                  child: Text(t.startup.copyDetails),
+                                ),
+                                TextButton(
+                                  key: const Key('LastCrashClearButton'),
+                                  onPressed: _clear,
+                                  child: Text(t.settings.lastCrashClear),
+                                ),
+                              ],
                             ),
                           ),
                         ],

@@ -943,6 +943,9 @@ class Translations$settings$en {
 	/// en: 'Clear'
 	String get lastCrashClear => 'Clear';
 
+	/// en: 'Crash history'
+	String get lastCrashHistory => 'Crash history';
+
 	/// en: 'Debug Logging'
 	String get debugLogging => 'Debug Logging';
 
@@ -9322,6 +9325,7 @@ extension on Translations {
 			'settings.lastCrashAbnormalExit' => 'The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code',
 			'settings.lastCrashLoading' => 'Checking for a recorded crash…',
 			'settings.lastCrashClear' => 'Clear',
+			'settings.lastCrashHistory' => 'Crash history',
 			'settings.debugLogging' => 'Debug Logging',
 			'settings.debugLoggingDescription' => 'Enable detailed logging for troubleshooting',
 			'settings.viewLogs' => 'View Logs',
@@ -9524,9 +9528,9 @@ extension on Translations {
 			'settings.scopeAspectRatio' => 'Aspect Ratio',
 			'settings.scopeSyncOffsets' => 'Audio & Subtitle Sync',
 			'settings.playerScopeOff' => 'Don\'t save',
-			'settings.playerScopeGlobal' => 'Everywhere',
 			_ => null,
 		} ?? switch (path) {
+			'settings.playerScopeGlobal' => 'Everywhere',
 			'settings.playerScopeLibrary' => 'Per library',
 			'settings.playerScopeTitle' => 'Per show or movie',
 			'settings.exportDialogTitle' => 'Export PlezTV settings',
@@ -10038,9 +10042,9 @@ extension on Translations {
 			'profiles.noConnections' => 'No connections',
 			'profiles.plexHomeAccount' => 'Plex Home account',
 			'profiles.plexAccountChip' => ({required Object account}) => 'Plex account: ${account}',
-			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
 			'profiles.connectionDefault' => 'Default',
 			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
 			'profiles.makeDefault' => 'Make default',
@@ -10552,9 +10556,9 @@ extension on Translations {
 			'explore.stats.completed' => ({required Object n}) => '${n} completed',
 			'explore.stats.onHold' => ({required Object n}) => '${n} on hold',
 			'explore.stats.dropped' => ({required Object n}) => '${n} dropped',
-			'explore.season.winter' => 'Winter',
 			_ => null,
 		} ?? switch (path) {
+			'explore.season.winter' => 'Winter',
 			'explore.season.spring' => 'Spring',
 			'explore.season.summer' => 'Summer',
 			'explore.season.fall' => 'Fall',
@@ -11066,9 +11070,9 @@ extension on Translations {
 			'downloads.backgroundWarning.statusOk' => 'Allowed to run in the background',
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
 			'downloads.backgroundWarning.statusDegraded' => 'Limited by system settings',
-			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
 			'downloads.options' => 'Downloads options',
@@ -11580,9 +11584,9 @@ extension on Translations {
 			'iptv.playerSettingsDescription' => 'Decoder, external player and playback options',
 			'iptv.epgSection' => 'EPG / TV guide',
 			'iptv.epgDaysToLoad' => 'Days to load',
-			'iptv.epgDaysToLoadDescription' => 'How many days of guide to load ahead',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.epgDaysToLoadDescription' => 'How many days of guide to load ahead',
 			'iptv.epgDaysCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} day', other: '${n} days', ), 
 			'iptv.epgUpdateInterval' => 'Update interval',
 			'iptv.epgUpdateIntervalDescription' => 'How often the guide refreshes',

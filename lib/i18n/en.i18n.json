@@ -331,6 +331,7 @@
     "lastCrashAbnormalExit": "The app did not shut down cleanly last time, and no Dart error was recorded — if it crashed, the crash is likely outside Dart code",
     "lastCrashLoading": "Checking for a recorded crash…",
     "lastCrashClear": "Clear",
+    "lastCrashHistory": "Crash history",
     "debugLogging": "Debug Logging",
     "debugLoggingDescription": "Enable detailed logging for troubleshooting",
     "viewLogs": "View Logs",

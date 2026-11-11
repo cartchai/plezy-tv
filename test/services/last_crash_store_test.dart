@@ -186,4 +186,67 @@ void main() {
       expect(LastCrashStore.abnormalExitDetected, isFalse);
     });
   });
+
+  group('crash history (v1.0.10)', () {
+    test('history keeps every record, newest first', () async {
+      LastCrashStore.record(StateError('first'), source: 'framework');
+      LastCrashStore.record(ArgumentError('second'), source: 'uncaught');
+
+      final history = await LastCrashStore.readHistory();
+      expect(history.length, 2);
+      expect(history.first.errorType, 'ArgumentError');
+      expect(history.last.errorType, 'StateError');
+      // The latest readout still shows only the newest.
+      expect((await LastCrashStore.read())?.errorType, 'ArgumentError');
+    });
+
+    test('history caps at 50, dropping the oldest', () async {
+      for (var i = 0; i < 51; i++) {
+        LastCrashStore.record(StateError('crash $i'), source: 'uncaught');
+      }
+
+      final history = await LastCrashStore.readHistory();
+      expect(history.length, LastCrashStore.maxHistoryEntries);
+      expect(history.first.message, contains('crash 50'));
+      expect(history.last.message, contains('crash 1'));
+    });
+
+    test('clear empties the history too', () async {
+      LastCrashStore.record(StateError('boom'));
+      expect(await LastCrashStore.readHistory(), isNotEmpty);
+
+      await LastCrashStore.clear();
+      expect(await LastCrashStore.readHistory(), isEmpty);
+      expect(await LastCrashStore.read(), isNull);
+    });
+
+    test('a legacy single record seeds the history', () async {
+      // Simulate an app updated from the single-record version: only the
+      // legacy file exists, no history file yet.
+      final file = File('${tempDir.path}/${LastCrashStore.fileName}');
+      await file.writeAsString(
+        jsonEncode({
+          'errorType': 'StateError',
+          'message': 'Bad state: legacy crash',
+          'stackTrace': null,
+          'timestamp': DateTime.utc(2026, 11, 10, 12, 0, 0).toIso8601String(),
+          'source': 'uncaught',
+        }),
+      );
+
+      final history = await LastCrashStore.readHistory();
+      expect(history.length, 1);
+      expect(history.first.message, contains('legacy crash'));
+    });
+
+    test('a corrupt history file falls back to the legacy record', () async {
+      LastCrashStore.record(StateError('boom'));
+      final historyFile = File('${tempDir.path}/${LastCrashStore.historyFileName}');
+      await historyFile.writeAsString('not json{{{');
+
+      final history = await LastCrashStore.readHistory();
+      expect(history.length, 1);
+      expect(history.first.message, contains('boom'));
+    });
+  });
 }

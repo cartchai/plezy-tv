@@ -107,6 +107,15 @@ class LastCrashRecord {
 abstract final class LastCrashStore {
   static const String fileName = 'last_crash.json';
 
+  /// History file: every recorded crash, newest first, capped at
+  /// [maxHistoryEntries] (Matt, 2026-11-11: a Crash history page with a
+  /// date/time + Copy per crash). The single-record file above stays the
+  /// "latest" readout — the history is additive, never a replacement.
+  static const String historyFileName = 'crash_history.json';
+
+  /// Oldest entries past this count are dropped on the next record.
+  static const int maxHistoryEntries = 50;
+
   /// One-word exit-state file (build #14, D-6): the previous launch's
   /// shutdown. [markLaunched] writes 'running' at startup; a clean engine
   /// detach writes 'clean' ([markCleanExit]). A crash, a force-stop, or the
@@ -252,6 +261,40 @@ abstract final class LastCrashStore {
     } catch (error, stackTrace) {
       appLogger.d('Could not persist the last crash record', error: error, stackTrace: stackTrace);
     }
+    _appendHistorySync(directory, record);
+  }
+
+  /// Prepends [record] to the history file (newest first), trimming to
+  /// [maxHistoryEntries]. Best effort, never throws.
+  static void _appendHistorySync(Directory directory, LastCrashRecord record) {
+    try {
+      final file = File(p.join(directory.path, historyFileName));
+      var entries = _readHistorySync(file);
+      entries.insert(0, record);
+      if (entries.length > maxHistoryEntries) entries = entries.sublist(0, maxHistoryEntries);
+      if (!file.parent.existsSync()) file.parent.createSync(recursive: true);
+      file.writeAsStringSync(
+        jsonEncode(entries.map((e) => e.toJson()).toList()),
+        flush: true,
+      );
+    } catch (error, stackTrace) {
+      appLogger.d('Could not persist the crash history', error: error, stackTrace: stackTrace);
+    }
+  }
+
+  static List<LastCrashRecord> _readHistorySync(File file) {
+    try {
+      if (!file.existsSync()) return [];
+      final decoded = jsonDecode(file.readAsStringSync());
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((m) => LastCrashRecord.fromJson(m.cast<String, Object?>()))
+          .whereType<LastCrashRecord>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   static Future<void> _writeFile(File file, LastCrashRecord record) async {
@@ -260,6 +303,18 @@ abstract final class LastCrashStore {
       await file.writeAsString(jsonEncode(record.toJson()), flush: true);
     } catch (error, stackTrace) {
       appLogger.d('Could not persist the last crash record', error: error, stackTrace: stackTrace);
+    }
+    try {
+      final historyFile = File(p.join(file.parent.path, historyFileName));
+      var entries = _readHistorySync(historyFile);
+      entries.insert(0, record);
+      if (entries.length > maxHistoryEntries) entries = entries.sublist(0, maxHistoryEntries);
+      await historyFile.writeAsString(
+        jsonEncode(entries.map((e) => e.toJson()).toList()),
+        flush: true,
+      );
+    } catch (error, stackTrace) {
+      appLogger.d('Could not persist the crash history', error: error, stackTrace: stackTrace);
     }
   }
 
@@ -287,12 +342,46 @@ abstract final class LastCrashStore {
     }
   }
 
-  /// Deletes the persisted record. Never throws.
+  /// Every recorded crash, newest first (capped at [maxHistoryEntries] by
+  /// [record]). When no history file exists yet — e.g. the app updated from
+  /// a version that only kept the latest — the legacy single record seeds
+  /// the list, so the one crash already on the phone is not lost.
+  static Future<List<LastCrashRecord>> readHistory() async {
+    final inFlight = _writeInFlight;
+    if (inFlight != null) {
+      try {
+        await inFlight;
+      } catch (_) {
+        // Best effort: a failed write must not block the read.
+      }
+    }
+    try {
+      final file = await _file(historyFileName);
+      if (file != null && await file.exists()) {
+        final decoded = jsonDecode(await file.readAsString());
+        if (decoded is List) {
+          final entries = decoded
+              .whereType<Map>()
+              .map((m) => LastCrashRecord.fromJson(m.cast<String, Object?>()))
+              .whereType<LastCrashRecord>()
+              .toList();
+          if (entries.isNotEmpty) return entries;
+        }
+      }
+    } catch (error, stackTrace) {
+      appLogger.d('Could not read the crash history', error: error, stackTrace: stackTrace);
+    }
+    final latest = await read();
+    return latest == null ? [] : [latest];
+  }
+
+  /// Deletes the persisted record and the history. Never throws.
   static Future<void> clear() async {
     try {
       final file = await _file();
-      if (file == null) return;
-      if (await file.exists()) await file.delete();
+      if (file != null && await file.exists()) await file.delete();
+      final historyFile = await _file(historyFileName);
+      if (historyFile != null && await historyFile.exists()) await historyFile.delete();
     } catch (error, stackTrace) {
       appLogger.d('Could not clear the last crash record', error: error, stackTrace: stackTrace);
     }
