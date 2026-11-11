@@ -60,8 +60,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/prefs.dart';
 
 // Redaction-safe test password (never a real credential).
@@ -207,7 +209,10 @@ class _Build18FakeApi extends XtreamApi {
             ]
           : vodFillerRows();
     }
-    return [
+    // The sync reads the raw body the API stored (not the typed rows) to
+    // write the index — the real XtreamApi sets it from the HTTP response;
+    // the fake must set it here, or the sync records 'empty-response'.
+    final rows = [
       const XtreamVodStream(
         streamId: 1,
         name: 'NF - Game of Thrones: A Day in...',
@@ -215,6 +220,8 @@ class _Build18FakeApi extends XtreamApi {
       ),
       ...vodFillerRows(),
     ];
+    lastVodStreamsBody = jsonEncode(rows.map((r) => r.toJson()).toList());
+    return rows;
   }
 
   @override
@@ -258,6 +265,34 @@ Future<List<XtreamSeries>> readDiskSeriesRows() async {
   if (hit == null) return const <XtreamSeries>[];
   final decoded = jsonDecode(hit.body) as List<dynamic>;
   return decoded.map((e) => XtreamSeries.fromJson(e as Map<String, dynamic>)).toList();
+}
+
+/// Make the seeded disk file STALE (older than the sync interval) by
+/// pushing its mtime back, so the submit's sync is due. (Mirror of
+/// build19's makeDiskSeriesStale; R2.3 repair tests need the sync due.)
+Future<void> makeDiskSeriesStale() async {
+  final tempDir = await IptvCatalogDiskCache.debugDirectoryProvider!();
+  final files = await tempDir
+      .list(recursive: true)
+      .where((e) => e.path.endsWith('/series.json'))
+      .toList();
+  expect(files, hasLength(1));
+  await (files.single as File).setLastModified(
+    DateTime.now().subtract(const Duration(days: 8)),
+  );
+}
+
+/// Same, for the VOD disk file.
+Future<void> makeDiskVodStale() async {
+  final tempDir = await IptvCatalogDiskCache.debugDirectoryProvider!();
+  final files = await tempDir
+      .list(recursive: true)
+      .where((e) => e.path.endsWith('/vod.json'))
+      .toList();
+  expect(files, hasLength(1));
+  await (files.single as File).setLastModified(
+    DateTime.now().subtract(const Duration(days: 8)),
+  );
 }
 
 /// The disk write inside _loadSeriesCached is fire-and-forget; poll until
@@ -328,65 +363,88 @@ void main() {
     test('D1: warm search over a crawl-shaped disk list returns [] with hiddenMatches=0', () async {
       // Seed the disk series file with exactly what _loadSeries()'s crawl
       // writes when category 1219 was hidden: 46,417 rows, no GoT.
+      // R2.3: the search sweep is gone, so the warm search serves the
+      // poisoned disk list and GoT is unfindable until the submit's sync
+      // repairs the disk + index — the repair moved from the heal to the
+      // sync.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode(crawlShapedSeriesRows().map((r) => r.toJson()).toList()),
       );
-      final client = clientWith(api: _Build18FakeApi());
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build18FakeApi();
+      final client = clientWith(api: api);
       try {
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         await warmSeries(client);
-        final results = await client.searchItems('game of thrones');
+        final first = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
         // ignore: avoid_print
         print(
-          'BUILD18-D1 unscoped: titles=${results.map((i) => i.title).toList()} '
+          'BUILD18-D1 unscoped: titles=${first.map((i) => i.title).toList()} '
           'series loadRows=${diag.series.loadRows} hidden=${diag.series.hiddenMatches} '
           'ms=${diag.series.ms} totalMs=${diag.totalMs}',
         );
         // The recording's exact signature: movies 1, live 2, series 0,
         // and the filter did NOT hide anything (hiddenMatches == 0).
-        expect(results.where((i) => (i.title ?? '').contains('A Day in')).length, 1);
-        expect(results.where((i) => (i.title ?? '').contains('GAME OF THRONES 4K')).length, 2);
+        expect(first.where((i) => (i.title ?? '').contains('A Day in')).length, 1);
+        expect(first.where((i) => (i.title ?? '').contains('GAME OF THRONES 4K')).length, 2);
         expect(diag.series.loadRows, 46417);
         expect(diag.series.hiddenMatches, 0);
         expect(diag.series.ms, lessThan(5000));
-        // FAILING-FIRST: the warm path trusts the disk list and never
-        // consults the sweep/network, so the show is unfindable.
+        expect(first.map((i) => i.title), isNot(contains(_gotName)));
+        await client.searchIndexReady;
+        final results = await client.searchItems('game of thrones');
         expect(results.map((i) => i.title), contains(_gotName));
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
     test('D1b: scoped Trex — Series search over the same disk list returns []', () async {
+      // Same poisoned disk as D1, scoped to Trex — Series. R2.3: the
+      // repair is the submit's sync, as in D1.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode(crawlShapedSeriesRows().map((r) => r.toJson()).toList()),
       );
-      final client = clientWith(api: _Build18FakeApi());
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build18FakeApi();
+      final client = clientWith(api: api);
       try {
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         await warmSeries(client);
-        final results = await client.searchItems(
+        final first = await client.searchItems(
           'game of thrones',
+          onlineAllowed: true,
           excludedLibraryIds: {_moviesLibraryId},
         );
         final diag = client.lastSearchDiagnostics!;
         // ignore: avoid_print
         print(
-          'BUILD18-D1b scoped: titles=${results.map((i) => i.title).toList()} '
+          'BUILD18-D1b scoped: titles=${first.map((i) => i.title).toList()} '
           'series loadRows=${diag.series.loadRows} hidden=${diag.series.hiddenMatches} '
           'ms=${diag.series.ms}',
         );
         expect(diag.series.loadRows, 46417);
         expect(diag.series.hiddenMatches, 0);
-        // FAILING-FIRST: same warm-path trust, scoped — the phone's f16/f19.
+        expect(first.map((i) => i.title), isNot(contains(_gotName)));
+        await client.searchIndexReady;
+        final results = await client.searchItems(
+          'game of thrones',
+          excludedLibraryIds: {_moviesLibraryId},
+        );
         expect(results.map((i) => i.title), contains(_gotName));
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
@@ -460,36 +518,46 @@ void main() {
 
       // Step 2: EN turned back ON, fresh client, same connection, same
       // disk. The panel would now return the full list — but the warm
-      // search never asks it. The heal must find the show via the
-      // per-category sweep of the categories the disk does not cover.
+      // search never asks it. R2.3: the heal is the submit's sync, not
+      // the sweep — it fetches the full list in one unfiltered call and
+      // repairs the disk + index, and the next search finds the show.
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
       final api2 = _Build18FakeApi();
       final shown = clientWith(api: api2);
       try {
+        await seedIptvSearchIndexFromFakePanel(api2, 'conn-xt-1', types: {'live', 'movie'});
         await warmSeries(shown);
-        final r2 = await shown.searchItems('game of thrones');
+        final first = await shown.searchItems('game of thrones', onlineAllowed: true);
         final diag = shown.lastSearchDiagnostics!;
         // ignore: avoid_print
         print(
-          'BUILD18-D3 step 2: titles=${r2.map((i) => i.title).toList()} '
+          'BUILD18-D3 step 2: titles=${first.map((i) => i.title).toList()} '
           'series loadRows=${diag.series.loadRows} hidden=${diag.series.hiddenMatches} '
           'unfilteredCalls=${api2.unfilteredSeriesCalls}',
         );
         expect(diag.series.loadRows, poisoned.length);
         expect(diag.series.hiddenMatches, 0);
-        expect(api2.unfilteredSeriesCalls, 0);
-        // The poisoned disk survives the un-hide, but the search heals.
+        expect(first.map((i) => i.title), isNot(contains(_gotName)));
+        await shown.searchIndexReady;
+        expect(api2.unfilteredSeriesCalls, greaterThan(0));
+        final r2 = await shown.searchItems('game of thrones');
+        // The poisoned disk survives the un-hide, but the sync repairs it.
         expect(r2.map((i) => i.title), contains(_gotName));
       } finally {
         shown.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
     test('D5: a VOD crawl does not write a poisoned disk file', () async {
       // Same bug class as series (build #18 fix 1), for VOD: the panel's
       // unfiltered VOD call returns [], the load crawls per-category, and
-      // the crawled rows must be served in memory but never persisted —
-      // otherwise the next warm search trusts a list missing every
-      // category hidden at crawl time.
+      // the crawled rows must be served in memory but never persisted.
+      // R2.3: the crawl is gone from search — the search serves local
+      // rows only, so the per-category-only documentary is not found by
+      // search at all, and nothing runs that could write a poisoned disk
+      // file. The disk stays empty by construction now.
       final api = _Build18FakeApi(unfilteredVodEmpty: true);
       final client = clientWith(api: api);
       try {
@@ -498,7 +566,7 @@ void main() {
         print(
           'BUILD18-D5: titles=${results.map((i) => i.title).toList()}',
         );
-        expect(results.map((i) => i.title), contains('NF - Game of Thrones: A Day in...'));
+        expect(results.map((i) => i.title), isNot(contains('NF - Game of Thrones: A Day in...')));
         final diskVod = await waitForDiskVod();
         expect(diskVod, isEmpty);
       } finally {
@@ -506,63 +574,59 @@ void main() {
       }
     });
 
-    test('D6: a poisoned VOD disk still heals via the sweep', () async {
+    test('D6: a poisoned VOD disk still heals via the sync', () async {
       // Same shape as D1, for VOD: seed the disk exactly as v2.25.13
       // wrote it when 'Movies' was hidden at crawl time — rows from
       // every visible category, none from 'Movies', so the documentary
-      // is missing from the list the warm search trusts. The warm-up
-      // search lands the VOD load (setting _vodStreamsLoaded), so the
-      // asserted search takes the warm branch.
+      // is missing from the list the warm search trusts. R2.3: the
+      // sweep is gone — the submit's sync repairs the disk + index, and
+      // the next search finds the documentary.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.vodDataset,
         jsonEncode(vodFillerRows().map((r) => r.toJson()).toList()),
       );
+      await makeDiskVodStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
       final client = clientWith(api: _Build18FakeApi());
       try {
         await warmSeries(client);
-        final results = await client.searchItems('game of thrones');
+        final first = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
         // ignore: avoid_print
         print(
-          'BUILD18-D6: titles=${results.map((i) => i.title).toList()} '
+          'BUILD18-D6: titles=${first.map((i) => i.title).toList()} '
           'movies loadRows=${diag.movies.loadRows} '
-          'loadMatches=${diag.movies.loadMatches} sweepMatches=${diag.movies.sweepMatches}',
+          'loadMatches=${diag.movies.loadMatches}',
         );
         // The search read the seeded disk (3 filler rows, no documentary).
-        // (loadRows == 3 pins the disk read: a network load would return
-        // 4 rows — the documentary plus the fillers. loadSource is a
-        // build #18 diagnostics addition, so this test must not reference
-        // it — the file has to compile on base too.)
         expect(diag.movies.loadRows, 3);
         expect(diag.movies.loadMatches, 0);
-        // FAILING-FIRST on base: the warm VOD path trusts the disk list
-        // and never sweeps, so the documentary is unfindable. On the fix,
-        // the 0-match warm branch sweeps the categories the disk does not
-        // cover ('Movies') and the documentary comes back via the sweep.
-        expect(diag.movies.sweepMatches, greaterThan(0));
+        expect(first.map((i) => i.title), isNot(contains('NF - Game of Thrones: A Day in...')));
+        await client.searchIndexReady;
+        final results = await client.searchItems('game of thrones');
         expect(results.map((i) => i.title), contains('NF - Game of Thrones: A Day in...'));
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
-    test('D4 (control): cold path, unfiltered [] fast, per-category works — the show is found', () async {
-      // No disk seeding: the load IS the crawl, and with EN visible the
-      // crawl covers 1219 — so the cold path finds GoT. Proves the
-      // sweep/crawl machinery is fine; the bug is the warm path trusting
-      // a partial disk list.
+    test('D4 (control): cold path, unfiltered [] fast, per-category works — the show is not found by search', () async {
+      // No disk seeding: the panel's unfiltered series call returns []
+      // and the show lives only in a per-category call. R2.3: the sweep
+      // is gone, so the search cannot reach it — the series leg stays
+      // [] + cold. The submit's sync records 'empty-response' (one
+      // unfiltered call, zero per-category calls) and the search answers
+      // the other legs instead of hanging.
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
       final api = _Build18FakeApi(unfilteredSeriesEmpty: true);
       final client = clientWith(api: api);
       try {
-        final results = await client.searchItems('game of thrones');
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
+        final results = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
-        // The search returns via the sweep before the background load
-        // (crawl) lands — loadRows == -1 is expected in this shape — so
-        // a second search is needed before the load's counters can be
-        // read: by then the shared _seriesFuture has resolved.
-        await client.searchItems('zz-no-match-zz');
         // ignore: avoid_print
         print(
           'BUILD18-D4 control: titles=${results.map((i) => i.title).toList()} '
@@ -571,10 +635,12 @@ void main() {
           'perCategoryCalls=${api.perCategorySeriesCalls}',
         );
         expect(api.unfilteredSeriesCalls, 1);
-        expect(api.perCategorySeriesCalls, greaterThan(0));
-        expect(results.map((i) => i.title), contains(_gotName));
+        expect(api.perCategorySeriesCalls, 0);
+        expect(results.map((i) => i.title), isNot(contains(_gotName)));
+        expect(diag.series.cold, isTrue);
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
   });

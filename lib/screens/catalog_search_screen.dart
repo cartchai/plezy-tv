@@ -34,7 +34,9 @@ class _CatalogSearchScreenState extends State<CatalogSearchScreen>
   String get searchDebugLabel => 'CatalogSearch';
 
   @override
-  Future<List<MediaItem>> performSearchQuery(String query) async {
+  Future<List<MediaItem>> performSearchQuery(String query, {bool onlineAllowed = false}) async {
+    // Build v1.0.11 (R2.0): ignored — a catalog source searches its local
+    // catalog, never the IPTV panel.
     final items = await widget.source.search(query);
     return [for (final item in items) item.toMediaItem()];
   }

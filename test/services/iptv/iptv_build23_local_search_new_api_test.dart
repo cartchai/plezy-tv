@@ -248,6 +248,7 @@ class _PlexLikeFakeClient implements MediaServerClient {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   }) async => searchResults;
 
   @override

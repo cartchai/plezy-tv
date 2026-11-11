@@ -120,6 +120,7 @@ import 'package:plezy/services/plex_api_cache.dart';
 import 'package:plezy/services/settings_service.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/media_items.dart';
 import '../../test_helpers/prefs.dart';
 
@@ -457,6 +458,7 @@ class _PlexLikeFakeClient implements MediaServerClient {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   }) async {
     lastExcludedLibraryIds = excludedLibraryIds;
     return searchResults;
@@ -647,17 +649,11 @@ void main() {
   });
 
   group('build19: Trex series leg — heal timing + partial-list persistence', () {
-    test(
-      'P4-fast (control): heal reaches 1219 when the sweep fits the 45 s deadline',
-      // Build #21: at cap 8 the sweep needs 232 / 8 x 1 s = 29 s to
-      // reach 1219, plus warm-up overhead — past the default 30 s test
-      // timeout. The 3-minute timeout (same as P4-slow) is a harness
-      // allowance, not a product budget: the product section budget is
-      // still 50 s and the sweep deadline 49 s.
-      timeout: const Timeout(Duration(minutes: 3)),
-      () async {
-      // Disk holds rows from categories 1..5 only, so the heal must sweep
-      // the other 232 categories (1219 last) to find GoT.
+    test('P4-fast (control): the sync reaches 1219 where the sweep used to', () async {
+      // R2.3: the per-category sweep is gone. The disk holds rows from
+      // categories 1..5 only; the submit's coalesced sync fetches the
+      // full unfiltered list (one call) and writes disk + index, and the
+      // next search finds GoT — no 29 s sweep, no 45 s deadline.
       final cache = IptvCatalogDiskCache();
       final seed = allSeriesRows()
           .where((r) => {'1', '2', '3', '4', '5'}.contains(r.categoryId))
@@ -667,79 +663,66 @@ void main() {
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode(seed.map((r) => r.toJson()).toList()),
       );
-      final client = clientWith(api: _Build19FakeApi(perCallDelay: const Duration(seconds: 1)));
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build19FakeApi(perCallDelay: const Duration(seconds: 1));
+      final client = clientWith(api: api);
       try {
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         await warmSeriesNoHeal(client);
-        final results = await client.searchItems('game of thrones');
+        final first = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
         // ignore: avoid_print
         print(
-          'BUILD19-P4-fast: titles=${results.map((i) => i.title).toList()} '
-          'series loadRows=${diag.series.loadRows} sweepMatches=${diag.series.sweepMatches} '
-          'ms=${diag.series.ms}',
+          'BUILD19-P4-fast: first titles=${first.map((i) => i.title).toList()} '
+          'series loadRows=${diag.series.loadRows} ms=${diag.series.ms}',
         );
         expect(diag.series.loadRows, seed.length);
+        expect(first.map((i) => i.title), isNot(contains(_gotName)));
+        expect(first, isNotEmpty, reason: 'the other legs answer from the seeded index');
+        await client.searchIndexReady;
+        final results = await client.searchItems('game of thrones');
         expect(results.map((i) => i.title), contains(_gotName));
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
-    test(
-      'P4-slow: heal MISSES 1219 when per-call latency pushes the sweep past the 45 s deadline',
-      timeout: const Timeout(Duration(minutes: 3)),
-      () async {
-        final cache = IptvCatalogDiskCache();
-        final seed = allSeriesRows()
-            .where((r) => {'1', '2', '3', '4', '5'}.contains(r.categoryId))
-            .toList();
-        await cache.write(
-          'conn-xt-1',
-          IptvCatalogDiskCache.seriesDataset,
-          jsonEncode(seed.map((r) => r.toJson()).toList()),
-        );
-        final api = _Build19FakeApi(perCallDelay: const Duration(seconds: 6));
-        final client = clientWith(api: api);
-        try {
-          await warmSeriesNoHeal(client);
-          final results = await client.searchItems('game of thrones');
-          final diag = client.lastSearchDiagnostics!;
-          // ignore: avoid_print
-          print(
-            'BUILD19-P4-slow: titles=${results.map((i) => i.title).toList()} '
-            'series loadRows=${diag.series.loadRows} sweepMatches=${diag.series.sweepMatches} '
-            'ms=${diag.series.ms} perCategoryCalls=${api.perCategorySeriesCalls}',
-          );
-          // FAILING-FIRST (build #19): 232 categories / 32 per batch = 8
-          // batches; 8 x 6 s = 48 s < the 49 s sweep deadline, so the
-          // last batch (holding 1219) JUST lands and GoT is found. The
-          // threshold is what matters, not the exact 6 s: any per-call
-          // latency above ~5.6 s breaks the heal for a worst-case wanted
-          // set at batch 32 — and a throttled panel serialises the batch
-          // the same way.
-          //
-          // Build #21 recalibration: the burst is now capped at 8 total
-          // in flight (was batch 32), so at 6 s per call the sweep needs
-          // 232 / 8 x 6 s = 174 s — far past the 49 s deadline — and the
-          // heal MISSES 1219, exactly as this test's name says. That is
-          // the correct graceful behaviour at cap 8: the search returns
-          // what it found (other Game of Thrones variants from earlier
-          // categories) instead of hanging, and it does not claim the
-          // exact show. The "heal reaches 1219" guarantee is now
-          // carried by P4-fast (1 s per call, cap 8 reaches in 29 s)
-          // and by build #21's R1 reach test (250 ms per call). A panel
-          // answering at 6 s per category call is severely degraded;
-          // the unfiltered load, which runs outside the cap, is the
-          // primary path then.
-          expect(results.map((i) => i.title), isNot(contains(_gotName)));
-          expect(results, isNotEmpty, reason: 'the search returns what it found, not []');
-          expect(diag.series.ms, lessThan(60000), reason: 'the sweep times out at the section budget, it does not hang');
-        } finally {
-          client.close();
-        }
-      },
-    );
-
+    test('P4-slow: a 6 s-per-call panel still delivers GoT via one unfiltered sync call', () async {
+      // R2.3: the sweep is gone, so the 232-category x 6 s = 174 s sweep
+      // deadline no longer applies. The submit's sync fetches the full
+      // list in ONE unfiltered call (the per-call delay only ever gated
+      // per-category calls), writes disk + index, and the next search
+      // finds the exact show — the slow panel costs seconds, not a
+      // missed heal.
+      final cache = IptvCatalogDiskCache();
+      final seed = allSeriesRows()
+          .where((r) => {'1', '2', '3', '4', '5'}.contains(r.categoryId))
+          .toList();
+      await cache.write(
+        'conn-xt-1',
+        IptvCatalogDiskCache.seriesDataset,
+        jsonEncode(seed.map((r) => r.toJson()).toList()),
+      );
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build19FakeApi(perCallDelay: const Duration(seconds: 6));
+      final client = clientWith(api: api);
+      try {
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
+        await warmSeriesNoHeal(client);
+        final first = await client.searchItems('game of thrones', onlineAllowed: true);
+        expect(first.map((i) => i.title), isNot(contains(_gotName)));
+        expect(first, isNotEmpty, reason: 'the search returns the disk variants immediately, not []');
+        await client.searchIndexReady;
+        final results = await client.searchItems('game of thrones');
+        expect(results.map((i) => i.title), contains(_gotName));
+      } finally {
+        client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
+      }
+    });
     test('P5a: a PARTIAL unfiltered list must not overwrite a larger good disk file', () async {
       // The panel's current degraded shape: unfiltered returns 635 rows.
       final cache = IptvCatalogDiskCache();
@@ -763,10 +746,11 @@ void main() {
       );
       final client = clientWith(api: api);
       try {
-        await warmSeries(client);
-        // The stale disk triggers the sync; the sync's unfiltered call
-        // returns the 635-row partial list.
-        final diskRows = await waitForDiskSeriesChange(46527);
+        // The stale disk makes the sync due; the submit kicks it off and
+        // the sync's unfiltered call returns the 635-row partial list.
+        await client.searchItems('game of thrones', onlineAllowed: true);
+        await client.searchIndexReady;
+        final diskRows = await readDiskSeriesRows();
         // ignore: avoid_print
         print(
           'BUILD19-P5a: disk rows after refresh=${diskRows.length} '
@@ -787,34 +771,37 @@ void main() {
       }
     });
 
-    test('P5b: a healing search must repair the disk, not just the one result', () async {
+    test('P5b: the sync repairs a poisoned disk, not just the one result', () async {
       // Poisoned disk (build #18 D3 shape): 46,417 rows, no 1219.
+      // R2.3: the search never heals, so the repair moved to the sync —
+      // the submit's coalesced sync fetches the full list and writes
+      // disk + index together, and the next search finds GoT from the
+      // warm index without re-fetching.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode(crawlShapedSeriesRows().map((r) => r.toJson()).toList()),
       );
+      await makeDiskSeriesStale();
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
       final client = clientWith(api: _Build19FakeApi());
       try {
-        await warmSeries(client);
-        final results = await client.searchItems('game of thrones');
-        // The heal itself works on base (build #18): GoT is found.
-        expect(results.map((i) => i.title), contains(_gotName));
-        // But the disk is untouched — the heal only appends matches to
-        // the returned list, it never persists the swept rows.
+        await client.searchItems('game of thrones', onlineAllowed: true);
+        await client.searchIndexReady;
         final diskRows = await readDiskSeriesRows();
         // ignore: avoid_print
         print(
-          'BUILD19-P5b: after healing search, disk rows=${diskRows.length} '
+          'BUILD19-P5b: after sync, disk rows=${diskRows.length} '
           'hasGoT=${diskRows.any((r) => r.seriesId == _gotSeriesId)}',
         );
-        // FAILING-FIRST: the next search (or a disk-only read) must heal
-        // all over again, and a disk-only read finds nothing at all.
-        // The fix repairs the disk when a search heals it.
+        expect(diskRows.length, 46527);
         expect(diskRows.any((r) => r.seriesId == _gotSeriesId), isTrue);
+        final results = await client.searchItems('game of thrones');
+        expect(results.map((i) => i.title), contains(_gotName));
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
@@ -823,14 +810,19 @@ void main() {
       // Netflix rows, category 1219 returns 0 rows. No app-side fix can
       // find GoT while the panel has no GoT — this pins that dependency
       // so a future live-panel validation does not blame the app.
-      final client = clientWith(
-        api: _Build19FakeApi(
-          unfilteredSeriesOverride: netflixOnlySeriesRows(),
-          category1219Empty: true,
-          includeNetflixCategories: true,
-        ),
+      // R2.3: the movies/live legs answer from the seeded index; the
+      // series leg stays cold (nothing local, and the panel has no GoT
+      // to sync), so it is [] + cold instead of a sweep that finds
+      // nothing.
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build19FakeApi(
+        unfilteredSeriesOverride: netflixOnlySeriesRows(),
+        category1219Empty: true,
+        includeNetflixCategories: true,
       );
+      final client = clientWith(api: api);
       try {
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         final results = await client.searchItems('game of thrones');
         final diag = client.lastSearchDiagnostics!;
         // ignore: avoid_print
@@ -844,21 +836,34 @@ void main() {
         expect(results.where((i) => (i.title ?? '').contains('GAME OF THRONES 4K')).length, 2);
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
 
-    test('P7 (control): a transient 400 on the unfiltered call degrades to the sweep, not a throw', () async {
+    test('P7 (control): a transient 400 on the unfiltered call fails the sync leg, not the search', () async {
       // The parent's live probe also saw transient HTTP 400s on every
-      // panel call, then 200s minutes later. The cold path catches the
-      // load error and falls back to the per-category sweep.
-      final client = clientWith(api: _Build19FakeApi(unfilteredSeriesThrows: true));
+      // panel call, then 200s minutes later. R2.3: the sweep is gone, so
+      // there is no per-category fallback in search — a 400 on the
+      // unfiltered sync fetch records the series leg 'failed' (4xx never
+      // retries) and the search still answers the healthy legs instead
+      // of throwing. The series rows arrive on the next sync, once the
+      // panel answers again.
+      IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      final api = _Build19FakeApi(unfilteredSeriesThrows: true);
+      final client = clientWith(api: api);
       try {
-        final results = await client.searchItems('game of thrones');
+        await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
+        final results = await client.searchItems('game of thrones', onlineAllowed: true);
         // ignore: avoid_print
         print('BUILD19-P7 400 on unfiltered: titles=${results.map((i) => i.title).toList()}');
-        expect(results.map((i) => i.title), contains(_gotName));
+        expect(results.map((i) => i.title), isNot(contains(_gotName)));
+        expect(client.lastSearchDiagnostics?.series.cold, isTrue);
+        // The other legs still work — the search as a whole is healthy.
+        expect(results.where((i) => (i.title ?? '').contains('A Day in')).length, 1);
+        expect(results.where((i) => (i.title ?? '').contains('GAME OF THRONES 4K')).length, 2);
       } finally {
         client.close();
+        IptvSearchIndex.debugDirectoryProvider = null;
       }
     });
   });

@@ -10,6 +10,31 @@ import '../../utils/json_utils.dart';
 import '../../utils/search_relevance.dart';
 import 'xtream_api.dart';
 
+/// Whole-token quality markers stripped from titles at index time
+/// (R2.2) — see [stripTitleDecorations].
+const _qualityTokens = {'4k', 'fhd', 'hd', 'uhd', '2160p', '1080p', '720p', 'hevc', 'x265', 'x264'};
+
+/// Strip the provider's title decorations before normalizing for the
+/// index (R2.2) — the display `name` stays raw. A decorated title
+/// ("EN - Game Of Thrones (2011)") normalizes to the same bare form as
+/// the plain title ("Game of Thrones"), so BM25 + the caller scorer
+/// stop ranking the real title 252nd of 252 behind shorter
+/// near-matches. Strips, in order: a leading 2-letter language prefix
+/// ("EN - "), a trailing " (YYYY)", and whole-token quality markers
+/// (case-insensitive). If stripping leaves nothing, the original title
+/// is kept. Case is preserved — [normalizeSearchText] lowercases after.
+/// Note: the prefix regex also strips a genuine title starting like
+/// "Go - …" — the real catalog's coverage beyond the `^[A-Za-z]{2} - `
+/// + year + quality-token rules is UNVERIFIED; do not invent more
+/// strip rules without data.
+String stripTitleDecorations(String title) {
+  var stripped = title.replaceFirst(RegExp(r'^[A-Za-z]{2} - '), '');
+  stripped = stripped.replaceFirst(RegExp(r' \(\d{4}\)$'), '');
+  final tokens = stripped.split(' ').where((t) => !_qualityTokens.contains(t.toLowerCase())).toList();
+  final joined = tokens.join(' ');
+  return joined.trim().isEmpty ? title : joined;
+}
+
 /// Local search index for IPTV catalogs (build #23 — local-only search).
 ///
 /// The whole catalog (live channels, VOD movies, series) is synced to a
@@ -151,9 +176,25 @@ class IptvSearchIndex {
     return index;
   }
 
+  /// Index schema version. v2 (R2.2): `name_norm` is the STRIPPED title
+  /// ([stripTitleDecorations]), not the raw one.
+  static const int _schemaVersion = 2;
+
   void _open() {
     _db.execute('PRAGMA journal_mode=WAL;');
     _db.execute('PRAGMA busy_timeout = 30000;');
+    // One-time re-index on the v1 -> v2 upgrade: the old rows' norms are
+    // the raw titles, so drop the four tables and rebuild from the disk
+    // catalogs (local, 0 panel requests) — the seed path rebuilds it on
+    // the next bind, and the sync refreshes it when due.
+    final version = _db.select('PRAGMA user_version').first.values.first as int;
+    if (version < _schemaVersion) {
+      _db.execute('DROP TABLE IF EXISTS iptv_search_item;');
+      _db.execute('DROP TABLE IF EXISTS iptv_search_fts;');
+      _db.execute('DROP TABLE IF EXISTS iptv_search_category;');
+      _db.execute('DROP TABLE IF EXISTS iptv_search_meta;');
+      _db.execute('PRAGMA user_version = $_schemaVersion;');
+    }
     createSchema(_db);
   }
 
@@ -313,7 +354,43 @@ class IptvSearchIndex {
     return tokens.map((t) => '"${t.replaceAll('"', '""')}"').join(' ');
   }
 
-  /// Candidate rows for [needle] (already lowercased by the caller, the
+  /// Whether any row for [type] could match [needle] — a cheap `EXISTS`
+  /// + LIKE gate over the same normalized tokens the FTS arm uses, so a
+  /// no-match section answers in ~10 ms instead of paying a ~280 ms
+  /// trigram posting-list walk over the whole table (R2.1: the 443 ms
+  /// search was a no-match FTS walk, not the scorer). The gate must
+  /// never change the result SET — it only skips work that cannot return
+  /// rows. Returns true when the needle has no token >= 3 chars (the
+  /// LIKE arm decides those), and fails open (true) if the query itself
+  /// errors, so a broken gate degrades to the ungated search.
+  bool hasMatch(String connectionId, String type, String needle) {
+    if (_closed) return false;
+    final tokens = normalizeSearchText(needle).split(' ').where((t) => t.length >= 3).toList();
+    if (tokens.isEmpty) return true;
+    final where = List.generate(tokens.length, (_) => 'name_norm LIKE ? ESCAPE ?').join(' AND ');
+    final args = <Object?>[connectionId, type];
+    for (final token in tokens) {
+      args.add('%${_escapeLike(token)}%');
+      args.add(r'\');
+    }
+    try {
+      // The (connection_id, type) PK prefix narrows the scan to this
+      // type's rows; the LIKEs then run over name_norm only.
+      final result = _db.select(
+        'SELECT EXISTS(SELECT 1 FROM iptv_search_item WHERE connection_id = ? AND type = ? AND $where)',
+        args,
+      );
+      return (result.first.values.first as int) == 1;
+    } catch (e) {
+      appLogger.w('IPTV search index: hasMatch failed for $type', error: e);
+      return true;
+    }
+  }
+
+  /// Escape the LIKE wildcards in [value] (backslash first, so the
+  /// escape itself is not ambiguous).
+  static String _escapeLike(String value) =>
+      value.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
   /// same needle the warm path filters on). FTS arm when the needle has
   /// a token >= 3 chars (a superset of the caller's RegExp matches —
   /// normalization is monotone over substrings, so a row matching the
@@ -340,11 +417,33 @@ class IptvSearchIndex {
     final pattern = ftsPattern(needleNorm);
     try {
       if (pattern.isNotEmpty) {
+        // No-match gate (R2.1): a section whose type holds no row for
+        // the needle skips the FTS walk entirely. The gate uses the
+        // same tokens as the FTS pattern, so it can never change the
+        // result set — only skip work that returns nothing.
+        if (!hasMatch(connectionId, type, needle)) return const [];
+        // Starts-with arm (R2.2): exact-prefix matches first, so a
+        // decorated title stripped to its bare form survives the cap
+        // and reaches the caller scorer ahead of near-matches. One
+        // LIKE over the type's rows (~0.1 ms); no ORDER BY — the scan
+        // visits rows in (connection, type, stream_id) order and stops
+        // after LIMIT 20, while ORDER BY rowid would force a sort of
+        // every match first (200k rows for a common needle).
+        final startsWith = _db
+            .select(
+              'SELECT connection_id, type, stream_id, category_id, name, name_norm, thumb, rating, container_ext, summary, epg_channel_id, has_archive, archive_duration '
+              'FROM iptv_search_item '
+              'WHERE connection_id = ? AND type = ? AND name_norm LIKE ? ESCAPE ? '
+              'LIMIT 20',
+              [connectionId, type, '${_escapeLike(needleNorm)}%', r'\'],
+            )
+            .map(IptvSearchIndexRow.fromDb)
+            .toList(growable: false);
         // The conn/type filter is on the FTS table itself (see the class
         // doc): filtering after the join makes the planner scan the whole
         // index per query at Trex scale.
         const columns =
-            'i.connection_id, i.type, i.stream_id, i.category_id, i.name, '
+            'i.connection_id, i.type, i.stream_id, i.category_id, i.name, i.name_norm, '
             'i.thumb, i.rating, i.container_ext, i.summary, i.epg_channel_id, '
             'i.has_archive, i.archive_duration ';
         // Probe: natural order, one row past the rank window. A LIMIT
@@ -358,11 +457,11 @@ class IptvSearchIndex {
           'LIMIT ?',
           [pattern, connectionId, type, ftsRankWindow + 1],
         );
+        final List<IptvSearchIndexRow> ftsRows;
         if (probe.length <= limit) {
           // The whole match set fits: return it; the caller re-scores.
-          return probe.map(IptvSearchIndexRow.fromDb).toList(growable: false);
-        }
-        if (probe.length <= ftsRankWindow) {
+          ftsRows = probe.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        } else if (probe.length <= ftsRankWindow) {
           // Moderate set: re-run ranked — the sort is cheap here, and
           // rank order is what keeps the exact match in the cap.
           final rows = _db.select(
@@ -374,10 +473,15 @@ class IptvSearchIndex {
             'LIMIT ?',
             [pattern, connectionId, type, limit],
           );
-          return rows.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+          ftsRows = rows.map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        } else {
+          // Huge set: return the first [limit] probe rows unranked.
+          ftsRows = probe.take(limit).map(IptvSearchIndexRow.fromDb).toList(growable: false);
         }
-        // Huge set: return the first [limit] probe rows unranked.
-        return probe.take(limit).map(IptvSearchIndexRow.fromDb).toList(growable: false);
+        if (startsWith.isEmpty) return ftsRows;
+        final seen = {for (final row in startsWith) row.streamId};
+        final merged = [...startsWith, ...ftsRows.where((row) => !seen.contains(row.streamId))];
+        return merged.take(limit).toList(growable: false);
       }
       // No trigram-matchable token (e.g. "of", "a&e"): LIKE scan of the
       // normalized name — still local-only. The LIKE is on the normalized
@@ -385,9 +489,9 @@ class IptvSearchIndex {
       // cannot miss a row the RegExp would catch. Bounded like the FTS
       // arm (build v1.0.10): without a LIMIT a 2-letter needle
       // materialized tens of thousands of rows across the 300k-row table.
-      final like = '%${needleNorm.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
+      final like = '%${_escapeLike(needleNorm)}%';
       final rows = _db.select(
-        'SELECT connection_id, type, stream_id, category_id, name, thumb, '
+        'SELECT connection_id, type, stream_id, category_id, name, name_norm, thumb, '
         'rating, container_ext, summary, epg_channel_id, has_archive, '
         'archive_duration FROM iptv_search_item '
         'WHERE connection_id = ? AND type = ? AND name_norm LIKE ? ESCAPE ? '
@@ -591,7 +695,7 @@ class IptvSearchIndexRow {
         streamId: stream.streamId,
         categoryId: stream.categoryId,
         name: stream.name,
-        nameNorm: normalizeSearchText(stream.name),
+        nameNorm: normalizeSearchText(stripTitleDecorations(stream.name)),
         thumb: stream.streamIcon,
         epgChannelId: stream.epgChannelId,
         hasArchive: stream.tvArchive,
@@ -602,7 +706,7 @@ class IptvSearchIndexRow {
         streamId: stream.streamId,
         categoryId: stream.categoryId,
         name: stream.name,
-        nameNorm: normalizeSearchText(stream.name),
+        nameNorm: normalizeSearchText(stripTitleDecorations(stream.name)),
         thumb: stream.cover ?? stream.streamIcon,
         rating: stream.rating,
         containerExt: stream.containerExtension,
@@ -612,7 +716,7 @@ class IptvSearchIndexRow {
         streamId: series.seriesId,
         categoryId: series.categoryId,
         name: series.name,
-        nameNorm: normalizeSearchText(series.name),
+        nameNorm: normalizeSearchText(stripTitleDecorations(series.name)),
         thumb: series.cover,
         rating: series.rating,
         summary: series.plot,
@@ -624,7 +728,10 @@ class IptvSearchIndexRow {
       streamId: row['stream_id'] as int,
       categoryId: row['category_id'] as String?,
       name: name,
-      nameNorm: normalizeSearchText(name),
+      // The stored norm is the STRIPPED title (R2.2) — re-deriving it
+      // from the raw name here would lose the strip. Fall back to the
+      // derivation only when the column is absent (old SELECTs).
+      nameNorm: (row['name_norm'] as String?) ?? normalizeSearchText(name),
       thumb: row['thumb'] as String?,
       rating: (row['rating'] as num?)?.toDouble(),
       containerExt: row['container_ext'] as String?,

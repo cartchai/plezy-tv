@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -9,9 +10,12 @@ import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/media/media_item.dart';
 import 'package:plezy/media/media_kind.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/m3u_parser.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/prefs.dart';
 
 void main() {
@@ -20,6 +24,31 @@ void main() {
   // the memoised shared cache) or the first prefs read throws "Binding has
   // not yet been initialized". Same setup as iptv_item_favorites_test.dart.
   setUp(resetSharedPreferencesForTest);
+
+  // R2.3: search answers from the local index, so the search groups seed
+  // it from their fake panels (see seedIptvSearchIndexFromFakePanel).
+  // The temp dir is per test; the providers are cleared in tearDown so
+  // no file leaks into the next test.
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_stage2_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
 
   group('M3U parser', () {
     test('parses EXTINF attributes and pairs the following URL', () {
@@ -272,7 +301,7 @@ https://example.com/cnn.m3u8
     // (The password is split so the literal never appears in new code.)
     const testPassword = 'pa' 'ss';
 
-    IptvClient xtreamClient({XtreamApi? api}) {
+    Future<IptvClient> xtreamClient({XtreamApi? api, Set<String> seedTypes = const {'live', 'movie', 'series'}}) async {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
@@ -283,25 +312,29 @@ https://example.com/cnn.m3u8
       );
       final client = IptvClient.forConnection(connection);
       client.testXtreamApi = api ?? _FakeXtreamApi();
+      // R2.3: the search groups assert search over a synced catalog,
+      // so seed the local index from the fake panel's rows before the
+      // test searches — the client then answers from the warm index.
+      await seedIptvSearchIndexFromFakePanel(api ?? _FakeXtreamApi(), 'conn-xt-1', types: seedTypes);
       return client;
     }
 
     test('searchItems returns movie + series matches from fixtures', () async {
-      final client = xtreamClient();
+      final client = await xtreamClient();
       final results = await client.searchItems('alpha');
       expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
       client.close();
     });
 
     test('a failing movies fetch still returns series results', () async {
-      final client = xtreamClient(api: _FlakyFakeXtreamApi(failVod: true));
+      final client = await xtreamClient(api: _FlakyFakeXtreamApi(failVod: true));
       final results = await client.searchItems('alpha');
       expect(results.map((i) => i.title), ['Alpha Show']);
       client.close();
     });
 
     test('a failing series fetch still returns movie results', () async {
-      final client = xtreamClient(api: _FlakyFakeXtreamApi(failSeries: true));
+      final client = await xtreamClient(api: _FlakyFakeXtreamApi(failSeries: true));
       final results = await client.searchItems('alpha');
       expect(results.map((i) => i.title), ['Alpha Movie']);
       client.close();
@@ -313,7 +346,7 @@ https://example.com/cnn.m3u8
       // series — before the aggregation's relevance ranking ever ran. On the
       // real provider (199k movies) a common-word query easily matches
       // 100+ movies, which is why "Search doesn't work for TV shows yet".
-      final client = xtreamClient(api: _CrowdedFakeXtreamApi());
+      final client = await xtreamClient(api: _CrowdedFakeXtreamApi());
       final results = await client.searchItems('alpha');
       expect(results.map((i) => i.title), contains('Alpha Show'));
       expect(results.where((i) => i.kind == MediaKind.show).map((i) => i.title), ['Alpha Show']);
@@ -321,63 +354,52 @@ https://example.com/cnn.m3u8
     });
 
     test('a slow series fetch does not block movie results', () async {
-      // Build #8 Task 1: Future.wait held both sections under the 60s leg
-      // deadline, so a cold 46k-row series catalog could kill the movies leg
-      // too. A section that misses its budget returns [] for that search
-      // while its catalog keeps loading in the background and warms the
-      // cache, so the next search finds the series.
+      // Build #8 Task 1, rewritten for R2.3: the per-section panel load
+      // is gone — a slow series catalog now lives in the background sync,
+      // not in the search. The first (typing) search answers the warm
+      // movies immediately; the submit kicks off the sync, completing the
+      // slow fetch lets it land, and the next search finds both.
       final api = _SlowSeriesFakeXtreamApi();
-      final client = xtreamClient(api: api);
-      final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 100);
-      try {
-        final first = await client.searchItems('alpha');
-        expect(first.map((i) => i.title), ['Alpha Movie']);
-        api.completeSeries();
-        final second = await client.searchItems('alpha');
-        expect(second.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
-      } finally {
-        IptvClient.searchSectionBudget = previousBudget;
-        client.close();
-      }
+      final client = await xtreamClient(api: api, seedTypes: {'live', 'movie'});
+      final first = await client.searchItems('alpha');
+      expect(first.map((i) => i.title), ['Alpha Movie']);
+      final submitted = await client.searchItems('alpha', onlineAllowed: true);
+      expect(submitted.map((i) => i.title), ['Alpha Movie']);
+      api.completeSeries();
+      await client.searchIndexReady;
+      final second = await client.searchItems('alpha');
+      expect(second.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
+      client.close();
     });
 
-    test('a cold series catalog still returns series matches from per-category calls', () async {
-      // Build #9 Task 1(a): "it still can't search tv/series" on v2.25.4.
-      // The old code awaited the FULL 46k-row series catalog before
-      // filtering a single title, so on a cold start (unfiltered call
-      // slow on LTE) the 50s section budget fired and the search returned
-      // [] every time — the background warm-up never finished in time
-      // either. A cold section must sweep per-category now and return the
-      // matches that land before the budget fires.
-      final client = xtreamClient(api: _ColdCatalogFakeXtreamApi());
-      final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 500);
-      try {
-        final results = await client.searchItems('alpha');
-        expect(results.map((i) => i.title), ['Alpha Movie', 'Alpha Show']);
-      } finally {
-        IptvClient.searchSectionBudget = previousBudget;
-        client.close();
-      }
+    test('a cold series catalog still returns movie results immediately; the series arrives with the sync', () async {
+      // Build #9 Task 1(a), rewritten for R2.3: the per-category sweep
+      // is gone, so a cold section no longer burns the section budget
+      // fetching during the search. The submit kicks off one coalesced
+      // sync in the background and answers from local data (movies,
+      // warm) immediately; the series rows land when the sync's
+      // unfiltered fetch completes, and the next search finds them.
+      // This fixture's unfiltered series call never answers, so the sync
+      // never lands here — the point is the search did not wait for it.
+      final client = await xtreamClient(api: _ColdCatalogFakeXtreamApi(), seedTypes: {'live', 'movie'});
+      final results = await client.searchItems('alpha', onlineAllowed: true);
+      expect(results.map((i) => i.title), ['Alpha Movie']);
+      expect(client.lastSearchDiagnostics?.series.cold, isTrue);
+      client.close();
     });
 
-    test('a stalled per-category crawl returns the matches that already landed', () async {
-      // Build #9 Task 1(a): the old code crawled EVERY category (batched
-      // Future.wait) before returning anything, so one slow category held
-      // the whole section hostage until the budget fired. The sweep must
-      // process each category's rows as they land and return partial
-      // matches at the deadline instead of [].
-      final client = xtreamClient(api: _StalledCrawlFakeXtreamApi());
-      final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 500);
-      try {
-        final results = await client.searchItems('alpha');
-        expect(results.map((i) => i.title), contains('Alpha Show'));
-      } finally {
-        IptvClient.searchSectionBudget = previousBudget;
-        client.close();
-      }
+    test('a stalled per-category crawl no longer blocks search', () async {
+      // Build #9 Task 1(a), rewritten for R2.3: the per-category sweep
+      // is gone from search. The unfiltered series call returns [] here,
+      // so the sync records 'empty-response' and the series type stays
+      // empty — the search answers the warm movies immediately instead
+      // of burning the section budget crawling categories that stall.
+      // (Browse still rescues this provider via its own per-category
+      // fallback — see 'IptvClient catalog fallback'.)
+      final client = await xtreamClient(api: _StalledCrawlFakeXtreamApi(), seedTypes: {'live', 'movie'});
+      final results = await client.searchItems('alpha', onlineAllowed: true);
+      expect(results.map((i) => i.title), ['Alpha Movie']);
+      client.close();
     });
 
     test('a failing M3U playlist fetch returns no results instead of throwing', () async {
@@ -472,7 +494,7 @@ https://example.com/cnn.m3u8
     // (The password is split so the literal never appears in new code.)
     const testPassword = 'pa' 'ss';
 
-    IptvClient xtreamClient({XtreamApi? api, List<String> hiddenCategoryInitials = const []}) {
+    Future<IptvClient> xtreamClient({XtreamApi? api, List<String> hiddenCategoryInitials = const []}) async {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
@@ -484,11 +506,12 @@ https://example.com/cnn.m3u8
       );
       final client = IptvClient.forConnection(connection);
       client.testXtreamApi = api ?? _InitialsFakeXtreamApi();
+      await seedIptvSearchIndexFromFakePanel(api ?? _InitialsFakeXtreamApi(), 'conn-xt-1');
       return client;
     }
 
     test('iptvInitials detects only the initials that keep repeating', () async {
-      final client = xtreamClient();
+      final client = await xtreamClient();
       // EN: 6 live categories. NF: 1 VOD + 5 VOD + 1 series + 4 series
       // categories = 11. ES appears once — never offered. Counts are per
       // CATEGORY, not per item: the 5 EN-named channels and 5 EN-named
@@ -502,7 +525,7 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its content in browse', () async {
-      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
+      final client = await xtreamClient(hiddenCategoryInitials: const ['NF']);
       final movies = await client.fetchLibraryPagedContent('iptv:conn-xt-1:movies', query: const LibraryQuery());
       expect(movies.items.map((i) => i.title), contains('EN - Movie 1'));
       expect(movies.items.map((i) => i.title), isNot(contains('NF - Movie')));
@@ -512,7 +535,7 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its content in search', () async {
-      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
+      final client = await xtreamClient(hiddenCategoryInitials: const ['NF']);
       final results = await client.searchItems('show');
       expect(results, isEmpty);
       final movies = await client.searchItems('movie');
@@ -521,14 +544,14 @@ https://example.com/cnn.m3u8
     });
 
     test('a disabled initial hides its channels in Live TV', () async {
-      final client = xtreamClient(hiddenCategoryInitials: const ['EN']);
+      final client = await xtreamClient(hiddenCategoryInitials: const ['EN']);
       final channels = await client.iptvChannels();
       expect(channels.map((c) => c.title), ['ES - Channel']);
       client.close();
     });
 
     test('a category whose name carries a disabled initial is hidden', () async {
-      final client = xtreamClient(hiddenCategoryInitials: const ['NF']);
+      final client = await xtreamClient(hiddenCategoryInitials: const ['NF']);
       final categories = await client.iptvCategoriesForLibrary('iptv:conn-xt-1:movies');
       expect(categories.map((c) => c.name), ['Action']);
       client.close();
@@ -1011,6 +1034,13 @@ class _SlowSeriesFakeXtreamApi extends _FakeXtreamApi {
 
   void completeSeries() {
     if (!_seriesCompleter.isCompleted) {
+      // The sync reads the raw body the API stored (not the typed rows)
+      // to write the index — the real XtreamApi sets it from the HTTP
+      // response; the fake must set it here, before completing, or the
+      // sync records 'empty-response' and writes nothing.
+      lastSeriesBody = jsonEncode([
+        {'series_id': 10, 'name': 'Alpha Show', 'category_id': '1'},
+      ]);
       _seriesCompleter.complete(const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')]);
     }
   }

@@ -469,7 +469,7 @@ void main() {
       index.close();
       // The bind fires its sync in the background, exactly as the app
       // does at startup; the browse happens at the same time.
-      client.ensureSearchIndexSynced();
+      unawaited(client.ensureSearchIndexSynced());
       await _browseAll(client);
       final total = await _waitForQuiescent(panel);
       // ignore: avoid_print

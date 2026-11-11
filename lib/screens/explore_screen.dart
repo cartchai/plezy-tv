@@ -84,7 +84,9 @@ class ExploreScreenState extends State<ExploreScreen>
   bool get searchIsActive => searchController.text.trim().isNotEmpty;
 
   @override
-  Future<List<MediaItem>> performSearchQuery(String query) async {
+  Future<List<MediaItem>> performSearchQuery(String query, {bool onlineAllowed = false}) async {
+    // Build v1.0.11 (R2.0): ignored — a catalog source searches its local
+    // catalog, never the IPTV panel.
     final source = _explore.activeSource;
     if (source == null) return const [];
     final items = await source.search(query);

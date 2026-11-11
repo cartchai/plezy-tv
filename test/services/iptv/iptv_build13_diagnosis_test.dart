@@ -27,19 +27,45 @@
 // Every test uses a scaled-down section budget (the production 50s) with
 // proportional delays, so the timing shapes run in ~1s each — the same
 // idiom as iptv_build10_diagnosis_test.dart.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/prefs.dart';
 
 void main() {
   // _seriesItems/_moviesItems stamp favourites via SharedPreferences.
   setUp(resetSharedPreferencesForTest);
+
+  // R2.3: search answers from the local index, so the search groups seed
+  // it from their fake panels (see seedIptvSearchIndexFromFakePanel).
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_build13_diag_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
 
   // The password is split so the literal never appears in new code.
   const testPassword = 'pa' 'ss';
@@ -47,7 +73,7 @@ void main() {
   // Matt's filter state, in shape: every initial hidden except EN.
   const hiddenInitials = ['AR', 'FR', 'DE', 'PL', 'ES', 'IN', 'NL', 'SE'];
 
-  IptvClient xtreamClient({XtreamApi? api}) {
+  Future<IptvClient> xtreamClient({XtreamApi? api, Set<String> seedTypes = const {'live', 'movie', 'series'}}) async {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
@@ -58,7 +84,12 @@ void main() {
       createdAt: DateTime.utc(2026, 11, 5),
     );
     final client = IptvClient.forConnection(connection);
-    client.testXtreamApi = api ?? _TrexScaleFakeXtreamApi();
+    final effectiveApi = api ?? _TrexScaleFakeXtreamApi();
+    client.testXtreamApi = effectiveApi;
+    // R2.3: the search groups assert search over a synced catalog, so
+    // seed the local index from the fake panel's rows before the test
+    // searches — the client then answers from the warm index.
+    await seedIptvSearchIndexFromFakePanel(effectiveApi, 'conn-xt-1', types: seedTypes);
     return client;
   }
 
@@ -87,53 +118,69 @@ void main() {
     }
   }
 
+  /// Wait until the series leg has indexed rows (the submit's sync has
+  /// landed), or fail after 10 s. `searchIndexReady` only awaits an index
+  /// write already in flight — a slow sync is still fetching when it is
+  /// awaited, so it returns immediately and the next search runs before
+  /// the sync lands.
+  Future<void> waitForSeriesRows(IptvClient client) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while ((client.searchIndexState.rowCounts['series'] ?? 0) == 0) {
+      if (DateTime.now().isAfter(deadline)) {
+        fail('series index rows never landed within 10 s');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
   group('build13 reproduction: the cold crawl trap (series)', () {
     test('B1: unfiltered [] + slow crawl + late-category match returns the show', () async {
       // 120 visible EN series categories; the only match sits in category
-      // 110; each per-category call takes 80ms of a 1000ms budget. Before
-      // the fix the sweep (batches of 8) covered ~72 categories in its
-      // 900ms deadline and the crawl needed ~1.2s with no partial
-      // progress visible to search, so the search returned [] although
-      // the show exists on the panel. After the fix the crawl publishes
-      // each batch as it lands (batch 7, holding category 110, lands at
-      // ~560ms) and the sweep skips crawled categories, so the match is
-      // found well inside the budget.
-      final client = xtreamClient(
+      // 110; each per-category call takes 80ms. R2.3: the sweep and the
+      // crawl are gone from search, so a match that lives ONLY in a
+      // per-category call is not reachable by search at all — the sync's
+      // unfiltered call returns [] ('empty-response'), so the series leg
+      // stays [] + cold and the search answers the other legs instead of
+      // burning a budget crawling 120 categories. (The per-category
+      // rescue still exists in browse — see the catalog-fallback group
+      // in iptv_stage2_test.dart.)
+      final client = await xtreamClient(
         api: _TrexScaleFakeXtreamApi(
           unfilteredSeriesEmpty: true,
           seriesPerCategoryDelay: const Duration(milliseconds: 80),
           matchSeriesCategoryId: '110',
           seriesCategoryCount: 120,
         ),
+        seedTypes: const {'live', 'movie'},
       );
       try {
-        final results = await withScaledBudget(() => client.searchItems('alpha'));
-        expect(results.map((i) => i.title), contains('Alpha Show'));
+        final results = await client.searchItems('alpha', onlineAllowed: true);
+        expect(results.map((i) => i.title), isNot(contains('Alpha Show')));
+        expect(client.lastSearchDiagnostics?.series.cold, isTrue);
       } finally {
         client.close();
       }
     });
 
     test('B2: slow unfiltered load + late-category match returns the show', () async {
-      // The unfiltered call DOES return the show, but only after 1400ms
-      // — past the section budget. The sweep must rescue it. At cap 8
-      // and 80ms per call, category 110 lands after 110 / 8 x 80ms =
-      // ~1100ms, inside the 2940ms sweep deadline (3s budget, build #21
-      // recalibration — the 1s budget assumed the old batch of 16, which
-      // reached category 110 in ~560ms). Before the build #13 fix the
-      // sweep (batches of 8, 100ms per call) could not reach category
-      // 120 inside 900ms, and the unfiltered load was past the budget —
-      // both sources too slow, search returned [].
-      final client = xtreamClient(
-        api: _TrexScaleFakeXtreamApi(
-          unfilteredSeriesDelay: const Duration(milliseconds: 1400),
-          seriesPerCategoryDelay: const Duration(milliseconds: 80),
-          matchSeriesCategoryId: '110',
-          seriesCategoryCount: 120,
-        ),
+      // The unfiltered call DOES return the show, but only after 1400ms.
+      // R2.3: the sweep is gone — the rescue is the submit's sync, which
+      // fetches the unfiltered list in the background (one call, no
+      // per-category crawl) and writes disk + index; the first search
+      // answers the warm movies immediately, and the next search finds
+      // the show once the sync lands.
+      final api = _TrexScaleFakeXtreamApi(
+        unfilteredSeriesDelay: const Duration(milliseconds: 1400),
+        seriesPerCategoryDelay: const Duration(milliseconds: 80),
+        matchSeriesCategoryId: '110',
+        seriesCategoryCount: 120,
       );
+      final client = await xtreamClient(api: api, seedTypes: const {'live', 'movie'});
       try {
-        final results = await withScaledBudget(() => client.searchItems('alpha'));
+        final first = await client.searchItems('alpha', onlineAllowed: true);
+        expect(first.map((i) => i.title), isNot(contains('Alpha Show')));
+        await waitForSeriesRows(client);
+        final results = await client.searchItems('alpha');
         expect(results.map((i) => i.title), contains('Alpha Show'));
       } finally {
         client.close();
@@ -144,19 +191,23 @@ void main() {
   group('build13 reproduction: the cold crawl trap (movies)', () {
     test('B1: unfiltered [] + slow crawl + late-category match returns the movie', () async {
       // Same trap on the 199k-row VOD side: unfiltered [] turns the load
-      // into a crawl, and the match in category 110 is past the old
-      // sweep's reach inside the budget (see the series B1 comment).
-      final client = xtreamClient(
+      // into a crawl, and the match in category 110 lives only in a
+      // per-category call. R2.3: same boundary as the series B1 — the
+      // search cannot reach it; the sync records 'empty-response' and
+      // the movies leg stays [] + cold.
+      final client = await xtreamClient(
         api: _TrexScaleFakeXtreamApi(
           unfilteredVodEmpty: true,
           vodPerCategoryDelay: const Duration(milliseconds: 80),
           matchVodCategoryId: '110',
           vodCategoryCount: 120,
         ),
+        seedTypes: const {'live', 'series'},
       );
       try {
-        final results = await withScaledBudget(() => client.searchItems('alpha'));
-        expect(results.map((i) => i.title), contains('Alpha Movie 2'));
+        final results = await client.searchItems('alpha', onlineAllowed: true);
+        expect(results.map((i) => i.title), isNot(contains('Alpha Movie 2')));
+        expect(client.lastSearchDiagnostics?.movies.cold, isTrue);
       } finally {
         client.close();
       }
@@ -168,7 +219,7 @@ void main() {
       // The live catalog holds 'HBO East' in an EN category. Today the
       // Xtream searchItems returns movies + series only — there is no
       // live leg at all — so a live-TV search is empty by construction.
-      final client = xtreamClient(api: _TrexScaleFakeXtreamApi());
+      final client = await xtreamClient(api: _TrexScaleFakeXtreamApi());
       try {
         final results = await withScaledBudget(() => client.searchItems('hbo'));
         final live = results.where((i) => i.libraryId == liveLibraryId).toList();
@@ -182,7 +233,13 @@ void main() {
       // Guard: with a Movies scope (every other library excluded), live
       // results must stay out — the live library is not a real library,
       // so it can never appear in excludedLibraryIds itself.
-      final client = xtreamClient(api: _TrexScaleFakeXtreamApi());
+      //
+      // Pinned on the COLD path: live is NOT seeded here, so the section
+      // falls through to the fallback, where the exclusion skips it (the
+      // #23 scope inversion means a WARM index still returns the global
+      // pool and the aggregation filters — the client-level skip only
+      // applies when the index is cold).
+      final client = await xtreamClient(api: _TrexScaleFakeXtreamApi(), seedTypes: const {'movie', 'series'});
       try {
         final results = await withScaledBudget(
           () => client.searchItems('hbo', excludedLibraryIds: {seriesLibraryId, moviesLibraryId}),
@@ -196,7 +253,7 @@ void main() {
     test('L-filter: hidden-category channels stay hidden from live search', () async {
       // Guard: a channel in an AR category (AR initial turned off) must
       // not surface, the same as movies/series honour the filter.
-      final client = xtreamClient(api: _TrexScaleFakeXtreamApi());
+      final client = await xtreamClient(api: _TrexScaleFakeXtreamApi());
       try {
         final results = await withScaledBudget(() => client.searchItems('aljazeera'));
         expect(results.map((i) => i.title), isNot(contains('Al Jazeera')));
@@ -212,7 +269,7 @@ void main() {
       // awaits the full _seriesList() crawl (~minutes on the (g) shape),
       // so the one readout that could settle (g) never answers. It must
       // return inside the search budget by probing directly instead.
-      final client = xtreamClient(
+      final client = await xtreamClient(
         api: _TrexScaleFakeXtreamApi(
           unfilteredSeriesEmpty: true,
           seriesPerCategoryDelay: const Duration(milliseconds: 100),
@@ -235,7 +292,7 @@ void main() {
 
   group('build13 controls: warm paths that must keep working', () {
     test('control: a warm series catalog answers search', () async {
-      final client = xtreamClient(api: _TrexScaleFakeXtreamApi());
+      final client = await xtreamClient(api: _TrexScaleFakeXtreamApi());
       try {
         final first = await withScaledBudget(() => client.searchItems('alpha'));
         expect(first.map((i) => i.title), contains('Alpha Show'));
@@ -247,26 +304,36 @@ void main() {
     });
 
     test('control: a disk-cached series catalog answers search without a network load', () async {
-      // First client populates the disk cache (its load writes the file);
-      // a fresh client with the same connection id must then serve the
-      // search from disk — zero unfiltered network calls.
+      // R2.3: the disk is populated by the submit's sync, not by a
+      // search load. The first client submits (its sync writes the disk
+      // file); a fresh client with the same connection id — and a fresh,
+      // cold index — must then serve the search from disk, zero
+      // unfiltered network calls. (The index is pointed at a fresh dir
+      // for the second client so the test pins the DISK path, not the
+      // index the first client's sync also wrote.)
       final tempDir = await Directory.systemTemp.createTemp('plezy_build13_disk_');
+      final indexDir1 = await Directory.systemTemp.createTemp('plezy_build13_disk_idx1_');
+      final indexDir2 = await Directory.systemTemp.createTemp('plezy_build13_disk_idx2_');
       IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
       try {
+        IptvSearchIndex.debugDirectoryProvider = () async => indexDir1;
         final api = _TrexScaleFakeXtreamApi();
-        final first = xtreamClient(api: api);
+        final first = await xtreamClient(api: api, seedTypes: const {});
         try {
-          final results = await withScaledBudget(() => first.searchItems('alpha'));
+          await first.searchItems('alpha', onlineAllowed: true);
+          await waitForSeriesRows(first);
+          final results = await first.searchItems('alpha');
           expect(results.map((i) => i.title), contains('Alpha Show'));
         } finally {
           first.close();
         }
         // Let the fire-and-forget disk write land.
         await Future.delayed(const Duration(milliseconds: 300));
+        IptvSearchIndex.debugDirectoryProvider = () async => indexDir2;
         final api2 = _TrexScaleFakeXtreamApi();
-        final second = xtreamClient(api: api2);
+        final second = await xtreamClient(api: api2, seedTypes: const {});
         try {
-          final results = await withScaledBudget(() => second.searchItems('alpha'));
+          final results = await second.searchItems('alpha');
           expect(results.map((i) => i.title), contains('Alpha Show'));
           expect(api2.unfilteredSeriesCalls, 0);
         } finally {
@@ -274,7 +341,10 @@ void main() {
         }
       } finally {
         IptvCatalogDiskCache.debugDirectoryProvider = null;
-        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+        IptvSearchIndex.debugDirectoryProvider = null;
+        for (final d in [tempDir, indexDir1, indexDir2]) {
+          if (await d.exists()) await d.delete(recursive: true);
+        }
       }
     });
   });
@@ -333,7 +403,19 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
       unfilteredSeriesCalls++;
       await Future.delayed(unfilteredSeriesDelay);
       if (unfilteredSeriesEmpty) return const [];
-      return const [XtreamSeries(seriesId: 10, name: 'Alpha Show', categoryId: '1')];
+      // One row per EN category: the sync's completeness guard refuses a
+      // write covering <50% of the categories, so a 1-row answer would
+      // (correctly) be discarded as 'partial'.
+      final rows = [
+        for (var i = 1; i <= seriesCategoryCount; i++)
+          XtreamSeries(
+            seriesId: 1000 + i,
+            name: '$i' == matchSeriesCategoryId ? 'Alpha Show' : 'Filler Series $i',
+            categoryId: '$i',
+          ),
+      ];
+      lastSeriesBody = jsonEncode(rows.map((r) => r.toJson()).toList());
+      return rows;
     }
     await Future.delayed(seriesPerCategoryDelay);
     if (categoryId == matchSeriesCategoryId) {
@@ -347,9 +429,17 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
     if (categoryId == null) {
       unfilteredVodCalls++;
       if (unfilteredVodEmpty) return const [];
-      return const [
-        XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
+      final rows = [
+        for (var i = 1; i <= vodCategoryCount; i++)
+          XtreamVodStream(
+            streamId: 1000 + i,
+            name: '$i' == matchVodCategoryId ? 'Alpha Movie' : 'Filler Movie $i',
+            containerExtension: 'mp4',
+            categoryId: '$i',
+          ),
       ];
+      lastVodStreamsBody = jsonEncode(rows.map((r) => r.toJson()).toList());
+      return rows;
     }
     await Future.delayed(vodPerCategoryDelay);
     if (categoryId == matchVodCategoryId) {
@@ -369,10 +459,17 @@ class _TrexScaleFakeXtreamApi extends XtreamApi {
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       unfilteredLiveCalls++;
-      return const [
-        XtreamLiveStream(streamId: 100, name: 'HBO East', categoryId: '1'),
-        XtreamLiveStream(streamId: 101, name: 'Al Jazeera', categoryId: '900'),
+      final rows = [
+        for (var i = 1; i <= 150; i++)
+          XtreamLiveStream(
+            streamId: 1000 + i,
+            name: i == 1 ? 'HBO East' : 'Filler Live $i',
+            categoryId: '$i',
+          ),
+        const XtreamLiveStream(streamId: 101, name: 'Al Jazeera', categoryId: '900'),
       ];
+      lastLiveStreamsBody = jsonEncode(rows.map((r) => r.toJson()).toList());
+      return rows;
     }
     if (categoryId == '1') {
       return [XtreamLiveStream(streamId: 100, name: 'HBO East', categoryId: categoryId)];

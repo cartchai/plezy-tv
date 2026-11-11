@@ -1579,6 +1579,12 @@
       "Browsing a stale catalog no longer re-downloads it on its own — the refresh now goes through the weekly catalog sync, so one fetch updates the saved copy, the search index and what you see, and a partial answer from the provider can no longer overwrite a good saved list",
       "Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once",
       "The category names now update when the catalog refreshes, instead of staying as they were until the next restart"
+    ],
+    "changelog2275": [
+      "Typing a search no longer talks to the provider at all — results come from the copy saved on the phone, and only pressing Enter goes online to refresh a section that has not been downloaded yet",
+      "Search is much faster now: a common search went from about half a second to about 20 milliseconds, and an exact title like Game of Thrones now comes first instead of being cut off by shorter near-matches",
+      "When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background",
+      "The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type"
     ]
   },
   "serverSelection": {
@@ -2850,6 +2856,7 @@
     "catalogCacheEmpty": "No catalog downloaded yet",
     "catalogNotSynced": "Catalog not synced yet — syncing in background",
     "catalogSyncing": "Catalog syncing…",
+    "catalogColdHint": "${types} not synced yet — hit Enter to search online",
     "catalogUpdated": "Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}",
     "guideAndCatchUp": "Guide & catch-up",
     "showCatchUpBadge": "Show catch-up badge",

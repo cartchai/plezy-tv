@@ -359,11 +359,20 @@ abstract class MediaServerClient {
   /// caller drops those rows by id. A backend whose rows cannot be attributed
   /// to a library MUST scope the request server-side instead — the caller has
   /// nothing to filter on.
+  ///
+  /// [onlineAllowed] (build v1.0.11, R2.0 — the SEARCH RULE): false means
+  /// the search is a keystroke pass and must make ZERO panel requests
+  /// (local/cached data only); true means the user explicitly submitted
+  /// (Enter) and the backend may go online. Defaults to false — the
+  /// typing path must never have to remember to pass it. Only the IPTV
+  /// backend honours it; Plex/Jellyfin search server-side by nature and
+  /// ignore it.
   Future<List<MediaItem>> searchItems(
     String query, {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   });
 
   /// People (actors and directors) whose name matches [query], best match

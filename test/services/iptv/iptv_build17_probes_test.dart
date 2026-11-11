@@ -17,10 +17,17 @@
 //     and a warm catalog, with Matt's migrated hidden-initials state.
 //  E. Trex-scale isolate parse cost (item 2) — what each toggle's client
 //     swap re-pays: the three warm-ups re-parse 55k + 199k + 46k rows.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
+
+import '../../test_helpers/iptv_search_index_seed.dart';
 import 'package:plezy/utils/iptv_initials.dart';
 import 'package:plezy/screens/video_player/live_tv_session_args.dart';
 import 'package:plezy/models/livetv_capture_buffer.dart';
@@ -29,6 +36,29 @@ import '../../test_helpers/prefs.dart';
 
 void main() {
   setUp(resetSharedPreferencesForTest);
+
+  // R2.3: search answers from the local index, so the C-group builder
+  // seeds it from the fake panel's rows.
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_build17_probes_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
 
   // The password is split so the literal never appears in new code.
   const testPassword = 'pa' 'ss';
@@ -164,7 +194,7 @@ void main() {
   });
 
   group('build17 C: series search "game of thrones"', () {
-    IptvClient clientWith({required XtreamApi api, List<String> hiddenInitials = const []}) {
+    Future<IptvClient> clientWith({required XtreamApi api, List<String> hiddenInitials = const [], Set<String> seedTypes = const {'live', 'movie', 'series'}}) async {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
@@ -176,7 +206,22 @@ void main() {
       );
       final client = IptvClient.forConnection(connection);
       client.testXtreamApi = api;
+      await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: seedTypes);
       return client;
+    }
+
+    /// Wait until the series leg has indexed rows (the submit's sync has
+    /// landed), or fail after 10 s. (Same helper as build13's — the
+    /// sync's fetch is slow here, so searchIndexReady alone returns too
+    /// early: it only awaits a write already in flight.)
+    Future<void> waitForSeriesRows(IptvClient client) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while ((client.searchIndexState.rowCounts['series'] ?? 0) == 0) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail('series index rows never landed within 10 s');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
     }
 
     const moviesLibraryId = 'iptv:conn-xt-1:movies';
@@ -207,15 +252,15 @@ void main() {
       // category "|EN| TOP SERIES" (id 1219); per-category get_series
       // for 1219 returns 110 rows (panel serves per-category fine —
       // suspect (g) is DEAD for this category). 237 series categories.
-      final client = clientWith(
+      final client = await clientWith(
         api: _GotFakeApi(unfilteredSeriesDelay: Duration.zero),
       );
       try {
-        final unscoped = await withScaledBudget(() => client.searchItems('game of thrones'));
+        // R2.3: the "warm catalog" is the seeded index — the search
+        // answers from it locally, no budget needed.
+        final unscoped = await client.searchItems('game of thrones');
         expect(unscoped.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));
-        final scoped = await withScaledBudget(
-          () => client.searchItems('game of thrones', excludedLibraryIds: {moviesLibraryId}),
-        );
+        final scoped = await client.searchItems('game of thrones', excludedLibraryIds: {moviesLibraryId});
         expect(scoped.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));
         // The scoped search must not silently drop the series leg.
         expect(client.lastSearchDiagnostics?.series.skipped, isFalse);
@@ -232,7 +277,7 @@ void main() {
       // (tell him which filter hides it), not search. EN was ON in his
       // 2026-11-06 screenshot, but its state after the build #10
       // redesign + build #15 migration is UNVERIFIED on his phone.
-      final client = clientWith(
+      final client = await clientWith(
         api: _GotFakeApi(unfilteredSeriesDelay: Duration.zero),
         hiddenInitials: const ['EN'],
       );
@@ -255,9 +300,11 @@ void main() {
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
-      client.testXtreamApi = _GotFakeApi(unfilteredSeriesDelay: Duration.zero);
+      final api = _GotFakeApi(unfilteredSeriesDelay: Duration.zero);
+      client.testXtreamApi = api;
+      await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1');
       try {
-        final results = await withScaledBudget(() => client.searchItems('game of thrones'));
+        final results = await client.searchItems('game of thrones');
         expect(results, isEmpty);
       } finally {
         client.close();
@@ -268,7 +315,7 @@ void main() {
       // FAILING-FIRST (item 3 mechanism at the search layer): the user
       // turned off EN expecting every EN category hidden, but the
       // category derives NEWS, so the show survives the filter.
-      final client = clientWith(
+      final client = await clientWith(
         api: _GotFakeApi(
           unfilteredSeriesDelay: Duration.zero,
           gotCategoryId: '2',
@@ -300,14 +347,23 @@ void main() {
       // category. The budget is 6s (sweep deadline 5880ms) so the cap-4
       // sweep still proves it reaches the last category; the behaviour
       // under test is unchanged.
-      final client = clientWith(
+      // R2.3: the sweep is gone — the rescue is the submit's sync,
+      // which fetches the unfiltered 46,527-row list (1400ms) once and
+      // writes disk + index; the first search answers the warm legs,
+      // and the next search finds the show once the sync lands. The
+      // per-category delay is irrelevant now (nothing crawls).
+      final client = await clientWith(
         api: _GotFakeApi(
           unfilteredSeriesDelay: const Duration(milliseconds: 1400),
           perCategoryDelay: const Duration(milliseconds: 80),
         ),
+        seedTypes: const {'live', 'movie'},
       );
       try {
-        final results = await withScaledBudget(() => client.searchItems('game of thrones'));
+        final first = await client.searchItems('game of thrones', onlineAllowed: true);
+        expect(first.map((i) => i.title), isNot(contains('EN - Game Of Thrones (2011)')));
+        await waitForSeriesRows(client);
+        final results = await client.searchItems('game of thrones');
         expect(results.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));
       } finally {
         client.close();
@@ -415,6 +471,10 @@ class _GotFakeApi extends XtreamApi {
   Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
     if (categoryId == null) {
       await Future.delayed(unfilteredSeriesDelay);
+      // The sync reads the raw body the API stored (not the typed rows)
+      // to write the index — the real XtreamApi sets it from the HTTP
+      // response; the fake must set it here.
+      lastSeriesBody = jsonEncode(_allSeries.map((r) => r.toJson()).toList());
       return _allSeries;
     }
     await Future.delayed(perCategoryDelay);

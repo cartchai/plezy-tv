@@ -66,6 +66,23 @@ class _SearchScreenState extends State<SearchScreen>
   AbortController? _activeSearchAbort;
   ({String query, SearchAggregationResult result})? _pendingSearchOutcome;
 
+  /// Whether the last started search was an explicit submit (build
+  /// v1.0.11, R2.0 — the SEARCH RULE): typing searches are local-only and
+  /// their rows defer artwork; a submit may go online, so its rows load
+  /// artwork. Also the re-run guard (R2.3): only a submit re-runs when
+  /// the sync it kicked off lands.
+  bool _lastSearchSubmitted = false;
+
+  /// Indexed IPTV rows at the last submit (R2.3): the sync re-run fires
+  /// only when the sync the submit kicked off actually GREW the index —
+  /// a failed sync (rows unchanged) never loops.
+  int _submitIndexRows = 0;
+
+  /// IPTV index-state notifiers this screen is listening to (R2.3).
+  /// Subscribed in [didChangeDependencies] (the provider is optional),
+  /// removed in [dispose].
+  final Set<ValueNotifier<IptvSearchIndexState>> _indexNotifiers = {};
+
   /// Filter over the current results: everything, one media kind, or only
   /// people. Chips and the filtered views derive from [_searchCandidates] and
   /// [_searchPeople] — the pre-rank pools behind the ranked [searchResults] —
@@ -102,7 +119,71 @@ class _SearchScreenState extends State<SearchScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _subscribeIptvIndexNotifiers();
+  }
+
+  /// Listen to every IPTV client's index state (R2.3): when the sync a
+  /// submit kicked off lands, the screen re-runs the submitted search
+  /// against the warm index. The provider is optional — the screen is
+  /// also pumped in tests that only provide the hidden/libraries
+  /// providers — so a missing provider just means no subscription. The
+  /// set guards against double-subscribing when dependencies change.
+  void _subscribeIptvIndexNotifiers() {
+    MultiServerProvider? multiServer;
+    try {
+      multiServer = context.read<MultiServerProvider>();
+    } on ProviderNotFoundException {
+      return;
+    }
+    for (final id in multiServer.serverIds) {
+      final client = multiServer.getClientForServer(ServerId(id));
+      if (client is! IptvClient) continue;
+      final notifier = client.searchIndexStateNotifier;
+      if (_indexNotifiers.add(notifier)) {
+        notifier.addListener(_onIptvIndexStateChanged);
+      }
+    }
+  }
+
+  /// Total indexed IPTV rows across all clients on this screen.
+  int _currentIptvIndexRows() {
+    var total = 0;
+    for (final notifier in _indexNotifiers) {
+      total += notifier.value.totalRows;
+    }
+    return total;
+  }
+
+  /// True while any IPTV sync/seed is running on this screen.
+  bool _isIptvSyncBusy() => _indexNotifiers.any((notifier) => notifier.value.isBusy);
+
+  /// R2.3 re-run: the sync the submit kicked off just finished AND grew
+  /// the index. Only then — a failed sync (rows unchanged) never loops,
+  /// a typing search never re-runs, and a changed query (the user kept
+  /// typing) is left alone. The snapshot updates on every re-run, so a
+  /// second sync landing more rows re-runs once more. Known gap: if the
+  /// sync finishes while the submit search itself is still running
+  /// (isSearching), this pass is skipped and nothing re-fires it — in
+  /// practice the sync's fetch + write outlasts the local search in
+  /// every path where a re-run is needed (a sync that fast grew nothing).
+  void _onIptvIndexStateChanged() {
+    if (!mounted) return;
+    if (!_lastSearchSubmitted || _isIptvSyncBusy() || isSearching) return;
+    if (_currentIptvIndexRows() <= _submitIndexRows) return;
+    final query = searchController.text.trim();
+    if (query.isEmpty || query != lastSearchedQuery) return;
+    _submitIndexRows = _currentIptvIndexRows();
+    unawaited(runSearch(query, onlineAllowed: true));
+  }
+
+  @override
   void dispose() {
+    for (final notifier in _indexNotifiers) {
+      notifier.removeListener(_onIptvIndexStateChanged);
+    }
+    _indexNotifiers.clear();
     // Build #21 (close-after-use): stop the in-flight search, if any —
     // the user has left this screen, so its sweep must stop talking to
     // the panel. (The tab is kept alive in an IndexedStack, so this
@@ -152,7 +233,15 @@ class _SearchScreenState extends State<SearchScreen>
   String get searchDebugLabel => 'Search';
 
   @override
-  Future<List<SearchHit>> performSearchQuery(String query) async {
+  Future<List<SearchHit>> performSearchQuery(String query, {bool onlineAllowed = false}) async {
+    // Build v1.0.11 (R2.0 — the SEARCH RULE): typing is local-only, only
+    // an explicit submit may go online. The flag is recorded before the
+    // await so the artwork deferral + the sync re-run (R2.3) follow the
+    // search that is actually running, not the one that landed last.
+    // The row snapshot (R2.3) is taken at the same moment — before the
+    // sync the submit kicks off can grow the index.
+    _lastSearchSubmitted = onlineAllowed;
+    if (onlineAllowed) _submitIndexRows = _currentIptvIndexRows();
     final multiServerProvider = Provider.of<MultiServerProvider>(context, listen: false);
     if (!multiServerProvider.hasConnectedServers) {
       throw const _SearchUnavailableException();
@@ -195,6 +284,7 @@ class _SearchScreenState extends State<SearchScreen>
         hiddenLibraryKeys: hiddenKeys,
         scopedLibraryKey: scopedKey,
         abort: abort,
+        onlineAllowed: onlineAllowed,
       );
       abort.throwIfAborted();
       if (result.succeededServerIds.isEmpty && result.failedServerIds.isNotEmpty) {
@@ -711,6 +801,10 @@ class _SearchScreenState extends State<SearchScreen>
         onNavigateUp: onNavigateUp,
         showServerName: showServerName,
         libraryName: libraries.libraryLabelFor(item),
+        // Build v1.0.11 (R2.0 — SEARCH RULE, STRICT): artwork is a panel
+        // request, so rows from a typing (local-only) search render
+        // placeholder tiles until a submit lets them load.
+        deferArtwork: !_lastSearchSubmitted,
       ),
       PersonSearchHit(:final person) => PersonSearchRow(
         key: Key(person.globalKey),
@@ -772,6 +866,11 @@ class _SearchScreenState extends State<SearchScreen>
                     ? (_showFilterChips ? _focusFilterChips : firstResultFocusNode.requestFocus)
                     : null,
                 onEditingComplete: PlatformDetector.isTV() ? handleSearchSubmit : null,
+                // Build v1.0.11 (R2.0 — SEARCH RULE): phone Enter submits
+                // the search, which is the only action that may go online.
+                // The screen's handleSearchSubmit keeps the TV focus
+                // behaviour (it sets _focusResultsForQuery first).
+                onSubmitted: (_) => handleSearchSubmit(),
                 onBack: () {
                   if (searchController.text.isNotEmpty) {
                     searchController.clear();
@@ -800,29 +899,10 @@ class _SearchScreenState extends State<SearchScreen>
                 child: StateMessageWidget(message: t.explore.searchFailed, icon: Symbols.error_rounded, iconSize: 80),
               )
             else if (searchResults.isEmpty)
-              SliverFillRemaining(
-                child: StateMessageWidget(
-                  message: scopeTitle == null
-                      ? t.messages.noResultsFound
-                      : t.search.noResultsInLibrary(library: scopeTitle),
-                  subtitle: hiddenMatches > 0
-                      ? t.search.hiddenByCategoryFilter(n: hiddenMatches, count: hiddenMatches)
-                      : t.search.tryDifferentTerm,
-                  icon: Symbols.search_off_rounded,
-                  iconSize: 80,
-                  onAction: scopedIptvConnection == null
-                      ? null
-                      : () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => IptvCategoriesScreen(connection: scopedIptvConnection!),
-                            ),
-                          );
-                        },
-                  actionLabel: scopedIptvConnection == null
-                      ? null
-                      : t.iptvCategories.title(name: scopedIptvConnection.displayName),
-                ),
+              _SearchEmptyState(
+                hiddenMatches: hiddenMatches,
+                scopeTitle: scopeTitle,
+                scopedIptvConnection: scopedIptvConnection,
               )
             else ...[
               if (_showFilterChips) _buildFilterChips(),
@@ -886,7 +966,16 @@ class _CatalogHealthLine extends StatelessWidget {
 
   String _healthText(IptvSearchIndexState state) {
     if (state.isBusy) return t.iptv.catalogSyncing;
-    if (state.isEmpty) return t.iptv.catalogNotSynced;
+    // Build v1.0.11 (R2.0 — SEARCH RULE): name the types that have no
+    // local data yet and the Enter action that fetches them. A stale
+    // index still answers, so only a cold type (0 rows) is listed.
+    final cold = [
+      for (final type in IptvSearchIndex.types)
+        if ((state.rowCounts[type] ?? 0) == 0) type,
+    ];
+    if (cold.isNotEmpty) {
+      return t.iptv.catalogColdHint(types: cold.map(_iptvTypeLabel).join(', '));
+    }
     final synced = state.lastSync.values.whereType<DateTime>().toList();
     final lastSync = synced.isEmpty ? null : synced.reduce((a, b) => a.isAfter(b) ? a : b);
     final date = lastSync == null
@@ -898,6 +987,98 @@ class _CatalogHealthLine extends StatelessWidget {
       series: state.rowCounts[IptvSearchIndex.typeSeries] ?? 0,
       date: date,
     );
+  }
+}
+
+/// Display label for an IPTV catalog type, shared by the health line and
+/// the empty state (same labels as the sync dialog's rows).
+String _iptvTypeLabel(String type) => switch (type) {
+  IptvSearchIndex.typeLive => t.iptv.catalogSyncLive,
+  IptvSearchIndex.typeMovie => t.iptv.catalogSyncMovies,
+  _ => t.iptv.catalogSyncSeries,
+};
+
+/// The no-results state (build v1.0.11, R2.0): it must distinguish "no
+/// local matches" from "this section has no local data yet" — so the
+/// subtitle reads the same IPTV index state as the health line (one
+/// source of truth, not a second one). While a submit's sync is running
+/// it says "Catalog syncing…"; once it lands, the screen re-runs the
+/// search (R2.3) and this state is replaced by the results.
+class _SearchEmptyState extends StatelessWidget {
+  const _SearchEmptyState({
+    required this.hiddenMatches,
+    required this.scopeTitle,
+    required this.scopedIptvConnection,
+  });
+
+  final int hiddenMatches;
+  final String? scopeTitle;
+  final Connection? scopedIptvConnection;
+
+  @override
+  Widget build(BuildContext context) {
+    // Same optional-provider pattern as _CatalogHealthLine: the search
+    // screen is also pumped in widget tests that only provide the
+    // hidden/libraries providers.
+    MultiServerProvider? multiServer;
+    try {
+      multiServer = context.watch<MultiServerProvider>();
+    } on ProviderNotFoundException {
+      return _buildSliver(context, null);
+    }
+    final clients = [
+      for (final id in multiServer.serverIds)
+        multiServer.getClientForServer(ServerId(id)),
+    ].whereType<IptvClient>().toList();
+    if (clients.isEmpty) return _buildSliver(context, null);
+    return ValueListenableBuilder<IptvSearchIndexState>(
+      valueListenable: clients.first.searchIndexStateNotifier,
+      builder: (context, state, _) => _buildSliver(context, state),
+    );
+  }
+
+  Widget _buildSliver(BuildContext context, IptvSearchIndexState? state) {
+    // A local, so the null check promotes it (a public field never
+    // promotes, and `.displayName` would not compile).
+    final connection = scopedIptvConnection;
+    return SliverFillRemaining(
+      child: StateMessageWidget(
+        message: scopeTitle == null
+            ? t.messages.noResultsFound
+            : t.search.noResultsInLibrary(library: scopeTitle!),
+        subtitle: _subtitle(state),
+        icon: Symbols.search_off_rounded,
+        iconSize: 80,
+        onAction: connection == null
+            ? null
+            : () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => IptvCategoriesScreen(connection: connection),
+                  ),
+                );
+              },
+        actionLabel: connection == null
+            ? null
+            : t.iptvCategories.title(name: connection.displayName),
+      ),
+    );
+  }
+
+  String _subtitle(IptvSearchIndexState? state) {
+    if (hiddenMatches > 0) {
+      return t.search.hiddenByCategoryFilter(n: hiddenMatches, count: hiddenMatches);
+    }
+    if (state == null) return t.search.tryDifferentTerm;
+    if (state.isBusy) return t.iptv.catalogSyncing;
+    final cold = [
+      for (final type in IptvSearchIndex.types)
+        if ((state.rowCounts[type] ?? 0) == 0) type,
+    ];
+    if (cold.isNotEmpty) {
+      return t.iptv.catalogColdHint(types: cold.map(_iptvTypeLabel).join(', '));
+    }
+    return t.search.tryDifferentTerm;
   }
 }
 

@@ -7,22 +7,50 @@
 // impossible, and a hidden channel (had one existed) would still have
 // matched in search.
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/iptv_live_tv.dart';
 import 'package:plezy/models/livetv_channel.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/prefs.dart';
 
 void main() {
   setUp(resetSharedPreferencesForTest);
 
+  // R2.3: search answers from the local index, so the builder seeds it
+  // from the fake panel's rows.
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_build17_hidden_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
+
   // The password is split so the literal never appears in new code.
   const testPassword = 'pa' 'ss';
 
-  IptvClient clientWith({required XtreamApi api}) {
+  Future<IptvClient> clientWith({required XtreamApi api}) async {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
@@ -33,6 +61,7 @@ void main() {
     );
     final client = IptvClient.forConnection(connection);
     client.testXtreamApi = api;
+    await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1');
     return client;
   }
 
@@ -41,7 +70,7 @@ void main() {
 
   group('build17 hidden channels', () {
     test('hide persists across a client rebind', () async {
-      final first = clientWith(api: _HiddenFakeApi());
+      final first = await clientWith(api: _HiddenFakeApi());
       try {
         final support = first.liveTv as IptvLiveTvSupport;
         await support.hideChannel(news);
@@ -53,7 +82,7 @@ void main() {
 
       // A fresh client over the same connection (a rebind) re-reads the
       // store from disk — the channel stays hidden.
-      final second = clientWith(api: _HiddenFakeApi());
+      final second = await clientWith(api: _HiddenFakeApi());
       try {
         final support = second.liveTv as IptvLiveTvSupport;
         await support.loadHiddenChannels();
@@ -65,7 +94,7 @@ void main() {
     });
 
     test('hidden channel never appears in Live TV search results', () async {
-      final client = clientWith(api: _HiddenFakeApi());
+      final client = await clientWith(api: _HiddenFakeApi());
       try {
         final support = client.liveTv as IptvLiveTvSupport;
         await support.hideChannel(news);
@@ -80,7 +109,7 @@ void main() {
     });
 
     test('unhide by key and unhide-all restore the channels', () async {
-      final client = clientWith(api: _HiddenFakeApi());
+      final client = await clientWith(api: _HiddenFakeApi());
       try {
         final support = client.liveTv as IptvLiveTvSupport;
         await support.hideChannel(news);

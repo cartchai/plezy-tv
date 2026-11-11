@@ -225,6 +225,12 @@ class MediaCard extends StatefulWidget {
   final bool usesContinueWatchingAction;
   final String? collectionId; // The collection ID if displaying within a collection
   final bool isOffline; // True for downloaded content without server access
+
+  /// Defer the artwork load (build v1.0.11, R2.0 — SEARCH RULE, STRICT):
+  /// render the placeholder tile and issue no image request until the
+  /// host clears the flag (after an explicit submit). Separate from
+  /// [isOffline], which also changes tap navigation.
+  final bool deferArtwork;
   final bool mixedHubContext; // True when in a hub with mixed content (movies + episodes)
   final bool showServerName; // Show server name in list view (multi-server)
 
@@ -264,6 +270,7 @@ class MediaCard extends StatefulWidget {
     bool? usesContinueWatchingAction,
     this.collectionId,
     this.isOffline = false,
+    this.deferArtwork = false,
     this.mixedHubContext = false,
     this.showServerName = false,
     this.libraryName,
@@ -504,6 +511,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
             onMenuTap: showContextMenu,
             density: SettingsService.instance.read(SettingsService.libraryDensity),
             isOffline: widget.isOffline,
+            deferArtwork: widget.deferArtwork,
             localPosterPath: localPosterPath,
             showServerName: widget.showServerName,
             libraryName: widget.libraryName,
@@ -646,6 +654,7 @@ class MediaCardState extends State<MediaCard> with ContextMenuTapMixin<MediaCard
       context,
       item,
       isOffline: widget.isOffline,
+      deferArtwork: widget.deferArtwork,
       localPosterPath: localPosterPath,
       mixedHubContext: widget.mixedHubContext,
       episodePosterModeOverride: widget.episodePosterModeOverride,
@@ -779,6 +788,7 @@ class _MediaCardList extends StatelessWidget {
   final VoidCallback onMenuTap;
   final int density;
   final bool isOffline;
+  final bool deferArtwork;
   final String? localPosterPath;
   final bool showServerName;
   final String? libraryName;
@@ -797,6 +807,7 @@ class _MediaCardList extends StatelessWidget {
     required this.onMenuTap,
     required this.density,
     this.isOffline = false,
+    this.deferArtwork = false,
     this.localPosterPath,
     this.showServerName = false,
     this.libraryName,
@@ -936,6 +947,7 @@ class _MediaCardList extends StatelessWidget {
                           context,
                           item,
                           isOffline: isOffline,
+                          deferArtwork: deferArtwork,
                           localPosterPath: localPosterPath,
                           episodePosterModeOverride: episodePosterModeOverride,
                           cardShapeOverride: cardShapeOverride,
@@ -1123,6 +1135,7 @@ Widget _buildPosterImage(
   BuildContext context,
   Object item, {
   bool isOffline = false,
+  bool deferArtwork = false,
   String? localPosterPath,
   bool mixedHubContext = false,
   EpisodePosterMode? episodePosterModeOverride,
@@ -1132,6 +1145,10 @@ Widget _buildPosterImage(
   double? knownHeight,
   Animation<double>? artworkDim,
 }) {
+  // Build v1.0.11 (R2.0 — SEARCH RULE, STRICT): deferred artwork renders
+  // the loading placeholder and never builds the image widget, so no
+  // request is issued until the host clears the flag after a submit.
+  if (deferArtwork) return _buildPosterLoadingPlaceholder(context, '');
   if (item is MediaPlaylist) {
     return OptimizedMediaImage(
       client: isOffline ? null : context.tryGetMediaClientWithFallback(serverIdOrNull(item.serverId)),

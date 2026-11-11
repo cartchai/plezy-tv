@@ -1357,6 +1357,9 @@ mixin _JellyfinBrowseMethods on _JellyfinClientInternals {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    // Build v1.0.11 (R2.0): ignored — the SEARCH RULE is IPTV-scoped;
+    // Jellyfin search is server-side by nature.
+    bool onlineAllowed = false,
   }) async {
     // Jellyfin search rows cannot be attributed to a library after the fact:
     // there is no library field, and `ParentId` (which this request does not

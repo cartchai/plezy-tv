@@ -331,6 +331,7 @@ class _Build19ScopeFakeClient implements MediaServerClient {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   }) async {
     abort?.throwIfAborted();
     return items;

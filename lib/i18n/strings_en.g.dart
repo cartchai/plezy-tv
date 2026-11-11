@@ -3837,6 +3837,12 @@ class Translations$about$en {
 		'Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once',
 		'The category names now update when the catalog refreshes, instead of staying as they were until the next restart',
 	];
+	List<String> get changelog2275 => [
+		'Typing a search no longer talks to the provider at all — results come from the copy saved on the phone, and only pressing Enter goes online to refresh a section that has not been downloaded yet',
+		'Search is much faster now: a common search went from about half a second to about 20 milliseconds, and an exact title like Game of Thrones now comes first instead of being cut off by shorter near-matches',
+		'When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background',
+		'The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type',
+	];
 }
 
 // Path: serverSelection
@@ -6645,6 +6651,9 @@ class Translations$iptv$en {
 
 	/// en: 'Catalog syncing…'
 	String get catalogSyncing => 'Catalog syncing…';
+
+	/// en: '${types} not synced yet — hit Enter to search online'
+	String catalogColdHint({required Object types}) => '${types} not synced yet — hit Enter to search online';
 
 	/// en: 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}'
 	String catalogUpdated({required Object channels, required Object movies, required Object series, required Object date}) => 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}';
@@ -10432,6 +10441,10 @@ extension on Translations {
 			'about.changelog2274.0' => 'Browsing a stale catalog no longer re-downloads it on its own — the refresh now goes through the weekly catalog sync, so one fetch updates the saved copy, the search index and what you see, and a partial answer from the provider can no longer overwrite a good saved list',
 			'about.changelog2274.1' => 'Search results now come back best match first instead of in the order they were saved, and a short search term can no longer pull thousands of rows into memory at once',
 			'about.changelog2274.2' => 'The category names now update when the catalog refreshes, instead of staying as they were until the next restart',
+			'about.changelog2275.0' => 'Typing a search no longer talks to the provider at all — results come from the copy saved on the phone, and only pressing Enter goes online to refresh a section that has not been downloaded yet',
+			'about.changelog2275.1' => 'Search is much faster now: a common search went from about half a second to about 20 milliseconds, and an exact title like Game of Thrones now comes first instead of being cut off by shorter near-matches',
+			'about.changelog2275.2' => 'When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background',
+			'about.changelog2275.3' => 'The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
 			'serverSelection.noValidServers' => 'No usable servers were found on this account',
@@ -10552,12 +10565,12 @@ extension on Translations {
 			'explore.stats.dropRate' => ({required Object percent}) => '${percent} dropped it',
 			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
 			'explore.stats.votes' => ({required Object n}) => '${n} votes',
+			_ => null,
+		} ?? switch (path) {
 			'explore.stats.watching' => ({required Object n}) => '${n} watching it',
 			'explore.stats.completed' => ({required Object n}) => '${n} completed',
 			'explore.stats.onHold' => ({required Object n}) => '${n} on hold',
 			'explore.stats.dropped' => ({required Object n}) => '${n} dropped',
-			_ => null,
-		} ?? switch (path) {
 			'explore.season.winter' => 'Winter',
 			'explore.season.spring' => 'Spring',
 			'explore.season.summer' => 'Summer',
@@ -11066,12 +11079,12 @@ extension on Translations {
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
 			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
 			'downloads.backgroundWarning.dialogFixFirst' => 'Fix this first',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.statusTile' => 'Background downloads',
 			'downloads.backgroundWarning.statusOk' => 'Allowed to run in the background',
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
 			'downloads.backgroundWarning.statusDegraded' => 'Limited by system settings',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.statusUnknown' => 'Not checked yet',
 			'downloads.backgroundWarning.settingsUnavailable' => 'Couldn\'t open system settings on this device',
 			'downloads.backgroundWarning.linkUnavailable' => 'Couldn\'t open dontkillmyapp.com on this device',
@@ -11575,17 +11588,18 @@ extension on Translations {
 			'iptv.catalogCacheEmpty' => 'No catalog downloaded yet',
 			'iptv.catalogNotSynced' => 'Catalog not synced yet — syncing in background',
 			'iptv.catalogSyncing' => 'Catalog syncing…',
+			'iptv.catalogColdHint' => ({required Object types}) => '${types} not synced yet — hit Enter to search online',
 			'iptv.catalogUpdated' => ({required Object channels, required Object movies, required Object series, required Object date}) => 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}',
 			'iptv.guideAndCatchUp' => 'Guide & catch-up',
 			'iptv.showCatchUpBadge' => 'Show catch-up badge',
 			'iptv.showCatchUpBadgeDescription' => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.player' => 'Player',
 			'iptv.playerSettings' => 'Player settings',
 			'iptv.playerSettingsDescription' => 'Decoder, external player and playback options',
 			'iptv.epgSection' => 'EPG / TV guide',
 			'iptv.epgDaysToLoad' => 'Days to load',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.epgDaysToLoadDescription' => 'How many days of guide to load ahead',
 			'iptv.epgDaysCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} day', other: '${n} days', ), 
 			'iptv.epgUpdateInterval' => 'Update interval',

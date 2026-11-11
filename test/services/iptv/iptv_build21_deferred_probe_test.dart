@@ -23,6 +23,7 @@ import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
 import '../../test_helpers/prefs.dart';
@@ -91,14 +92,6 @@ IptvClient _clientWith(_ProbeCountingPanel panel) {
   return client;
 }
 
-Future<void> _waitFor(bool Function() condition, {Duration timeout = const Duration(seconds: 10)}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) throw StateError('condition not met within $timeout');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-  }
-}
-
 void main() {
   setUp(resetSharedPreferencesForTest);
 
@@ -106,9 +99,11 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('plezy_build21_defer_');
     IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
   });
   tearDown(() async {
     IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
     for (var attempt = 0; attempt < 3; attempt++) {
       if (!await tempDir.exists()) break;
       try {
@@ -125,19 +120,21 @@ void main() {
     test('two probes mid-search coalesce to one deferred probe after the search', () async {
       final panel = _ProbeCountingPanel();
       final client = _clientWith(panel);
-      // Seed rows in categories 1-5 only, warm without healing (same
-      // shape as the failing-first file), so the asserted search heals.
+      // Seed the series disk file with Trex-scale rows (46,527) and do
+      // NOT warm the catalog: the asserted search's cold-body disk read
+      // + parse (~200ms) is what holds it in flight long enough for the
+      // probes to land mid-search. R2.3: the search never sweeps, so the
+      // old "wait for the sweep to start" trigger is gone — and the
+      // probes' refusal-check await is only ~ms, so the window is wide.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode([
-          for (var i = 0; i < 5; i++)
-            XtreamSeries(seriesId: 1000 + i, name: 'Filler Series $i', categoryId: '${i + 1}').toJson(),
+          for (var i = 0; i < 46527; i++)
+            XtreamSeries(seriesId: 1000 + i, name: 'Filler Series $i', categoryId: '${(i % 236) + 1}').toJson(),
         ]),
       );
-      client.warmUpSeriesCatalog();
-      await client.searchItems('Filler Series 0', excludedLibraryIds: _seriesOnlyScope);
       expect(panel.userInfoRequests, 0, reason: 'no probe has run yet');
 
       var callbackCount = 0;
@@ -149,7 +146,6 @@ void main() {
       };
 
       final search = client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
-      await _waitFor(() => panel.categoryRequests > 0);
       // Two probes arrive while the search is in flight.
       expect(await client.checkHealth(), HealthStatus.online);
       expect(await client.checkHealth(), HealthStatus.online);

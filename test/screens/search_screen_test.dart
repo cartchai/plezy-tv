@@ -131,7 +131,9 @@ void main() {
     await tester.pumpAndSettle();
 
     _searchController(tester).text = 'movie';
-    await tester.pump(const Duration(milliseconds: 100));
+    // R2.5: the debounce is 100 ms now (was 500 ms) — pump half of it so
+    // the search genuinely has not fired yet when the native action lands.
+    await tester.pump(const Duration(milliseconds: 50));
     expect(client.queries, isEmpty);
 
     await tester.showKeyboard(find.byType(TextField));
@@ -1185,6 +1187,7 @@ class _FakeMediaServerClient implements MediaServerClient {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   }) async {
     queries.add(query);
     lastSearchAbort = abort;

@@ -4401,6 +4401,9 @@ class PlexClient
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    // Build v1.0.11 (R2.0): ignored — the SEARCH RULE is IPTV-scoped;
+    // Plex search is server-side by nature.
+    bool onlineAllowed = false,
   }) async {
     final results = await _search(query, limit: limit, abort: abort);
     final items = results.map((m) => PlexMappers.mediaItem(m)).toList();

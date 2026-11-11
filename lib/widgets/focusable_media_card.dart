@@ -38,6 +38,12 @@ class FocusableMediaCard extends StatefulWidget {
   /// True for downloaded content without server access
   final bool isOffline;
 
+  /// Defer the artwork load (build v1.0.11, R2.0 — SEARCH RULE, STRICT):
+  /// the card renders its placeholder tile and issues no image request
+  /// until the host clears the flag (after an explicit submit). Separate
+  /// from [isOffline], which also changes tap navigation.
+  final bool deferArtwork;
+
   /// True when in a hub with mixed content (movies + episodes)
   final bool mixedHubContext;
 
@@ -100,6 +106,7 @@ class FocusableMediaCard extends StatefulWidget {
     bool? usesContinueWatchingAction,
     this.collectionId,
     this.isOffline = false,
+    this.deferArtwork = false,
     this.mixedHubContext = false,
     this.fullBleedImage = false,
     this.cardShapeOverride,
@@ -160,6 +167,7 @@ class _FocusableMediaCardState extends State<FocusableMediaCard> {
         usesContinueWatchingAction: widget.usesContinueWatchingAction,
         collectionId: widget.collectionId,
         isOffline: widget.isOffline,
+        deferArtwork: widget.deferArtwork,
         mixedHubContext: widget.mixedHubContext,
         fullBleedImage: widget.fullBleedImage,
         cardShapeOverride: widget.cardShapeOverride,

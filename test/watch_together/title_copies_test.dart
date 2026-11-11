@@ -86,6 +86,7 @@ class _Library implements MediaServerClient {
     int limit = 100,
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
+    bool onlineAllowed = false,
   }) async {
     searches.add(query);
     if (hangSearch) await (abort?.trigger ?? Completer<void>().future);

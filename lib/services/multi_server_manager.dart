@@ -1010,10 +1010,10 @@ class MultiServerManager {
       // Build #23: populate/refresh the local search index in the
       // background — seed it from the disk catalog when cold, then sync
       // from the panel when the interval has elapsed. Fire-and-forget;
-      // search falls back to the disk/sweep paths until the index is
+      // search falls back to the disk/sync paths until the index is
       // warm. M3U connections return immediately (no VOD/series catalog
       // to index).
-      client.ensureSearchIndexSynced();
+      unawaited(client.ensureSearchIndexSynced());
 
       final health = await client.checkHealth();
       final healthy = health == HealthStatus.online;

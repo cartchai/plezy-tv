@@ -47,6 +47,7 @@ import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/library_query.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
@@ -91,12 +92,18 @@ void main() {
       });
       IptvCatalogDiskCache.debugDirectoryProvider = () async => cacheRoot;
       IptvCatalogDiskCache.debugDisableDisk = false;
+      // R2.3: the sync owns fetching now, and it needs the index — the
+      // default documents path is unavailable in tests, so point the
+      // index at the same temp root (its file lives alongside, not
+      // inside, the iptv_catalog/ disk files).
+      IptvSearchIndex.debugDirectoryProvider = () async => cacheRoot;
     });
 
     tearDown(() {
       IptvClient.debugClientFactory = null;
       IptvCatalogDiskCache.debugDirectoryProvider = null;
       IptvCatalogDiskCache.debugDisableDisk = false;
+      IptvSearchIndex.debugDirectoryProvider = null;
     });
 
     /// Seed the disk cache exactly as v2.25.8 (build #11) wrote it:
@@ -132,6 +139,18 @@ void main() {
       await write(IptvCatalogDiskCache.liveDataset, jsonEncode(api.liveRows().map((r) => r.toJson()).toList()));
       await write(IptvCatalogDiskCache.vodDataset, jsonEncode(api.vodRows().map((r) => r.toJson()).toList()));
       await write(IptvCatalogDiskCache.seriesDataset, jsonEncode(api.seriesRows().map((r) => r.toJson()).toList()));
+    }
+
+    /// Wait until the live leg has indexed rows (the submit's sync has
+    /// landed), or fail after 10 s.
+    Future<void> waitForLiveRows(IptvClient client) async {
+      final deadline = DateTime.now().add(const Duration(seconds: 10));
+      while ((client.searchIndexState.rowCounts['live'] ?? 0) == 0) {
+        if (DateTime.now().isAfter(deadline)) {
+          fail('live index rows never landed within 10 s');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
     }
 
     /// Bind Trex through the REAL manager path (health probe -> 3
@@ -320,24 +339,39 @@ void main() {
         await client.fetchLibraryPagedContent(moviesId, query: const LibraryQuery(offset: 0, limit: 20));
         await client.fetchLibraryPagedContent(seriesId, query: const LibraryQuery(offset: 0, limit: 20));
         await client.searchItems('alpha', limit: 100);
+        // R2.3: a search never loads the catalog, so the 'alpha' search
+        // no longer writes the live disk file — the live rows arrive via
+        // the submit's sync instead. Submit 'hbo' and wait for the sync
+        // to land them (index + disk file) before the second launch.
+        await client.searchItems('hbo', onlineAllowed: true, limit: 100);
+        await waitForLiveRows(client);
         await Future.delayed(const Duration(seconds: 1));
 
-        // Second launch: a fresh client on the files v2.25.9 wrote.
-        final second = IptvClient.xtream(xtreamConnection: trexConnection());
-        second.testXtreamApi = _TrexPanelFakeApi();
-        final moviesAgain = await second.fetchLibraryPagedContent(
-          moviesId,
-          query: const LibraryQuery(offset: 0, limit: 20),
-        );
-        expect(moviesAgain.items, isNotEmpty);
-        final seriesAgain = await second.fetchLibraryPagedContent(
-          seriesId,
-          query: const LibraryQuery(offset: 0, limit: 20),
-        );
-        expect(seriesAgain.items, isNotEmpty);
-        final liveAgain = await second.searchItems('hbo', limit: 100);
-        expect(liveAgain.map((i) => i.title), contains('HBO East'));
-        second.close();
+        // Second launch: a fresh client on the files v2.25.9 wrote —
+        // pointed at a FRESH index dir, so its 'hbo' search must re-parse
+        // the live disk file (the test's premise), not the warm index.
+        final secondIndexDir = await Directory.systemTemp.createTemp('plezy-build14-second-index');
+        IptvSearchIndex.debugDirectoryProvider = () async => secondIndexDir;
+        try {
+          final second = IptvClient.xtream(xtreamConnection: trexConnection());
+          second.testXtreamApi = _TrexPanelFakeApi();
+          final moviesAgain = await second.fetchLibraryPagedContent(
+            moviesId,
+            query: const LibraryQuery(offset: 0, limit: 20),
+          );
+          expect(moviesAgain.items, isNotEmpty);
+          final seriesAgain = await second.fetchLibraryPagedContent(
+            seriesId,
+            query: const LibraryQuery(offset: 0, limit: 20),
+          );
+          expect(seriesAgain.items, isNotEmpty);
+          final liveAgain = await second.searchItems('hbo', limit: 100);
+          expect(liveAgain.map((i) => i.title), contains('HBO East'));
+          second.close();
+        } finally {
+          IptvSearchIndex.debugDirectoryProvider = null;
+          if (await secondIndexDir.exists()) await secondIndexDir.delete(recursive: true);
+        }
         await Future.delayed(const Duration(seconds: 1));
       } finally {
         manager.dispose();

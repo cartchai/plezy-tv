@@ -19,12 +19,18 @@
 // notification when addIptvConnection replaces a client, with the guide
 // subscribing to it.
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/library_change_event.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
+
+import '../../test_helpers/iptv_search_index_seed.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/utils/iptv_initials.dart';
 import 'package:plezy/utils/library_content_notifier.dart';
@@ -33,6 +39,29 @@ import '../../test_helpers/prefs.dart';
 
 void main() {
   setUp(resetSharedPreferencesForTest);
+
+  // R2.3: search answers from the local index, so the end-to-end
+  // builder seeds it from the fake panel's rows.
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_build13_initials_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
 
   // The password is split so the literal never appears in new code.
   const testPassword = 'pa' 'ss';
@@ -71,7 +100,7 @@ void main() {
   });
 
   group('build13: buried initials hide their categories end to end', () {
-    IptvClient buriedClient({List<String> hiddenCategoryInitials = const []}) {
+    Future<IptvClient> buriedClient({List<String> hiddenCategoryInitials = const []}) async {
       final connection = XtreamConnection(
         id: 'conn-xt-1',
         name: 'Trex',
@@ -82,12 +111,14 @@ void main() {
         createdAt: DateTime.utc(2026, 11, 5),
       );
       final client = IptvClient.forConnection(connection);
-      client.testXtreamApi = _BuriedInitialsFakeXtreamApi();
+      final api = _BuriedInitialsFakeXtreamApi();
+      client.testXtreamApi = api;
+      await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1');
       return client;
     }
 
     test('disabling FR hides every FR category — including buried ones — everywhere', () async {
-      final client = buriedClient(hiddenCategoryInitials: const ['FR']);
+      final client = await buriedClient(hiddenCategoryInitials: const ['FR']);
       try {
         final seriesCategories = await client.iptvCategoriesForLibrary('iptv:conn-xt-1:series');
         expect(seriesCategories.map((c) => c.name), isNot(contains('SERIES | FR | Drama')));

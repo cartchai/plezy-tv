@@ -67,9 +67,9 @@ import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/media_server_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
-import 'package:plezy/utils/media_server_http_client.dart' show AbortController;
 
 import '../../test_helpers/prefs.dart';
 
@@ -290,11 +290,21 @@ Future<void> _warmSeriesNoHeal(IptvClient client) async {
   await client.searchItems('Filler Series 0', excludedLibraryIds: _seriesOnlyScope);
 }
 
-Future<void> _waitFor(bool Function() condition, {Duration timeout = const Duration(seconds: 10)}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) throw StateError('condition not met within $timeout');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+/// Wait until the panel request count has been stable for ~300 ms (the
+/// fire-and-forget submit sync has landed or will never come).
+Future<void> _waitForPanelQuiescent(_CountingPanel panel) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  var last = panel.totalRequests;
+  var stableSince = DateTime.now();
+  while (true) {
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    if (panel.totalRequests != last) {
+      last = panel.totalRequests;
+      stableSince = DateTime.now();
+    } else if (DateTime.now().difference(stableSince) > const Duration(milliseconds: 300)) {
+      return;
+    }
+    if (DateTime.now().isAfter(deadline)) throw StateError('panel never went quiescent');
   }
 }
 
@@ -305,9 +315,11 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('plezy_build21_');
     IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
   });
   tearDown(() async {
     IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
     IptvClient.searchSectionBudget = const Duration(seconds: 50);
     // Fire-and-forget catalog writes can still be in flight when a test
     // ends; retry the delete after a settle delay instead of failing
@@ -353,8 +365,13 @@ void main() {
       expect(await client.checkHealth(), HealthStatus.authError, reason: '401 is definitive, not transient');
     });
 
-    test('warm-heal sweep never exceeds the burst cap', () async {
-      // 24 categories, rows only in 1-5: the heal sweeps 6..24 (19 calls).
+    test('a no-match search makes zero panel requests — no burst at all', () async {
+      // R2.3: the heal sweep is gone, so the burst cap is moot — a
+      // no-match search over the seeded disk serves local rows only.
+      // 24 categories, rows only in 1-5: before, the heal swept 6..24
+      // (19 calls); now the search makes no call at all, and the repair
+      // moved to the submit's sync — one unfiltered fetch per type, never
+      // a per-category call.
       final panel = _CountingPanel(
         categories: [for (var i = 1; i <= 24; i++) XtreamCategory(id: '$i', name: 'Category $i')],
         categoryLatency: const Duration(milliseconds: 100),
@@ -366,37 +383,40 @@ void main() {
 
       final results = await client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
       expect(results, isEmpty);
-      expect(
-        panel.maxConcurrentCategory,
-        lessThanOrEqualTo(8),
-        reason: 'the burst cap is shared across sections — before: 19 at once (batch 32)',
-      );
-      expect(panel.categoryRequests, 19, reason: 'the sweep still visits every missing category');
+      expect(panel.totalRequests, 0, reason: 'typing search is local-only');
+      expect(panel.categoryRequests, 0);
+      expect(panel.maxConcurrentCategory, 0);
+      // A submit repairs through the sync: 6 requests (category list +
+      // unfiltered fetch per type), zero per-category calls.
+      await client.searchItems('zz-no-match-zz', onlineAllowed: true, excludedLibraryIds: _seriesOnlyScope);
+      await _waitForPanelQuiescent(panel);
+      expect(panel.categoryRequests, 0, reason: 'the sync fetches the unfiltered list, never per-category');
+      expect(panel.totalRequests, 6, reason: 'one category list + one unfiltered fetch per type');
+      expect(panel.maxConcurrentCategory, 0);
       // ignore: avoid_print
       print(
         'BUILD21-B1 burst: maxConcurrentCategory=${panel.maxConcurrentCategory} '
-        'cap=${8} categoryRequests=${panel.categoryRequests} '
+        'categoryRequests=${panel.categoryRequests} '
         'totalRequests=${panel.totalRequests}',
       );
     });
 
-    test('cap 8 still reaches the last of 237 series categories in budget', () async {
-      // CAP-JUSTIFICATION, not failing-first: it passes on base too (32 is
-      // faster at sweeping). Its job is to prove the tighter cap does not
-      // lose the reach the old 32 had — GoT lives in the LAST category.
-      //
-      // Cold catalog, series-only. The unfiltered load is slow (20s) and
-      // returns non-matching rows, so the sweep — not the load — must find
-      // GoT in the last category. 250ms per call is a realistic
-      // healthy-panel round trip for a small category list: 237 / 4 * 0.25
-      // is ~15s, inside the 49s sweep deadline.
+    test('a row that lives only in a per-category call is not found by search', () async {
+      // R2.3: the sweep is gone, so GoT in cat-237 (reachable only via a
+      // per-category call) is not found by search — the submit's sync
+      // fetches the unfiltered list (50 fillers, no GoT) once and never
+      // crawls. The 20 s unfiltered latency is dropped to 2 s: the sync
+      // just waits for the one call; there is no sweep race to time.
+      // (The sync also refuses the 50-filler list as 'partial' — 1 of 237
+      // categories covered — so the index stays cold; the boundary is the
+      // same either way.)
       final categories = [
         for (var i = 1; i <= 237; i++) XtreamCategory(id: 'cat-$i', name: 'Category $i'),
       ];
       final panel = _CountingPanel(
         categories: categories,
         categoryLatency: const Duration(milliseconds: 250),
-        unfilteredSeriesLatency: const Duration(seconds: 20),
+        unfilteredSeriesLatency: const Duration(seconds: 2),
         unfilteredSeriesRows: [
           for (var i = 0; i < 50; i++)
             XtreamSeries(seriesId: 50000 + i, name: 'Load Filler $i', categoryId: 'cat-1'),
@@ -412,25 +432,40 @@ void main() {
               ],
       );
       final client = _clientWith(panel);
-      final results = await client.searchItems(
+      final first = await client.searchItems(
+        'game of thrones',
+        onlineAllowed: true,
+        excludedLibraryIds: _seriesOnlyScope,
+      );
+      expect(
+        first.map((m) => m.title),
+        isNot(contains('EN - Game Of Thrones (2011)')),
+      );
+      await _waitForPanelQuiescent(panel);
+      expect(panel.categoryRequests, 0, reason: 'the sync never crawls per-category');
+      expect(panel.maxConcurrentCategory, 0);
+      final second = await client.searchItems(
         'game of thrones',
         excludedLibraryIds: _seriesOnlyScope,
       );
       expect(
-        results.map((m) => m.title),
-        contains('EN - Game Of Thrones (2011)'),
-        reason: 'the sweep reached the last category (cat-237 of 237) inside the budget',
+        second.map((m) => m.title),
+        isNot(contains('EN - Game Of Thrones (2011)')),
+        reason: 'the unfiltered list has no GoT and nothing crawls for it',
       );
-      expect(panel.categoryRequests, 237, reason: 'the sweep visited every category');
-      expect(panel.maxConcurrentCategory, lessThanOrEqualTo(8));
       // ignore: avoid_print
       print(
-        'BUILD21-R1 reach: GoT found in cat-237 (last of 237); '
+        'BUILD21-R1 reach: GoT not found (per-category-only); '
         'maxConcurrentCategory=${panel.maxConcurrentCategory} categoryRequests=${panel.categoryRequests}',
       );
     }, timeout: const Timeout(Duration(minutes: 2)));
 
-    test('section-budget expiry hard-cancels in-flight sweep requests', () async {
+    test('a search over a slow panel returns promptly with zero requests — nothing to cancel', () async {
+      // R2.3: the search never calls the panel, so a 5 s panel latency
+      // cannot stall it and there is nothing to abort — the old
+      // budget/hard-cancel machinery has nothing to cancel from the
+      // search path. (The sync still waits for the panel on a submit;
+      // this test pins the typing path only.)
       final panel = _CountingPanel(
         categories: [for (var i = 1; i <= 24; i++) XtreamCategory(id: '$i', name: 'Category $i')],
         categoryLatency: const Duration(seconds: 5),
@@ -439,21 +474,20 @@ void main() {
       await _seedSeriesDisk();
       await _warmSeriesNoHeal(client);
       panel.reset();
-      IptvClient.searchSectionBudget = const Duration(seconds: 3);
 
       final stopwatch = Stopwatch()..start();
       final results = await client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
       final elapsed = stopwatch.elapsed;
       expect(results, isEmpty);
-      // The search returned on the 3s budget, not on the 5s call latency.
+      // The search returned on local data, not on the 5s call latency.
       expect(elapsed, lessThan(const Duration(seconds: 5)));
-      // The in-flight sweep calls were cancelled, not left running: on
-      // base the timeout abandons the future and the sockets stay open.
-      expect(panel.abortedRequests, greaterThan(0), reason: 'in-flight sweep calls must be aborted');
+      expect(panel.totalRequests, 0);
+      // Nothing was started, so nothing was aborted.
+      expect(panel.abortedRequests, 0, reason: 'nothing was started, nothing to abort');
       // No orphan tail: after the search returned, no new requests start.
       panel.mark();
       await Future<void>.delayed(const Duration(seconds: 2));
-      expect(panel.requestsAfterMark, 0, reason: 'a timed-out search must stop generating panel traffic');
+      expect(panel.requestsAfterMark, 0, reason: 'a local search must stop generating panel traffic');
       // ignore: avoid_print
       print(
         'BUILD21-O1 orphan: elapsed=${elapsed.inMilliseconds}ms aborted=${panel.abortedRequests} '
@@ -462,6 +496,12 @@ void main() {
     });
 
     test('a health probe during a search makes no panel request', () async {
+      // R2.3: the search makes no panel requests at all, so a probe
+      // issued while one is in flight has no search traffic to collide
+      // with — it makes at most its own request and returns
+      // last-known-online. (Whether the #21 deferral suppresses even
+      // that one request depends on microtask timing now that the search
+      // is local and fast, so the bound is <= 1, not exactly 0.)
       final panel = _CountingPanel(
         categories: [for (var i = 1; i <= 24; i++) XtreamCategory(id: '$i', name: 'Category $i')],
         categoryLatency: const Duration(seconds: 2),
@@ -472,23 +512,24 @@ void main() {
       panel.reset();
 
       final search = client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
-      await _waitFor(() => panel.categoryRequests > 0);
-      final userInfoBefore = panel.userInfoRequests;
       final health = await client.checkHealth();
       expect(health, HealthStatus.online, reason: 'the probe returns last-known-online while searching');
       expect(
         panel.userInfoRequests,
-        userInfoBefore,
-        reason: 'a probe during a search must not hit the panel',
+        lessThanOrEqualTo(1),
+        reason: 'a probe during a search makes at most its own request',
       );
+      expect(panel.categoryRequests, 0, reason: 'the search made no panel requests');
       await search;
       // ignore: avoid_print
-      print('BUILD21-P1 defer: userInfoBefore=$userInfoBefore userInfoAfter=${panel.userInfoRequests}');
+      print('BUILD21-P1 defer: userInfoAfter=${panel.userInfoRequests}');
     });
 
-    test('two keystrokes share one burst cap and leave no orphan tail', () async {
-      // The request-count test: a second keystroke while the first sweep
-      // is still running must not add a second burst on top of the first.
+    test('two keystrokes make zero panel requests and leave no orphan tail', () async {
+      // R2.3: searches are local — two concurrent keystrokes share
+      // nothing on the panel because neither calls it. The burst cap is
+      // moot and the orphan tail is gone by construction. (The abort
+      // controllers are dropped: there is no burst to cancel any more.)
       final panel = _CountingPanel(
         categories: [for (var i = 1; i <= 24; i++) XtreamCategory(id: '$i', name: 'Category $i')],
         categoryLatency: const Duration(milliseconds: 300),
@@ -498,33 +539,12 @@ void main() {
       await _warmSeriesNoHeal(client);
       panel.reset();
 
-      final abort1 = AbortController();
-      final first = client.searchItems(
-        'zz-no-match-zz',
-        abort: abort1,
-        excludedLibraryIds: _seriesOnlyScope,
-      );
-      await _waitFor(() => panel.categoryRequests > 0);
-      // Second keystroke: cancel the first search, start the second.
-      abort1.abort();
-      final abort2 = AbortController();
-      final second = client.searchItems(
-        'zz-no-match-zz',
-        abort: abort2,
-        excludedLibraryIds: _seriesOnlyScope,
-      );
+      final first = client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
+      final second = client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
       final results = await Future.wait([first, second]);
       expect(results[1], isEmpty);
-      // The burst cap is shared across concurrent searches: two sweeps
-      // never exceed it together (before: up to 19 + 19 in flight).
-      expect(
-        panel.maxConcurrentCategory,
-        lessThanOrEqualTo(8),
-        reason: 'two keystrokes share one cap',
-      );
-      // No runaway total: the first sweep stopped when cancelled, the
-      // second swept the missing categories once.
-      expect(panel.categoryRequests, lessThanOrEqualTo(38));
+      expect(panel.totalRequests, 0, reason: 'typing searches are local-only');
+      expect(panel.maxConcurrentCategory, 0);
       // No orphan tail after both searches settle.
       panel.mark();
       await Future<void>.delayed(const Duration(seconds: 1));
@@ -532,7 +552,7 @@ void main() {
       // ignore: avoid_print
       print(
         'BUILD21-C1 keystrokes: maxConcurrent=${panel.maxConcurrentCategory} '
-        'cap=${8} categoryRequests=${panel.categoryRequests} '
+        'categoryRequests=${panel.categoryRequests} '
         'total=${panel.totalRequests} aborted=${panel.abortedRequests}',
       );
     });

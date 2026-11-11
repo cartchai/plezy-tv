@@ -24,6 +24,11 @@ class SearchInputField extends StatefulWidget {
   final VoidCallback? onNavigateLeft;
   final VoidCallback? onNavigateDown;
   final VoidCallback? onEditingComplete;
+
+  /// Phone Enter / OSK "Search": the host's submit action. Kept separate
+  /// from [onEditingComplete] (TV) so the two platforms submit through
+  /// their own path.
+  final ValueChanged<String>? onSubmitted;
   final VoidCallback? onBack;
 
   const SearchInputField({
@@ -36,6 +41,7 @@ class SearchInputField extends StatefulWidget {
     this.onNavigateLeft,
     this.onNavigateDown,
     this.onEditingComplete,
+    this.onSubmitted,
     this.onBack,
   });
 
@@ -74,6 +80,7 @@ class _SearchInputFieldState extends State<SearchInputField> {
             onNavigateRight: hasText ? _clearFocusNode.requestFocus : null,
             onNavigateDown: widget.onNavigateDown,
             onEditingComplete: widget.onEditingComplete,
+            onSubmitted: widget.onSubmitted,
             onBack: widget.onBack,
             decoration: pillInputDecoration(
               context,

@@ -29,6 +29,7 @@ import 'package:http/http.dart' as http;
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
 import '../../test_helpers/prefs.dart';
@@ -129,14 +130,6 @@ IptvClient _clientWith(_AbandonCountingPanel panel) {
   return client;
 }
 
-Future<void> _waitFor(bool Function() condition, {Duration timeout = const Duration(seconds: 10)}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) throw StateError('condition not met within $timeout');
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-  }
-}
-
 void main() {
   setUp(resetSharedPreferencesForTest);
 
@@ -144,9 +137,11 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('plezy_build21_abandon_');
     IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
   });
   tearDown(() async {
     IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
     for (var attempt = 0; attempt < 3; attempt++) {
       if (!await tempDir.exists()) break;
       try {
@@ -168,23 +163,24 @@ void main() {
       // search), not a section-budget expiry.
       final panel = _AbandonCountingPanel();
       final client = _clientWith(panel);
-      // Seed rows in categories 1-5 only and warm without healing, so
-      // the asserted search heals by sweeping the missing categories.
+      // Seed the series disk file with Trex-scale rows (46,527) and do
+      // NOT warm the catalog: the asserted search's cold-body disk read
+      // + parse (~200ms) is what holds it in flight long enough for the
+      // cancel to land mid-search. R2.3: the search never sweeps, so
+      // there is nothing to abort — the cancel is a no-op for panel
+      // traffic, and the search still stops promptly with no tail.
       final cache = IptvCatalogDiskCache();
       await cache.write(
         'conn-xt-1',
         IptvCatalogDiskCache.seriesDataset,
         jsonEncode([
-          for (var i = 0; i < 5; i++)
-            XtreamSeries(seriesId: 1000 + i, name: 'Filler Series $i', categoryId: '${i + 1}').toJson(),
+          for (var i = 0; i < 46527; i++)
+            XtreamSeries(seriesId: 1000 + i, name: 'Filler Series $i', categoryId: '${(i % 236) + 1}').toJson(),
         ]),
       );
-      client.warmUpSeriesCatalog();
-      await client.searchItems('Filler Series 0', excludedLibraryIds: _seriesOnlyScope);
       panel.reset();
 
       final search = client.searchItems('zz-no-match-zz', excludedLibraryIds: _seriesOnlyScope);
-      await _waitFor(() => panel.categoryRequests > 0);
       // The user walks away: cancel the in-flight search.
       final stopwatch = Stopwatch()..start();
       client.cancelActiveSearches();
@@ -195,12 +191,11 @@ void main() {
         // the point, not how it reports it.
       }
       final elapsed = stopwatch.elapsed;
-      // Without the cancel the sweep would take 19 series + 24 live
-      // categories / 8 in flight x 5s = ~27s; the cancel stops it
-      // promptly (not the 50s section budget).
       expect(elapsed, lessThan(const Duration(seconds: 5)));
-      // The in-flight sweep calls were cancelled, not left running.
-      expect(panel.abortedRequests, greaterThan(0), reason: 'in-flight sweep calls must be aborted on abandon');
+      // Nothing was started, so nothing was aborted — and no panel
+      // request was made at any point.
+      expect(panel.totalRequests, 0, reason: 'a local search makes no panel requests');
+      expect(panel.abortedRequests, 0, reason: 'nothing was started, nothing to abort');
       // No tail: after the cancel, no new requests start.
       panel.mark();
       await Future<void>.delayed(const Duration(seconds: 2));

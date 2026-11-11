@@ -7,8 +7,10 @@ import '../utils/app_logger.dart';
 import '../utils/scroll_utils.dart';
 
 /// Debounced free-text search shared by the main search screen and the
-/// catalog (Explore) search screens: text controller + focus nodes, a 500ms
-/// debounce, a generation guard against out-of-order responses, in-flight
+/// catalog (Explore) search screens: text controller + focus nodes, a 100ms
+/// debounce (R2.5 — cut from 500 ms once R2.1 brought the common-needle
+/// search to ~15–25 ms, so the debounce was the whole wait), a generation
+/// guard against out-of-order responses, in-flight
 /// invalidation when the text diverges from the query being fetched, and the
 /// loading/failed/empty state flags the screens render from.
 ///
@@ -20,7 +22,7 @@ import '../utils/scroll_utils.dart';
 /// Implementations override [performSearchQuery]; everything else (including
 /// controller/node disposal) is owned here.
 mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
-  static const Duration searchDebounceDuration = Duration(milliseconds: 500);
+  static const Duration searchDebounceDuration = Duration(milliseconds: 100);
 
   late final TextEditingController searchController = TextEditingController();
   late final FocusNode searchFocusNode = FocusNode(debugLabel: '${searchDebugLabel}Input');
@@ -46,7 +48,10 @@ mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
   String get searchDebugLabel => widget.runtimeType.toString();
 
   /// Run the actual search. Non-cancellation errors flip [lastSearchFailed].
-  Future<List<R>> performSearchQuery(String query);
+  /// [onlineAllowed] (build v1.0.11, R2.0 — the SEARCH RULE): false for a
+  /// keystroke pass (IPTV answers from the local index only), true for an
+  /// explicit submit (Enter) that may go online.
+  Future<List<R>> performSearchQuery(String query, {bool onlineAllowed = false});
 
   /// A failed search was applied to the state (e.g. show a snackbar).
   void onSearchError(Object error) {}
@@ -141,7 +146,9 @@ mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
   }
 
   /// Run [query] now, bypassing the debounce (submit, external refresh).
-  Future<void> runSearch(String query) async {
+  /// [onlineAllowed] (build v1.0.11, R2.0): only an explicit submit passes
+  /// true — a keystroke pass must never go online.
+  Future<void> runSearch(String query, {bool onlineAllowed = false}) async {
     if (!mounted || query.isEmpty) return;
     if (_inFlightQuery != null) onSearchInvalidated();
     final generation = ++_searchGeneration;
@@ -152,7 +159,7 @@ mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
       lastSearchFailed = false;
     });
     try {
-      final results = await performSearchQuery(query);
+      final results = await performSearchQuery(query, onlineAllowed: onlineAllowed);
       if (!mounted || generation != _searchGeneration) return;
       _inFlightQuery = null;
       setState(() {
@@ -201,6 +208,18 @@ mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
     );
   }
 
+  /// Explicit submit (phone Enter / OSK "Search" / TV Enter): the user
+  /// asked for this search, so it may go online (SEARCH RULE, R2.0).
+  /// Cancels the pending debounce and runs immediately with
+  /// [onlineAllowed] true. A submit on a cold IPTV type kicks off one
+  /// coalesced sync (R2.3) and the screen re-runs when it lands.
+  void submitSearch() {
+    final query = searchController.text.trim();
+    if (query.isEmpty) return;
+    _debounceTimer?.cancel();
+    runSearch(query, onlineAllowed: true);
+  }
+
   /// OSK "Search" / hardware Enter on TV: jump to results, or force the
   /// pending search to run now.
   void handleSearchSubmit() {
@@ -214,8 +233,8 @@ mixin DebouncedMediaSearch<T extends StatefulWidget, R> on State<T> {
       return;
     }
     if ((_debounceTimer?.isActive ?? false) || !isSearching) {
-      _debounceTimer?.cancel();
-      runSearch(query);
+      // A submit is the explicit action the SEARCH RULE lets go online.
+      submitSearch();
     }
     // else: the in-flight search already covers the current text.
   }

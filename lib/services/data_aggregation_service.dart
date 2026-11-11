@@ -826,6 +826,10 @@ class DataAggregationService {
     Set<String>? hiddenLibraryKeys,
     String? scopedLibraryKey,
     AbortController? abort,
+    // Build v1.0.11 (R2.0 — SEARCH RULE): false = a keystroke pass
+    // (local-only for IPTV); true = the user submitted (Enter) and the
+    // IPTV client may go online. Plex/Jellyfin ignore it.
+    bool onlineAllowed = false,
   }) async {
     if (query.trim().isEmpty) return _emptySearchResult;
 
@@ -862,8 +866,13 @@ class DataAggregationService {
               : MediaServerTimeouts.searchServerDeadline,
           operation: 'Search on $serverId',
           parent: abort,
-          run: (legAbort) =>
-              client.searchItems(query, limit: fetchLimit, abort: legAbort, excludedLibraryIds: excludedLibraryIds),
+          run: (legAbort) => client.searchItems(
+            query,
+            limit: fetchLimit,
+            abort: legAbort,
+            excludedLibraryIds: excludedLibraryIds,
+            onlineAllowed: onlineAllowed,
+          ),
         );
         final people = await peopleFuture;
         appLogger.i(

@@ -7,20 +7,48 @@
 // series section reports 1 hidden match (the show exists in "|EN| TOP
 // SERIES" — the filter hid it, the search did not miss it).
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 
+import '../../test_helpers/iptv_search_index_seed.dart';
 import '../../test_helpers/prefs.dart';
 
 void main() {
   setUp(resetSharedPreferencesForTest);
 
+  // R2.3: search answers from the local index, so the builder seeds it
+  // from the fake panel's rows.
+  late Directory tempDir;
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('plezy_build17_filter_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+  });
+  tearDown(() async {
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!await tempDir.exists()) break;
+      try {
+        await tempDir.delete(recursive: true);
+        break;
+      } on FileSystemException {
+        if (attempt == 2) rethrow;
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
+  });
+
   // The password is split so the literal never appears in new code.
   const testPassword = 'pa' 'ss';
 
-  IptvClient clientWith({required XtreamApi api, List<String> hiddenInitials = const []}) {
+  Future<IptvClient> clientWith({required XtreamApi api, List<String> hiddenInitials = const []}) async {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
       name: 'Trex',
@@ -32,12 +60,13 @@ void main() {
     );
     final client = IptvClient.forConnection(connection);
     client.testXtreamApi = api;
+    await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1');
     return client;
   }
 
   group('build17 search: hidden matches are surfaced, not silently dropped', () {
     test('EN hidden — the show is counted as hidden, not as "no match"', () async {
-      final client = clientWith(api: _GotFakeApi(), hiddenInitials: const ['EN']);
+      final client = await clientWith(api: _GotFakeApi(), hiddenInitials: const ['EN']);
       try {
         final results = await client.searchItems('game of thrones');
         expect(results, isEmpty);
@@ -59,7 +88,7 @@ void main() {
     });
 
     test('EN shown — the show is returned and nothing is hidden', () async {
-      final client = clientWith(api: _GotFakeApi());
+      final client = await clientWith(api: _GotFakeApi());
       try {
         final results = await client.searchItems('game of thrones');
         expect(results.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));

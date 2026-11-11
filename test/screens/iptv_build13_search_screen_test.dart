@@ -18,8 +18,11 @@
 //   find the show inside a scaled 1s section budget — FAILS before the
 //   partial-row fix, passes after.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/focus/focusable_text_field.dart';
 import 'package:plezy/i18n/strings.g.dart';
@@ -29,6 +32,8 @@ import 'package:plezy/providers/libraries_provider.dart';
 import 'package:plezy/providers/multi_server_provider.dart';
 import 'package:plezy/screens/search_screen.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
+import 'package:plezy/services/iptv/iptv_item_favorites_repository.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
@@ -38,21 +43,38 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 
+import '../test_helpers/iptv_search_index_seed.dart';
 import '../test_helpers/multi_server_fixtures.dart';
 import '../test_helpers/prefs.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // The seeded index carries a last-sync stamp, and the catalog health
+  // line formats it with DateFormat — without this the first build
+  // throws LocaleDataException (same gotcha as the R2 widget tests).
+  setUpAll(() => initializeDateFormatting('en'));
 
-  setUp(() {
+  late Directory tempDir;
+  setUp(() async {
     resetSharedPreferencesForTest();
-    // Widget tests run in a fake async zone: real disk I/O hangs.
-    IptvCatalogDiskCache.debugDisableDisk = true;
+    // R2 migration: the typing search is local-only, so these tests seed
+    // the search index from the fake panel instead of relying on the
+    // removed cold sweep to load rows from the panel mid-search. The
+    // index + disk cache point at a temp dir; the old
+    // `debugDisableDisk = true` would make `_searchIndex()` return null
+    // and the seed impossible.
+    tempDir = await Directory.systemTemp.createTemp('plezy_build13_search_screen_');
+    IptvCatalogDiskCache.debugDirectoryProvider = () async => tempDir;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
   });
 
-  tearDown(() {
+  tearDown(() async {
     IptvClient.debugClientFactory = null;
-    IptvCatalogDiskCache.debugDisableDisk = false;
+    IptvCatalogDiskCache.debugDirectoryProvider = null;
+    IptvSearchIndex.debugDirectoryProvider = null;
+    if (tempDir.existsSync()) {
+      await tempDir.delete(recursive: true);
+    }
   });
 
   // The password is split so the literal never appears in new code.
@@ -61,6 +83,12 @@ void main() {
   // Matt's filter state, in shape: every initial hidden except EN.
   const hiddenInitials = ['AR', 'FR', 'DE', 'PL', 'ES', 'IN', 'NL', 'SE'];
 
+  // In-memory favourites: the production favourites read goes through
+  // the shared prefs cache, whose legacy `SharedPreferences.getInstance()`
+  // method-channel call cannot complete inside `tester.runAsync` — a
+  // warmup search stalls on it until the 50 s section budget aborts every
+  // section and the search returns [] (proven by bisection 2026-11-11).
+  // Same seam as iptv_screens_test.dart.
   IptvClient trexClient({XtreamApi? api}) {
     final connection = XtreamConnection(
       id: 'conn-xt-1',
@@ -73,20 +101,59 @@ void main() {
     );
     final client = IptvClient.forConnection(connection);
     client.testXtreamApi = api ?? _TrexSearchFakeXtreamApi();
+    client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
     return client;
   }
 
   Future<void> searchFor(WidgetTester tester, String query) async {
     tester.widget<FocusableTextField>(find.byType(FocusableTextField)).controller.text = query;
-    // The 500ms debounce, then the search itself.
-    await tester.pump(const Duration(milliseconds: 500));
+    // The 100ms debounce (R2.5, was 500ms), then the search itself.
+    //
+    // The search's legs (index open, disk reads) are real dart:io — a
+    // pump-only wait never lets them finish: pump + pumpAndSettle leaves
+    // the sections stalled on the 50 s budget and the search returns []
+    // (proven 2026-11-11). Interleave real-loop delays with pumps, the
+    // same pattern as the R2.0 widget test's waitFor helper.
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(() => Future.delayed(const Duration(milliseconds: 50)));
+      // Pump WITH a duration: a bare pump() advances the fake clock by
+      // zero, so the 100 ms debounce timer would never fire during this
+      // loop and the search would only start in the pumpAndSettle below
+      // — where the real loop never runs and the sections stall.
+      await tester.pump(const Duration(milliseconds: 100));
+    }
     await tester.pumpAndSettle();
+  }
+
+  // Seed the search index from the fake panel and pre-warm the client's
+  // index on the real loop (first open does real dart:io, which never
+  // completes in fake async) — after this, the screen's typing searches
+  // run entirely locally, as the SEARCH RULE requires.
+  //
+  // Call this AFTER `_Harness.create`: the harness initialises the
+  // settings/storage services the screen reads, and the warmup's
+  // favourites read is pure memory (see `trexClient`'s in-memory
+  // repository) so nothing in the warmup can stall on the shared prefs
+  // cache load inside `runAsync`.
+  Future<IptvClient> seedAndWarm(WidgetTester tester, IptvClient client, XtreamApi api, {Set<String> types = const {'live', 'movie', 'series'}}) async {
+    await tester.runAsync(() async {
+      await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: types);
+      await client.searchItems('warmup-needle');
+    });
+    return client;
   }
 
   group('build13: search on the Search screen (Trex, cold start)', () {
     testWidgets('series + movies: "alpha" shows the show and the movie', (tester) async {
-      final harness = await _Harness.create(trexClient());
+      final api = _TrexSearchFakeXtreamApi();
+      final client = trexClient(api: api);
+      // Services FIRST (see seedAndWarm): the search's favourites read
+      // goes through the shared prefs cache, and starting that load
+      // before SettingsService has initialised deadlocks the later
+      // getInstance() inside fake async.
+      final harness = await _Harness.create(client);
       addTearDown(harness.dispose);
+      await seedAndWarm(tester, client, api);
       await harness.pump(tester);
 
       await searchFor(tester, 'alpha');
@@ -96,8 +163,11 @@ void main() {
     });
 
     testWidgets('live: "hbo" shows the channel in a Live TV section', (tester) async {
-      final harness = await _Harness.create(trexClient());
+      final api = _TrexSearchFakeXtreamApi();
+      final client = trexClient(api: api);
+      final harness = await _Harness.create(client);
       addTearDown(harness.dispose);
+      await seedAndWarm(tester, client, api);
       await harness.pump(tester);
 
       await searchFor(tester, 'hbo');
@@ -108,44 +178,51 @@ void main() {
       expect(find.text('Al Jazeera'), findsNothing);
     });
 
-    testWidgets('cold crawl: "alpha" finds the show in a late category', (tester) async {
-      // (g) shape at Trex scale: unfiltered [] + 100ms per-category
-      // calls, match in category 120. Scaled 3s section budget, same
-      // idiom as the unit harness. Build #21 recalibration: the budget
-      // was 1s, calibrated to the old batch size (32) — 120/32 x 100ms =
-      // 375ms to reach category 120. At the build #21 burst cap of 8 it
-      // needs 120/8 x 100ms = 1500ms, past the 980ms sweep deadline at
-      // a 1s budget. The test's purpose is that a cold search finds a
-      // show in a late category, not the budget value (the real section
-      // budget is 50s); 3s keeps the same shape at the shipped cap.
-      final previousBudget = IptvClient.searchSectionBudget;
-      IptvClient.searchSectionBudget = const Duration(milliseconds: 3000);
-      addTearDown(() => IptvClient.searchSectionBudget = previousBudget);
-      final client = trexClient(
-        api: _TrexSearchFakeXtreamApi(
-          unfilteredSeriesEmpty: true,
-          seriesPerCategoryDelay: const Duration(milliseconds: 100),
-          matchSeriesCategoryId: '120',
-        ),
+    testWidgets('cold crawl: a per-category-only show is NOT found by search', (tester) async {
+      // R2.3 boundary pin (rewritten from the old cold-crawl test): the
+      // panel's unfiltered series list is [] and the match sits only in
+      // category 120. The old search swept the categories to find it;
+      // R2 removed the sweep — search is local-only while typing, and
+      // the sync only fetches the unfiltered lists, so a show the panel
+      // returns per-category alone is unreachable by search. The typing
+      // search still answers promptly with the rows the index DOES have
+      // (the movie), and the series section stays cold. The fake's
+      // per-category delay / budget shape is gone with the sweep.
+      final api = _TrexSearchFakeXtreamApi(
+        unfilteredSeriesEmpty: true,
+        seriesPerCategoryDelay: const Duration(milliseconds: 100),
+        matchSeriesCategoryId: '120',
       );
+      final client = trexClient(api: api);
+      // Services first (same ordering rule as the other tests in this
+      // file), then seed movies + live only: series stays cold, as on a
+      // fresh install whose sync recorded the series leg 'empty-response'.
       final harness = await _Harness.create(client);
       addTearDown(harness.dispose);
+      await seedAndWarm(tester, client, api, types: const {'movie', 'live'});
       await harness.pump(tester);
 
       await searchFor(tester, 'alpha');
 
-      expect(find.text('Alpha Show'), findsWidgets);
-
-      // Settle the background unfiltered-load crawl before teardown:
-      // the sweep (cap 8) now finishes in ~1500 ms of fake time while
-      // the crawl fallback (batch 16, ~1000 ms of 100 ms getSeries calls)
-      // is still firing, which leaves pending fake-async timers at
-      // teardown. Build #17 fix-up: the search result is already on
-      // screen; this only lets the crawl finish.
-      await tester.pump(const Duration(seconds: 2));
-      await tester.pumpAndSettle();
+      expect(find.text('Alpha Movie'), findsWidgets);
+      expect(find.text('Alpha Show'), findsNothing);
     });
   });
+}
+
+/// In-memory favourites store (same shape as iptv_screens_test.dart):
+/// favourites are always empty here — these tests assert search rows,
+/// not favourites.
+class _InMemoryItemFavoritesRepository implements IptvItemFavoritesRepository {
+  Map<String, IptvFavoriteItem> _items = {};
+
+  @override
+  Future<Map<String, IptvFavoriteItem>> read({required String key}) async => Map.of(_items);
+
+  @override
+  Future<void> write(String key, Map<String, IptvFavoriteItem> items) async {
+    _items = Map.of(items);
+  }
 }
 
 /// Minimal harness: the real manager/provider stack with the Trex client
