@@ -52,6 +52,7 @@ http.Response _json(Object body) => http.Response(jsonEncode(body), 200, headers
 class _LibrariesClient implements MediaServerClient {
   _LibrariesClient(
     this.serverId, {
+    this.backend = MediaBackend.plex,
     this.error,
     this.libraries = const [],
     this.searchError,
@@ -72,8 +73,9 @@ class _LibrariesClient implements MediaServerClient {
   /// The aggregation bridge reads this to pick the search deadline
   /// (build #14, SA-12): the fake is a plain non-IPTV server, so it gets
   /// the standard deadline — the same backend the test people carry.
+  /// Tests pass [MediaBackend.xtream] for the IPTV leg (v1.0.10).
   @override
-  MediaBackend get backend => MediaBackend.plex;
+  final MediaBackend backend;
 
   final Object? error;
   final List<MediaLibrary> libraries;
@@ -84,6 +86,7 @@ class _LibrariesClient implements MediaServerClient {
   final bool hangLibraries;
   final bool hangSearch;
   final bool hangPeople;
+  bool peopleCalled = false;
   Set<String>? lastExcludedLibraryIds;
   Set<String>? lastPeopleExcludedLibraryIds;
   AbortController? lastSearchAbort;
@@ -123,6 +126,7 @@ class _LibrariesClient implements MediaServerClient {
     AbortController? abort,
     Set<String> excludedLibraryIds = const {},
   }) async {
+    peopleCalled = true;
     lastPeopleExcludedLibraryIds = excludedLibraryIds;
     lastPeopleAbort = abort;
     if (hangPeople) await _hangUntilAborted(abort);
@@ -671,6 +675,38 @@ void main() {
         expect(result!.people, isEmpty);
         expect(result!.succeededServerIds, {'plex'});
       });
+    });
+
+    test('IPTV servers never run the people leg (v1.0.10)', () async {
+      // Xtream/M3U carry no cast or crew: the real IptvClient.searchPeople
+      // throws UnsupportedError on every call, and the aggregation logged
+      // a warning + stack trace for it on every keystroke search (Matt's
+      // 1.0.9 logs, 2026-11-11). The leg must not run at all for IPTV.
+      // (The title row itself is a plain Plex-shaped item — the helper
+      // has no IPTV shape, and the skip keys off the CLIENT's backend,
+      // not the row's.)
+      final item = testMediaItem(
+        id: 'movie-1',
+        backend: MediaBackend.plex,
+        kind: MediaKind.movie,
+        title: 'Target',
+        serverId: 'trex',
+      );
+      final iptv = _LibrariesClient(
+        ServerId('trex'),
+        backend: MediaBackend.xtream,
+        searchResults: [item],
+        peopleError: UnsupportedError('IPTV: searchPeople not supported'),
+      );
+      manager.debugRegisterClientForTesting(iptv);
+
+      final result = await service.searchAcrossServers('Target');
+
+      expect(iptv.peopleCalled, isFalse,
+          reason: 'the people leg must not run for IPTV at all');
+      expect(result.people, isEmpty);
+      expect(_hitIds(result), ['movie-1']);
+      expect(result.succeededServerIds, {'trex'});
     });
 
     test('a superseded search still cancels a server inside its deadline', () {

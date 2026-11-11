@@ -927,6 +927,11 @@ class DataAggregationService {
   /// cancelled, or misses [MediaServerTimeouts.searchServerDeadline]. Never
   /// throws: the title leg alone decides the server's outcome, and a user
   /// abort still surfaces through the caller's `throwIfAborted`.
+  ///
+  /// IPTV servers never run the leg at all: Xtream/M3U carry no cast or
+  /// crew, so `IptvClient.searchPeople` throws `UnsupportedError` on
+  /// every call — and the catch below logged a warning + stack trace for
+  /// it on every keystroke search (Matt's 1.0.9 logs, 2026-11-11).
   Future<List<MediaPerson>> _searchPeopleBestEffort(
     String serverId,
     MediaServerClient client,
@@ -934,6 +939,10 @@ class DataAggregationService {
     AbortController? abort,
     required Set<String> excludedLibraryIds,
   }) async {
+    if (client.backend == MediaBackend.m3u ||
+        client.backend == MediaBackend.xtream) {
+      return const [];
+    }
     try {
       return await _withinServerDeadline(
         MediaServerTimeouts.searchServerDeadline,

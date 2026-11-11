@@ -482,7 +482,7 @@ class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
     for (final client in widget.clients) {
       if (_abort.isAborted) break;
       try {
-        await client.syncSearchIndex(
+        final result = await client.syncSearchIndex(
           force: true,
           abort: _abort,
           onProgress: (p) {
@@ -490,6 +490,14 @@ class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
             setState(() => _progress[p.type] = p);
           },
         );
+        // A per-type fetch failure is recorded in the result's skipped
+        // map, not thrown — without this the dialog said "Catalog
+        // synced" with every row reading "failed" (Matt, 2026-11-11:
+        // manual refresh, all three types timed out). Only an
+        // 'up-to-date' skip is a clean sync.
+        if (result.skipped.values.any((reason) => reason != 'up-to-date')) {
+          failed = true;
+        }
       } catch (_) {
         // Aborted between types, or a client-level failure: the other
         // types/clients keep their last state; the dialog reports it.

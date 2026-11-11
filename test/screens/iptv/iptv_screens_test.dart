@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/connection/connection_registry.dart';
 import 'package:plezy/database/app_database.dart';
+import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/ids.dart';
@@ -40,6 +41,7 @@ import 'package:plezy/screens/settings/iptv_settings_screen.dart';
 import 'package:plezy/services/credential_vault.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/iptv_item_favorites_repository.dart';
+import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
 import 'package:plezy/services/settings_service.dart';
@@ -100,18 +102,33 @@ class _FakeXtreamApi extends XtreamApi {
     : super(serverUrl: 'https://panel.example.com:8080', username: 'user', password: 'pass');
 
   @override
-  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
-    XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
-    XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
-  ];
+  Future<List<XtreamVodStream>> getVodStreams({String? categoryId, Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
+    return const [
+      XtreamVodStream(streamId: 1, name: 'Alpha Movie', containerExtension: 'mp4', categoryId: '1'),
+      XtreamVodStream(streamId: 2, name: 'Beta Movie', containerExtension: 'mkv', categoryId: '2'),
+    ];
+  }
 
   /// When true, the unfiltered series call never answers — the diagnostics
   /// probe hangs, so a test can prove the "Last search" row does not wait
   /// for it (build #14, UI-2). Per-category calls still answer.
   bool hangUnfilteredSeries = false;
 
+  /// When true, every catalog + category fetch throws a timeout — the
+  /// panel answers nothing, like Matt's manual refresh on 2026-11-11
+  /// (v1.0.10: the sync dialog must report the failure, not "Catalog
+  /// synced").
+  bool failCatalogs = false;
+
+  Never _catalogTimeout() => throw MediaServerHttpException(
+    type: MediaServerHttpErrorType.connectionTimeout,
+    message: 'Future not completed',
+  );
+
   @override
   Future<List<XtreamSeries>> getSeries({String? categoryId, Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
     if (hangUnfilteredSeries && categoryId == null) {
       return Completer<List<XtreamSeries>>().future;
     }
@@ -121,28 +138,37 @@ class _FakeXtreamApi extends XtreamApi {
   }
 
   @override
-  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
-    XtreamLiveStream(
-      streamId: 100,
-      name: 'Trex News',
-      categoryId: '1',
-      tvArchive: true,
-      tvArchiveDuration: 86400,
-    ),
-    XtreamLiveStream(streamId: 101, name: 'Trex Sports', categoryId: '1'),
-  ];
+  Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
+    return const [
+      XtreamLiveStream(
+        streamId: 100,
+        name: 'Trex News',
+        categoryId: '1',
+        tvArchive: true,
+        tvArchiveDuration: 86400,
+      ),
+      XtreamLiveStream(streamId: 101, name: 'Trex Sports', categoryId: '1'),
+    ];
+  }
 
   @override
-  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async =>
-      const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
+  Future<List<XtreamCategory>> getVodCategories({Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
+    return const [XtreamCategory(id: '1', name: 'Action'), XtreamCategory(id: '2', name: 'Drama')];
+  }
 
   @override
-  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async =>
-      const [XtreamCategory(id: '1', name: 'Action')];
+  Future<List<XtreamCategory>> getSeriesCategories({Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
+    return const [XtreamCategory(id: '1', name: 'Action')];
+  }
 
   @override
-  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async =>
-      const [XtreamCategory(id: '1', name: 'News')];
+  Future<List<XtreamCategory>> getLiveCategories({Future<void>? abortTrigger}) async {
+    if (failCatalogs) _catalogTimeout();
+    return const [XtreamCategory(id: '1', name: 'News')];
+  }
 
   // EPG: the guide fetches these for every visible channel. The real
   // implementations hit the network (xmltv.php has a 120s timeout), so
@@ -597,6 +623,87 @@ void main() {
     expect(find.text('Trex'), findsWidgets);
     expect(find.textContaining('Xtream Codes'), findsWidgets);
     expect(find.text(t.iptv.refreshPlaylists), findsOneWidget);
+  });
+
+  testWidgets('manual refresh that fails every type says the sync failed, not "Catalog synced" (v1.0.10)', (tester) async {
+    // Matt, 2026-11-11: manual Refresh playlists with the panel timing
+    // out showed Live/Movies/Series "failed" and "Catalog synced"
+    // underneath. Per-type failures land in the sync result's skipped
+    // map, not as a throw, so the dialog used to report success whenever
+    // the sync itself returned.
+    CredentialVault.resetKeyForTesting();
+    await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async => db.close());
+    final registry = _FakeConnectionRegistry(db);
+    await registry.upsert(_trexConnection());
+
+    // The sync needs a real search index on disk, or it short-circuits
+    // to all-'failed' without ever calling the panel — point it at a
+    // temp dir so the per-type fetch path actually runs. The file-level
+    // setUp switches the disk cache off for every test (its real dart:io
+    // never completes in fake async); this test re-enables it, because
+    // without the index the sync never reaches the fetch that must fail.
+    // The sync fails at the fetch, before any disk-cache write, and the
+    // index open itself is yielded to via runAsync below.
+    IptvCatalogDiskCache.debugDisableDisk = false;
+    final tempDir = (await tester.runAsync<Directory>(
+      () => Directory.systemTemp.createTemp('plezy_sync_dialog_test_'),
+    ))!;
+    IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+    addTearDown(() async {
+      IptvSearchIndex.debugDirectoryProvider = null;
+      if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+    });
+
+    final api = _FakeXtreamApi()..failCatalogs = true;
+    final client = IptvClient.xtream(xtreamConnection: _trexConnection());
+    client.testXtreamApi = api;
+    client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
+
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(client);
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          Provider<ConnectionRegistry>.value(value: registry),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The sync dialog opens from the "Sync catalog now" row (the
+    // "Refresh playlists" row only clears the playlist cache + EPG and
+    // shows a snackbar — tapping it instead silently tests nothing).
+    // The row sits in the Playlist section, below the fold on the test
+    // viewport — scroll it into view first, then tap (the #20 lesson:
+    // a tap right after scrollUntilVisible reads a stale centre).
+    await tester.scrollUntilVisible(find.text(t.iptv.catalogSyncNow), 200);
+    await tester.pump();
+    await tester.tap(find.text(t.iptv.catalogSyncNow));
+    await tester.pump();
+
+    // The sync runs real sqlite + panel work on the real event loop —
+    // yield to it, then pump, until the dialog reports the outcome.
+    for (var i = 0; i < 40 && find.text(t.iptv.catalogSyncFailed).evaluate().isEmpty; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+    }
+    expect(find.text(t.iptv.catalogSyncFailed), findsOneWidget);
+    expect(find.text(t.iptv.catalogSyncDone), findsNothing);
+    expect(find.text('failed'), findsWidgets);
   });
 
   testWidgets('Last search shows while the series probe is still running', (tester) async {
