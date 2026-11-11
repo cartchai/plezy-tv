@@ -3843,6 +3843,10 @@ class Translations$about$en {
 		'When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background',
 		'The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type',
 	];
+	List<String> get changelog2276 => [
+		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
+		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
+	];
 }
 
 // Path: serverSelection
@@ -10445,6 +10449,8 @@ extension on Translations {
 			'about.changelog2275.1' => 'Search is much faster now: a common search went from about half a second to about 20 milliseconds, and an exact title like Game of Thrones now comes first instead of being cut off by shorter near-matches',
 			'about.changelog2275.2' => 'When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background',
 			'about.changelog2275.3' => 'The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type',
+			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
+			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
 			'serverSelection.failedToLoadServers' => ({required Object error}) => 'Failed to load servers: ${error}',
 			'serverSelection.noValidServers' => 'No usable servers were found on this account',
@@ -10563,10 +10569,10 @@ extension on Translations {
 			'explore.stats.planning' => ({required Object n}) => '${n} planning to watch',
 			'explore.stats.favorited' => ({required Object n}) => '${n} favorites',
 			'explore.stats.dropRate' => ({required Object percent}) => '${percent} dropped it',
-			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
-			'explore.stats.votes' => ({required Object n}) => '${n} votes',
 			_ => null,
 		} ?? switch (path) {
+			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
+			'explore.stats.votes' => ({required Object n}) => '${n} votes',
 			'explore.stats.watching' => ({required Object n}) => '${n} watching it',
 			'explore.stats.completed' => ({required Object n}) => '${n} completed',
 			'explore.stats.onHold' => ({required Object n}) => '${n} on hold',
@@ -11077,10 +11083,10 @@ extension on Translations {
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
 			'downloads.backgroundWarning.stillNotWorkingDescription' => 'See steps for your device, or send a log from Settings › View Logs if the issue continues.',
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
-			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
-			'downloads.backgroundWarning.dialogFixFirst' => 'Fix this first',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
+			'downloads.backgroundWarning.dialogFixFirst' => 'Fix this first',
 			'downloads.backgroundWarning.statusTile' => 'Background downloads',
 			'downloads.backgroundWarning.statusOk' => 'Allowed to run in the background',
 			'downloads.backgroundWarning.statusBlocked' => 'Blocked by system settings',
@@ -11591,10 +11597,10 @@ extension on Translations {
 			'iptv.catalogColdHint' => ({required Object types}) => '${types} not synced yet — hit Enter to search online',
 			'iptv.catalogUpdated' => ({required Object channels, required Object movies, required Object series, required Object date}) => 'Catalog: ${channels} channels · ${movies} movies · ${series} series · updated ${date}',
 			'iptv.guideAndCatchUp' => 'Guide & catch-up',
-			'iptv.showCatchUpBadge' => 'Show catch-up badge',
-			'iptv.showCatchUpBadgeDescription' => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.showCatchUpBadge' => 'Show catch-up badge',
+			'iptv.showCatchUpBadgeDescription' => 'Show a badge on channels that offer catch-up TV. Applies when the guide reloads.',
 			'iptv.player' => 'Player',
 			'iptv.playerSettings' => 'Player settings',
 			'iptv.playerSettingsDescription' => 'Decoder, external player and playback options',

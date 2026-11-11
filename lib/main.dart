@@ -1314,15 +1314,40 @@ bool shouldEnterOfflineModeAfterStartupBind({required bool bindingSucceeded, req
   return !bindingSucceeded && !hasOnlineServers;
 }
 
-/// The splash's wait for the initial bind. With no OS network the wait is
-/// capped at [MediaServerTimeouts.noNetworkStartupBind] and a timeout reads
-/// as a failed bind: the bind keeps running, and
-/// [shouldEnterOfflineModeAfterStartupBind] still keeps the launch online
-/// when a server already connected.
+/// Whether the splash proceeds to MainScreen after the startup-bind wait.
+/// A cap expiry with the binder still running (network branch only) is not
+/// a failed bind: the bind keeps running, and MainScreen's composite offline
+/// verdict flips to the offline shell by itself if the bind ultimately fails
+/// with zero servers online. Without this check a slow Trex probe would
+/// route splash → offline shell → MainScreen a second later (R5 §5.1).
+@visibleForTesting
+bool shouldProceedToMainScreenAfterStartupBind({
+  required bool bindingSucceeded,
+  required bool hasOnlineServers,
+  required bool bindStillRunning,
+  required bool hasNetwork,
+}) {
+  if (hasNetwork && bindStillRunning) return true;
+  return !shouldEnterOfflineModeAfterStartupBind(
+    bindingSucceeded: bindingSucceeded,
+    hasOnlineServers: hasOnlineServers,
+  );
+}
+
+/// The splash's wait for the initial bind. The wait is capped in both
+/// branches: [MediaServerTimeouts.networkStartupBind] with a network,
+/// [MediaServerTimeouts.noNetworkStartupBind] without one. A timeout reads
+/// as a failed bind AT THIS LAYER (the future completes false) — the caller
+/// must disambiguate with the binder's `isBinding` before routing to the
+/// offline shell (see `shouldProceedToMainScreenAfterStartupBind`): a cap
+/// expiry with the bind still running is a slow bind, not a failed one.
+/// The bind itself keeps running either way.
 @visibleForTesting
 Future<bool> awaitStartupBindSettle(Future<bool> settle, {required bool hasNetwork}) {
-  if (hasNetwork) return settle;
-  return settle.timeout(MediaServerTimeouts.noNetworkStartupBind, onTimeout: () => false);
+  final cap = hasNetwork
+      ? MediaServerTimeouts.networkStartupBind
+      : MediaServerTimeouts.noNetworkStartupBind;
+  return settle.timeout(cap, onTimeout: () => false);
 }
 
 /// Top-level PIN prompt used by [ActiveProfileBinder] when it runs above the
@@ -2426,28 +2451,30 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
         // race: per-server status flips on the splash list as each client comes
         // online, and we don't push MainScreen until they're all done (success
         // or fail). Eliminates the "Failed to load discover content: No servers
-        // available" race the old eager-navigate flow caused. Without a network
-        // the wait is capped so airplane mode reaches the offline shell fast.
+        // available" race the old eager-navigate flow caused. The wait is
+        // capped in both branches (15 s with a network, 2 s without) so a
+        // slow panel cannot hold the splash indefinitely; a cap expiry with
+        // the binder still running routes to MainScreen, not the offline
+        // shell (see shouldProceedToMainScreenAfterStartupBind).
         bindingSucceeded = await awaitStartupBindSettle(activeProfile.awaitBindingSettle(), hasNetwork: hasNetwork);
         if (!mounted) return;
       }
       AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.bindingSettled);
 
-      if (shouldEnterOfflineModeAfterStartupBind(
+      // R5: a cap expiry with the binder still running is a slow bind, not
+      // a failed one — the launch stays online and MainScreen's composite
+      // offline verdict flips to the offline shell by itself if the bind
+      // ultimately fails with zero servers online.
+      if (!shouldProceedToMainScreenAfterStartupBind(
         bindingSucceeded: bindingSucceeded,
         hasOnlineServers: _serverManagerFromContext().onlineServerIds.isNotEmpty,
+        bindStillRunning: activeProfile.isBinding,
+        hasNetwork: hasNetwork,
       )) {
         appLogger.w('Setup: no servers online after startup bind; starting offline mode');
         await _enterOfflineMode(initialPromptHandled: linkApplied);
         return;
       }
-
-      // Repopulate metadata for downloaded items now that per-backend caches
-      // are resolvable (the Connections row + live MediaBrowser client are in
-      // place). Without this the downloads list and sync-rule titles render
-      // empty until something forces a later refresh.
-      await downloadProvider.refreshMetadataFromCache();
-      if (!mounted) return;
 
       AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.mainScreen);
       unawaited(
@@ -2455,6 +2482,20 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
           context,
           fadeRoute(ProfileSessionScreen(initialPromptHandled: shouldPrompt || linkApplied)),
         ),
+      );
+
+      // R5.2: repopulate metadata for downloaded items AFTER first paint.
+      // The refresh walks every download and network-fills on a metadata
+      // miss, serially — awaiting it here used to hold first paint behind
+      // one round-trip per download, after the bind had already settled.
+      // It notifies listeners when it finishes, so the downloads list and
+      // sync-rule titles populate shortly after MainScreen lands. The
+      // catchError keeps a failing refresh from surfacing as an unhandled
+      // async error now that nothing awaits it.
+      unawaited(
+        downloadProvider.refreshMetadataFromCache().catchError((Object e, StackTrace st) {
+          appLogger.w('Setup: post-launch download metadata refresh failed', error: e, stackTrace: st);
+        }),
       );
     } finally {
       deepLinks.settleStartupProfile(applied: linkApplied);

@@ -98,6 +98,23 @@ class MediaServerTimeouts {
   /// brings the app online.
   static const noNetworkStartupBind = Duration(seconds: 2);
 
+  /// How long the startup splash waits for the initial bind when the OS
+  /// reports a network. Healthy binds settle in ~1-3 s (one health probe
+  /// per server); the slowest leg is a single Xtream health probe whose only
+  /// bound is its 30 s fetch timeout, so an uncapped wait strands the splash
+  /// for up to ~30 s on a slow panel. Past the cap the splash opens
+  /// MainScreen anyway and the bind keeps running — the cap is a *wait*
+  /// ceiling, not a failure: the splash's routing check (see
+  /// shouldProceedToMainScreenAfterStartupBind in main.dart) keeps the
+  /// launch online while the binder is still running, and the
+  /// composite offline verdict flips MainScreen to the offline shell by
+  /// itself if the bind ultimately fails with zero servers online. Distinct
+  /// from MainScreen's private `_startupSettleFallback`, a separate 15 s
+  /// timer for priming services once MainScreen exists (R5; the two
+  /// ceilings can stack to 30 s on a hung bind — harmless in practice,
+  /// since the Trex probe itself times out at 30 s).
+  static const networkStartupBind = Duration(seconds: 15);
+
   /// How long a caller waits for a Plex tune or a MediaBrowser Live TV
   /// PlaybackInfo that opens a source. Matches Plex web's value: a cold tuner
   /// can take well over ten seconds to return response headers.

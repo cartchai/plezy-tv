@@ -17,7 +17,7 @@ void main() {
       expect(shouldEnterOfflineModeAfterStartupBind(bindingSucceeded: false, hasOnlineServers: true), isFalse);
     });
 
-    test('without a network the splash waits for the bind only up to the cap', () {
+    test('the splash waits for the bind only up to the cap, with or without a network', () {
       fakeAsync((async) {
         bool? capped;
         bool? uncapped;
@@ -34,9 +34,75 @@ void main() {
         async.elapse(const Duration(milliseconds: 1));
         expect(capped, isFalse, reason: 'airplane mode reaches the offline shell after the cap');
 
-        async.elapse(const Duration(minutes: 1));
-        expect(uncapped, isNull, reason: 'with a network the splash waits for the real outcome');
+        // R5: with a network the wait is capped at networkStartupBind (15 s).
+        // Before R5 the splash waited for the real outcome with no cap at
+        // all, so a hung Trex probe held the splash for its whole 30 s
+        // fetch timeout. The old assertion here pinned the uncapped wait
+        // ("with a network the splash waits for the real outcome") — it is
+        // replaced, not deleted, by the capped assertion below.
+        async.elapse(
+          MediaServerTimeouts.networkStartupBind -
+              MediaServerTimeouts.noNetworkStartupBind -
+              const Duration(milliseconds: 1),
+        );
+        expect(uncapped, isNull);
+        async.elapse(const Duration(milliseconds: 1));
+        expect(uncapped, isFalse, reason: 'with a network the splash stops waiting at the 15 s cap');
       });
+    });
+
+    test('a cap expiry with the bind still running proceeds to MainScreen', () {
+      // R5 section 5.1 trap: a timeout is not a failed bind. The splash
+      // wait returns false on a cap expiry, so the caller must check
+      // isBinding before routing to the offline shell — otherwise a slow
+      // Trex probe flashes splash, offline shell, MainScreen in turn.
+      expect(
+        shouldProceedToMainScreenAfterStartupBind(
+          bindingSucceeded: false,
+          hasOnlineServers: false,
+          bindStillRunning: true,
+          hasNetwork: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldProceedToMainScreenAfterStartupBind(
+          bindingSucceeded: false,
+          hasOnlineServers: false,
+          bindStillRunning: false,
+          hasNetwork: true,
+        ),
+        isFalse,
+        reason: 'a genuinely settled failure with no online servers still goes offline',
+      );
+      expect(
+        shouldProceedToMainScreenAfterStartupBind(
+          bindingSucceeded: false,
+          hasOnlineServers: false,
+          bindStillRunning: true,
+          hasNetwork: false,
+        ),
+        isFalse,
+        reason: 'without a network the cap still reads as a failed bind',
+      );
+      expect(
+        shouldProceedToMainScreenAfterStartupBind(
+          bindingSucceeded: true,
+          hasOnlineServers: false,
+          bindStillRunning: false,
+          hasNetwork: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldProceedToMainScreenAfterStartupBind(
+          bindingSucceeded: false,
+          hasOnlineServers: true,
+          bindStillRunning: false,
+          hasNetwork: true,
+        ),
+        isTrue,
+      );
     });
 
     test('retries active profile bind when reconnect has no visible servers', () {

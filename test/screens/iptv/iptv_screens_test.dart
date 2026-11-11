@@ -915,6 +915,11 @@ void main() {
       final newest11 = tester.getTopLeft(find.text('Version 1.0.11-2.25.0')).dy;
       final previous10 = tester.getTopLeft(find.text('Version 1.0.10-2.25.0')).dy;
       expect(newest11, lessThan(previous10));
+      // R5 (v1.0.12): same guard for the new version — it must be present
+      // and sit above 1.0.11.
+      expect(find.text('Version 1.0.12-2.25.0'), findsOneWidget);
+      final newest12 = tester.getTopLeft(find.text('Version 1.0.12-2.25.0')).dy;
+      expect(newest12, lessThan(newest11));
     });
   });
 }

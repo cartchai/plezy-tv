@@ -1585,6 +1585,10 @@
       "Search is much faster now: a common search went from about half a second to about 20 milliseconds, and an exact title like Game of Thrones now comes first instead of being cut off by shorter near-matches",
       "When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background",
       "The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type"
+    ],
+    "changelog2276": [
+      "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
+      "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
     ]
   },
   "serverSelection": {
