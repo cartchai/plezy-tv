@@ -1,0 +1,71 @@
+# PlezTV — GitHub Actions release build (added 2026-11-11, see FORK_MAINTENANCE §27)
+#
+# Why: Codemagic's artifact downloads kept failing — its signed URLs
+# expire in ~2 min and the 345 MB file never survived the transfer to
+# this VM (5 failed browser captures for v1.0.10; direct curl 401;
+# authenticated API calls hang with 0 bytes). The APK file only existed
+# on Codemagic, so no GitHub Release could be created. Building here puts
+# the APK straight onto the Release the in-app updater reads.
+#
+# Mirrors codemagic.yaml exactly: Flutter 3.47.9, Java 17, debug APK,
+# ENABLE_UPDATE_CHECK=true. The debug signing key is the committed
+# android/app/debug.keystore (see android/app/build.gradle.kts), so this
+# APK installs over the top of Codemagic-built ones.
+#
+# How to ship: push a tag vX.Y.Z-2.25.0 to main. The workflow builds the
+# APK and creates the Release with PlezTV.vX.Y.Z-2.25.0.apk attached.
+# workflow_dispatch builds only (no release) and uploads the APK as a
+# workflow artifact instead. Codemagic stays as a backup builder.
+
+name: Android release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter 3.47.9
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+
+      - name: Get Flutter packages
+        run: flutter pub get
+
+      - name: Build debug APK
+        run: flutter build apk --debug --dart-define=ENABLE_UPDATE_CHECK=true
+
+      - name: Name the APK for the release
+        run: cp build/app/outputs/flutter-apk/app-debug.apk "PlezTV.${{ github.ref_name }}.apk"
+
+      - name: Upload APK as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlezTV-${{ github.ref_name }}
+          path: PlezTV.${{ github.ref_name }}.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release with the APK
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: PlezTV.${{ github.ref_name }}.apk
