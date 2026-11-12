@@ -1590,6 +1590,11 @@
       "The catalog now refreshes itself in the background once a week, so search stays fast without you opening the app — it never runs while you are watching, and it never re-downloads a catalog that is already up to date",
       "Opening the app after it was in the background checks whether the catalog is due for a refresh, and Settings \u2192 IPTV now shows when the last background refresh ran and what happened"
     ],
+    "changelog2278": [
+      "Movies and episodes you stop partway through now show up in Continue Watching, so you can pick up where you left off instead of starting over",
+      "Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn't add one",
+      "Opening a series now takes you to the episode you were watching"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"

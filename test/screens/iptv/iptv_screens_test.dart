@@ -41,6 +41,7 @@ import 'package:plezy/screens/settings/iptv_settings_screen.dart';
 import 'package:plezy/services/credential_vault.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/iptv_item_favorites_repository.dart';
+import 'package:plezy/services/iptv/iptv_resume_repository.dart';
 import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
 import 'package:plezy/services/multi_server_manager.dart';
@@ -202,12 +203,34 @@ class _InMemoryItemFavoritesRepository implements IptvItemFavoritesRepository {
   }
 }
 
+/// In-memory resume store for widget tests. Same fake-async wall as the
+/// favourites store above (build #25): the production store reads
+/// SharedPreferences, whose platform round-trip never completes inside
+/// `testWidgets`' fake async zone when the read is started from a widget
+/// load — the tab would spin its loading indicator forever. This store
+/// completes synchronously (a plain async function), so the item load
+/// finishes on pumps. Persistence itself is covered by the unit tests in
+/// `iptv_build25_resume_test.dart` (real async, where the production store
+/// works).
+class _InMemoryIptvResumeRepository implements IptvResumeRepository {
+  Map<String, IptvResumeItem> _items = {};
+
+  @override
+  Future<Map<String, IptvResumeItem>> read({required String key}) async => Map.of(_items);
+
+  @override
+  Future<void> write(String key, Map<String, IptvResumeItem> items) async {
+    _items = Map.of(items);
+  }
+}
+
 /// The REAL IptvClient, pointed at the fake catalog. Anything this client
 /// gets wrong, the tests catch.
 IptvClient _trexClient() {
   final client = IptvClient.xtream(xtreamConnection: _trexConnection());
   client.testXtreamApi = _FakeXtreamApi();
   client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
+  client.testResumeRepository = _InMemoryIptvResumeRepository();
   return client;
 }
 
@@ -660,6 +683,7 @@ void main() {
     final client = IptvClient.xtream(xtreamConnection: _trexConnection());
     client.testXtreamApi = api;
     client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
+    client.testResumeRepository = _InMemoryIptvResumeRepository();
 
     final manager = MultiServerManager();
     manager.debugRegisterClientForTesting(client);
@@ -720,6 +744,7 @@ void main() {
     final client = IptvClient.xtream(xtreamConnection: _trexConnection());
     client.testXtreamApi = api;
     client.testItemFavoritesRepository = _InMemoryItemFavoritesRepository();
+    client.testResumeRepository = _InMemoryIptvResumeRepository();
 
     final manager = MultiServerManager();
     manager.debugRegisterClientForTesting(client);
@@ -920,6 +945,16 @@ void main() {
       expect(find.text('Version 1.0.12-2.25.0'), findsOneWidget);
       final newest12 = tester.getTopLeft(find.text('Version 1.0.12-2.25.0')).dy;
       expect(newest12, lessThan(newest11));
+      // R4 (v1.0.13): the entry existed but had no guard — same guard
+      // for it, present and above 1.0.12.
+      expect(find.text('Version 1.0.13-2.25.0'), findsOneWidget);
+      final newest13 = tester.getTopLeft(find.text('Version 1.0.13-2.25.0')).dy;
+      expect(newest13, lessThan(newest12));
+      // #25 (v1.0.14): same guard for the new version — it must be
+      // present and sit above 1.0.13.
+      expect(find.text('Version 1.0.14-2.25.0'), findsOneWidget);
+      final newest14 = tester.getTopLeft(find.text('Version 1.0.14-2.25.0')).dy;
+      expect(newest14, lessThan(newest13));
     });
   });
 }

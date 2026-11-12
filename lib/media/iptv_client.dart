@@ -44,8 +44,10 @@ import '../utils/iptv_initials.dart';
 import '../utils/library_content_notifier.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_live_tv.dart';
+import 'watch_progress.dart';
 import '../services/iptv/iptv_item_favorites_repository.dart';
 import '../services/iptv/iptv_refusal_log.dart';
+import '../services/iptv/iptv_resume_repository.dart';
 import '../services/iptv/m3u_parser.dart';
 import '../services/iptv/xtream_api.dart';
 
@@ -1102,6 +1104,64 @@ class IptvClient implements MediaServerClient {
   Future<Map<String, IptvFavoriteItem>> _favoriteItems() =>
       _favoriteItemsFuture ??= _itemFavoritesRepository.read(key: _itemFavoritesKey);
 
+  /// Build #25: max resume entries per connection (OpenTV's
+  /// `observeRecent` default). Oldest-first eviction on insert, so the
+  /// store stays ~6 KB.
+  static const int _maxResumeEntries = 30;
+
+  /// Build #25: the 5-second anti-clutter floor (OpenTV saves only when
+  /// `pos > 5_000`; IPTVnator only lists an item after it "actually
+  /// played for a couple of seconds"). A report below this never creates
+  /// a row, so streams that fail right away don't clutter Continue
+  /// Watching.
+  static const int _resumeRecordFloorMs = 5000;
+
+  // Resume positions for VOD movies / episodes (id -> snapshot),
+  // persisted per connection. Same shape as the favourites store:
+  // loaded lazily; the report methods update the cached map so browse /
+  // search / detail all agree without re-reading prefs.
+  IptvResumeRepository _resumeRepository =
+      const SharedPreferencesIptvResumeRepository();
+  Future<Map<String, IptvResumeItem>>? _resumeItemsFuture;
+
+  /// Test-only override for the resume repository, so unit tests can
+  /// share one store across client instances. Production code never sets
+  /// this.
+  @visibleForTesting
+  set testResumeRepository(IptvResumeRepository repository) {
+    _resumeRepository = repository;
+    _resumeItemsFuture = null;
+  }
+
+  /// Prefs key for this connection's resume positions.
+  String get _resumeKey => 'iptv_resume:${connection.id}';
+
+  Future<Map<String, IptvResumeItem>> _resumeItems() =>
+      _resumeItemsFuture ??= _resumeRepository.read(key: _resumeKey);
+
+  /// Best-effort display snapshot (title / poster / library) for the
+  /// item currently playing, stashed in [getPlaybackInitialization] —
+  /// the one place the full item passes through the client at playback
+  /// time. The report methods only receive an id, so without this the
+  /// stored snapshot would have no title. Purely in-memory and bounded;
+  /// a restart loses nothing the catalog re-resolution cannot refill.
+  final Map<
+    String,
+    ({
+      String? title,
+      String? thumbPath,
+      String? libraryId,
+      String? parentId,
+      String? parentTitle,
+    })
+  >
+  _resumeSnapshots = {};
+
+  /// Monotonic last-viewed clock: two stops in the same millisecond must
+  /// still order deterministically (newest first), so the clock never
+  /// goes backwards within this client.
+  int _lastResumeTimestampMs = 0;
+
   /// Concurrent per-category fallback batch size (Task 8): the panel
   /// answers per-category calls even when the unfiltered call returns [].
   /// 16, not 8 (build #13): at 8 the sweep covered ~72 categories inside
@@ -1318,7 +1378,7 @@ class IptvClient implements MediaServerClient {
     richHubs: false,
     numericUserRating: false,
     userFavorites: true,
-    continueWatchingRemoval: false,
+    continueWatchingRemoval: true,
     externalSubtitleSearch: false,
     richMetadataEdit: false,
     scrubThumbnails: false,
@@ -1513,8 +1573,15 @@ class IptvClient implements MediaServerClient {
   @override
   double get watchedThreshold => 0.9;
 
+  /// Build #25 (trap T4): the stop report IS the watched-mark for IPTV
+  /// — [reportPlaybackStopped] deletes a resume entry at/above the
+  /// threshold — so the tracker must not also issue an explicit
+  /// [markWatched] on every finished stop (it would call the local-only
+  /// no-op path and claim the server acknowledged a mark that never
+  /// happened). With this true, the tracker settles the watch from the
+  /// stop report alone and only emits the local watched event.
   @override
-  bool get marksWatchedOnPlaybackStopped => false;
+  bool get marksWatchedOnPlaybackStopped => true;
 
   @override
   LiveTvSupport get liveTv => _liveTv;
@@ -2397,7 +2464,12 @@ class IptvClient implements MediaServerClient {
     return libraries;
   }
 
-  MediaItem _movieItem(XtreamVodStream stream, {bool isFavorite = false, String? categoryName}) {
+  MediaItem _movieItem(
+    XtreamVodStream stream, {
+    bool isFavorite = false,
+    String? categoryName,
+    IptvResumeItem? resume,
+  }) {
     final url = _xtreamApi.movieStreamUrl('${stream.streamId}', stream.containerExtension);
     return MediaItem.xtream(
       id: 'movie:${stream.streamId}',
@@ -2412,6 +2484,11 @@ class IptvClient implements MediaServerClient {
       serverId: connection.id,
       serverName: _name,
       isFavorite: isFavorite,
+      // Build #25: the catalog carries no movie duration, so the stored
+      // position AND duration both come from the player's report.
+      durationMs: resume?.durationMs,
+      viewOffsetMs: resume?.positionMs,
+      lastViewedAt: resume?.updatedAtMs,
     );
   }
 
@@ -2438,6 +2515,7 @@ class IptvClient implements MediaServerClient {
     int season, {
     bool isFavorite = false,
     String? seriesCategoryName,
+    IptvResumeItem? resume,
   }) {
     final url = _xtreamApi.seriesStreamUrl('${episode.id}', episode.containerExtension);
     return MediaItem.xtream(
@@ -2457,6 +2535,11 @@ class IptvClient implements MediaServerClient {
       serverId: connection.id,
       serverName: _name,
       isFavorite: isFavorite,
+      // Build #25: the episode duration stays the catalog's (the store
+      // agrees with it); only the position and last-viewed stamp come
+      // from the resume entry.
+      viewOffsetMs: resume?.positionMs,
+      lastViewedAt: resume?.updatedAtMs,
     );
   }
 
@@ -2530,6 +2613,7 @@ class IptvClient implements MediaServerClient {
   /// mapped, never the whole catalog.
   Future<List<MediaItem>> _vodPageItems(List<XtreamVodStream> rows, int offset, int limit) async {
     final favorites = await _favoriteItems();
+    final resume = await _resumeItems();
     final categoryNames = await _vodCategoryNames();
     final start = offset.clamp(0, rows.length);
     final end = (offset + limit).clamp(0, rows.length);
@@ -2540,6 +2624,7 @@ class IptvClient implements MediaServerClient {
             s,
             isFavorite: favorites.containsKey('movie:${s.streamId}'),
             categoryName: categoryNames[s.categoryId],
+            resume: resume['movie:${s.streamId}'],
           ),
         )
         .toList();
@@ -2570,6 +2655,7 @@ class IptvClient implements MediaServerClient {
   Future<List<MediaItem>> _moviesItems() async {
     final streams = await _vodStreams();
     final favorites = await _favoriteItems();
+    final resume = await _resumeItems();
     final categoryNames = await _vodCategoryNames();
     return streams
         .where((s) => !_isHiddenCategory(s.categoryId, categoryNames[s.categoryId]))
@@ -2578,6 +2664,7 @@ class IptvClient implements MediaServerClient {
             s,
             isFavorite: favorites.containsKey('movie:${s.streamId}'),
             categoryName: categoryNames[s.categoryId],
+            resume: resume['movie:${s.streamId}'],
           ),
         )
         .toList();
@@ -2884,6 +2971,7 @@ class IptvClient implements MediaServerClient {
       if (_isHiddenCategory(categoryId, categoryNames[categoryId])) return const [];
       final streams = await _vodStreams();
       final favorites = await _favoriteItems();
+      final resume = await _resumeItems();
       return streams
           .where((s) => s.categoryId == categoryId)
           .map(
@@ -2891,6 +2979,7 @@ class IptvClient implements MediaServerClient {
               s,
               isFavorite: favorites.containsKey('movie:${s.streamId}'),
               categoryName: categoryNames[s.categoryId],
+              resume: resume['movie:${s.streamId}'],
             ),
           )
           .toList();
@@ -2962,11 +3051,13 @@ class IptvClient implements MediaServerClient {
         final stream = streams.where((s) => s.streamId == streamId).firstOrNull;
         if (stream == null) return null;
         final movieFavorites = await _favoriteItems();
+        final movieResume = await _resumeItems();
         final vodCategoryNames = await _vodCategoryNames();
         return _movieItem(
           stream,
           isFavorite: movieFavorites.containsKey('movie:${stream.streamId}'),
           categoryName: vodCategoryNames[stream.categoryId],
+          resume: movieResume['movie:${stream.streamId}'],
         );
       case 'series':
         final seriesId = int.tryParse(parts[1]);
@@ -3002,6 +3093,7 @@ class IptvClient implements MediaServerClient {
           final series = (await _seriesList()).where((s) => s.seriesId == seriesId).firstOrNull;
           if (series == null) return null;
           final episodeFavorites = await _favoriteItems();
+          final episodeResume = await _resumeItems();
           final episodeCategoryNames = await _seriesCategoryNames();
           return _episodeItem(
             series,
@@ -3009,6 +3101,7 @@ class IptvClient implements MediaServerClient {
             seasonEntry.key,
             isFavorite: episodeFavorites.containsKey('episode:${series.seriesId}:${episode.id}'),
             seriesCategoryName: episodeCategoryNames[series.categoryId],
+            resume: episodeResume['episode:${series.seriesId}:${episode.id}'],
           );
         }
         return null;
@@ -3024,7 +3117,25 @@ class IptvClient implements MediaServerClient {
   }) async {
     final item = await fetchItem(id);
     if (item != null) onItemReady?.call(item);
-    return (item: item, onDeckEpisode: null);
+    MediaItem? onDeckEpisode;
+    // Build #25 (25.5): a series opens on the episode you would
+    // continue — the latest-resumed episode of that series, if any.
+    // Best-effort: a stale id simply leaves the episode null.
+    if (item != null && item.kind == MediaKind.show) {
+      try {
+        final resume = await _resumeItems();
+        final episodes = resume.values
+            .where((e) => e.kind == 'episode' && e.parentId == id)
+            .toList()
+          ..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+        if (episodes.isNotEmpty) {
+          onDeckEpisode = await fetchItem(episodes.first.id);
+        }
+      } catch (_) {
+        // On-deck is a convenience, never a failure.
+      }
+    }
+    return (item: item, onDeckEpisode: onDeckEpisode);
   }
 
   @override
@@ -3046,6 +3157,7 @@ class IptvClient implements MediaServerClient {
       final seasonEpisodes = info.episodesBySeason[seasonNum];
       if (seasonEpisodes == null) return const [];
       final favorites = await _favoriteItems();
+      final resume = await _resumeItems();
       final categoryNames = await _seriesCategoryNames();
       final seriesCategoryName = categoryNames[series.categoryId];
       // Sort a copy: the info object's lists are shared state (and may
@@ -3059,6 +3171,7 @@ class IptvClient implements MediaServerClient {
               seasonNum,
               isFavorite: favorites.containsKey('episode:${series.seriesId}:${episode.id}'),
               seriesCategoryName: seriesCategoryName,
+              resume: resume['episode:${series.seriesId}:${episode.id}'],
             ),
           )
           .toList(growable: false);
@@ -3416,6 +3529,7 @@ class IptvClient implements MediaServerClient {
     String needle,
     int limit,
     Map<String, IptvFavoriteItem> favorites,
+    Map<String, IptvResumeItem> resume,
     Map<String, String> categoryNames,
     List<MediaItem> out,
     Set<int> seen,
@@ -3439,6 +3553,7 @@ class IptvClient implements MediaServerClient {
           stream,
           isFavorite: favorites.containsKey('movie:${stream.streamId}'),
           categoryName: categoryNames[stream.categoryId],
+          resume: resume['movie:${stream.streamId}'],
         ),
       );
     }
@@ -3497,6 +3612,7 @@ class IptvClient implements MediaServerClient {
     final totalRows = index.rowCounts(connection.id)[IptvSearchIndex.typeMovie] ?? 0;
     if (totalRows == 0) return null;
     final favorites = await _favoriteItems();
+    final resume = await _resumeItems();
     final categoryNames = index.categoryNames(connection.id, IptvSearchIndex.typeMovie);
     final rows = index
         .search(connection.id, IptvSearchIndex.typeMovie, needle, limit: limit * 2)
@@ -3504,7 +3620,7 @@ class IptvClient implements MediaServerClient {
         .toList(growable: false);
     final out = <MediaItem>[];
     trace.partialOut = out;
-    _appendMovieMatches(rows, needle, limit, favorites, categoryNames, out, <int>{}, trace);
+    _appendMovieMatches(rows, needle, limit, favorites, resume, categoryNames, out, <int>{}, trace);
     trace.loadRows = totalRows;
     trace.loadSource = 'index';
     trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
@@ -3612,12 +3728,13 @@ class IptvClient implements MediaServerClient {
       if (onlineAllowed) unawaited(ensureSearchIndexSynced(retryTransportErrors: true));
       trace.cold = true;
       final favorites = await _favoriteItems();
+      final resume = await _resumeItems();
       final categoryNames = await _vodCategoryNamesFromDisk();
       final diskRows = await _vodRowsForEnterSearch();
       final out = <MediaItem>[];
       trace.partialOut = out;
       final seen = <int>{};
-      _appendMovieMatches(diskRows.rows, needle, limit, favorites, categoryNames, out, seen, trace);
+      _appendMovieMatches(diskRows.rows, needle, limit, favorites, resume, categoryNames, out, seen, trace);
       trace.loadRows = diskRows.rows.length;
       trace.loadSource = diskRows.source;
       trace.loadMs = DateTime.now().difference(sectionStarted).inMilliseconds;
@@ -3832,8 +3949,60 @@ class IptvClient implements MediaServerClient {
 
   @override
   Future<List<MediaItem>> fetchContinueWatching({int? count = 20, Set<String> excludedLibraryIds = const {}}) async {
-    // Local watch state is a follow-up; return empty so home renders.
-    return const [];
+    // Build #25: local-only resume. Rows come from the per-connection
+    // resume store; each id is re-resolved against the catalog (fresh
+    // titles/posters), falling back to the stored snapshot when the item
+    // left the catalog. No panel requests beyond the catalog the app
+    // already holds in memory / on disk.
+    if (!_isXtream) return const [];
+    final saved = await _resumeItems();
+    if (saved.isEmpty) return const [];
+    final entries = saved.values.toList()..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+    final favorites = await _favoriteItems();
+    final out = <MediaItem>[];
+    for (final entry in entries) {
+      if (entry.libraryId != null && excludedLibraryIds.contains(entry.libraryId)) continue;
+      MediaItem? item;
+      try {
+        item = await fetchItem(entry.id);
+      } catch (e) {
+        // A catalog failure for one resume row must not kill the list —
+        // the snapshot below is the fallback.
+        appLogger.w('IPTV: resume ${entry.id} could not re-resolve: $e');
+      }
+      item ??= _resumeSnapshotItem(entry, isFavorite: favorites.containsKey(entry.id));
+      if (item == null) continue;
+      out.add(item);
+      if (count != null && out.length >= count) break;
+    }
+    return out;
+  }
+
+  /// A resume entry whose item left the catalog, rendered from its
+  /// stored snapshot (favorites pattern). Unknown kinds render nothing.
+  MediaItem? _resumeSnapshotItem(IptvResumeItem entry, {required bool isFavorite}) {
+    final kind = switch (entry.kind) {
+      'movie' => MediaKind.movie,
+      'episode' => MediaKind.episode,
+      _ => null,
+    };
+    if (kind == null) return null;
+    return MediaItem.xtream(
+      id: entry.id,
+      kind: kind,
+      title: entry.title,
+      thumbPath: entry.thumbPath,
+      libraryId: entry.libraryId,
+      libraryTitle: entry.kind == 'movie' ? '$_name — Movies' : '$_name — Series',
+      parentId: entry.parentId,
+      parentTitle: entry.parentTitle,
+      durationMs: entry.durationMs,
+      viewOffsetMs: entry.positionMs,
+      lastViewedAt: entry.updatedAtMs,
+      serverId: connection.id,
+      serverName: _name,
+      isFavorite: isFavorite,
+    );
   }
 
   @override
@@ -4000,19 +4169,37 @@ class IptvClient implements MediaServerClient {
     return null;
   }
 
-  // Watch state is local-only for IPTV (no server API). markWatched /
-  // rate stay no-ops; setFavorite persists (Task 1) so the heart sticks.
+  // Watch state is local-only for IPTV (no server API). markWatched
+  // clears the local resume entry so the item leaves Continue Watching
+  // (the base-class postcondition — the detail screen's "mark watched"
+  // action reaches here through WatchActions, and a no-op would leave
+  // the item in the row while claiming it was marked); rate stays a
+  // no-op; setFavorite persists (Task 1) so the heart sticks.
   @override
-  Future<void> markWatched(MediaItem item) async {}
+  Future<void> markWatched(MediaItem item) async {
+    await _removeResumeEntry(item.id);
+  }
 
   @override
   Future<void> markUnwatched(MediaItem item) async {}
 
   @override
-  Future<void> removeFromContinueWatching(MediaItem item) async {}
+  Future<void> removeFromContinueWatching(MediaItem item) async {
+    await _removeResumeEntry(item.id);
+  }
 
   @override
   Future<void> rate(MediaItem item, double rating) async {}
+
+  /// Deletes the stored resume position for [id], if any. Shared by
+  /// [markWatched] and [removeFromContinueWatching]: both mean "this
+  /// item is no longer resumable".
+  Future<void> _removeResumeEntry(String id) async {
+    final current = Map<String, IptvResumeItem>.of(await _resumeItems());
+    if (current.remove(id) == null) return;
+    await _resumeRepository.write(_resumeKey, current);
+    _resumeItemsFuture = Future.value(current);
+  }
 
   @override
   Future<void> setFavorite(MediaItem item, bool isFavorite) async {
@@ -4265,7 +4452,9 @@ class IptvClient implements MediaServerClient {
     String? mediaSourceId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
-  }) async {}
+  }) async {
+    await _recordResumePosition(itemId: itemId, position: position, duration: duration, isStop: false);
+  }
 
   @override
   Future<void> reportPlaybackProgress({
@@ -4279,7 +4468,9 @@ class IptvClient implements MediaServerClient {
     String? mediaSourceId,
     int? audioStreamIndex,
     int? subtitleStreamIndex,
-  }) async {}
+  }) async {
+    await _recordResumePosition(itemId: itemId, position: position, duration: duration, isStop: false);
+  }
 
   @override
   Future<void> reportPlaybackStopped({
@@ -4292,7 +4483,82 @@ class IptvClient implements MediaServerClient {
     int? audioStreamIndex,
     int? subtitleStreamIndex,
     PlaybackReportMetadata report = const PlaybackReportMetadata.live(),
-  }) async {}
+  }) async {
+    await _recordResumePosition(itemId: itemId, position: position, duration: duration, isStop: true);
+  }
+
+  /// Build #25: the single record path for the three report methods.
+  /// Local writes only — never a panel request, never throws (trap T7:
+  /// a prefs failure drops the write silently instead of queuing a
+  /// position for a server that doesn't exist).
+  ///
+  /// Rules, in order: (1) only `movie:` / `episode:` ids (live never
+  /// enters the store, trap T5); (2) position below the 5 s floor
+  /// records nothing (anti-clutter, trap T2); (3) no usable duration
+  /// records nothing (a row without duration can never render
+  /// `hasActiveProgress`, trap T1); (4) a stop at/above
+  /// [watchedThreshold] (0.9) deletes the entry instead of writing it
+  /// (trap T3/T4 — the stop report IS the watched-mark); (5) otherwise
+  /// upsert with the reported duration and now as `lastViewedAt`.
+  Future<void> _recordResumePosition({
+    required String itemId,
+    required Duration position,
+    required Duration? duration,
+    required bool isStop,
+  }) async {
+    try {
+      final kind = itemId.startsWith('movie:')
+          ? 'movie'
+          : itemId.startsWith('episode:')
+              ? 'episode'
+              : null;
+      if (kind == null) return;
+      if (position.inMilliseconds < _resumeRecordFloorMs) return;
+      final durationMs = duration?.inMilliseconds ?? 0;
+      if (durationMs <= 0) return;
+      final current = Map<String, IptvResumeItem>.of(await _resumeItems());
+      if (isStop &&
+          isWatchedProgress(
+            positionMs: position.inMilliseconds,
+            durationMs: durationMs,
+            threshold: watchedThreshold,
+          )) {
+        if (current.remove(itemId) != null) {
+          await _resumeRepository.write(_resumeKey, current);
+          _resumeItemsFuture = Future.value(current);
+        }
+        return;
+      }
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      final updatedAtMs = nowMs > _lastResumeTimestampMs ? nowMs : _lastResumeTimestampMs + 1;
+      _lastResumeTimestampMs = updatedAtMs;
+      final stash = _resumeSnapshots[itemId];
+      final parts = itemId.split(':');
+      current[itemId] = IptvResumeItem(
+        id: itemId,
+        kind: kind,
+        title: stash?.title,
+        thumbPath: stash?.thumbPath,
+        libraryId: stash?.libraryId ?? (kind == 'movie' ? _moviesLibraryId : _seriesLibraryId),
+        parentId: stash?.parentId ?? (kind == 'episode' && parts.length >= 2 ? 'series:${parts[1]}' : null),
+        parentTitle: stash?.parentTitle,
+        positionMs: position.inMilliseconds,
+        durationMs: durationMs,
+        updatedAtMs: updatedAtMs,
+      );
+      if (current.length > _maxResumeEntries) {
+        final sorted = current.values.toList()..sort((a, b) => a.updatedAtMs.compareTo(b.updatedAtMs));
+        for (final oldest in sorted.take(current.length - _maxResumeEntries)) {
+          current.remove(oldest.id);
+        }
+      }
+      await _resumeRepository.write(_resumeKey, current);
+      _resumeItemsFuture = Future.value(current);
+    } catch (_) {
+      // A prefs failure drops the write silently — playback must never
+      // crash or queue on a local store failure.
+    }
+  }
 
   @override
   Future<PlaybackInitializationResult> getPlaybackInitialization(PlaybackInitializationOptions options) async {
@@ -4303,6 +4569,23 @@ class IptvClient implements MediaServerClient {
     };
     if (streamUrl == null || streamUrl.isEmpty) {
       throw PlaybackException('No playable IPTV stream for this item', reason: PlaybackFailureReason.noPlayableSource);
+    }
+    // Build #25: stash the playing item's display snapshot so the
+    // report methods (which only receive an id) can store a titled row.
+    // Movies and episodes only — live items never enter the resume
+    // store. Bounded and in-memory; a restart loses nothing the catalog
+    // re-resolution cannot refill.
+    if (item is XtreamMediaItem && (item.kind == MediaKind.movie || item.kind == MediaKind.episode)) {
+      _resumeSnapshots[item.id] = (
+        title: item.title,
+        thumbPath: item.thumbPath,
+        libraryId: item.libraryId,
+        parentId: item.parentId,
+        parentTitle: item.parentTitle,
+      );
+      if (_resumeSnapshots.length > 50) {
+        _resumeSnapshots.remove(_resumeSnapshots.keys.first);
+      }
     }
     final mediaInfo = MediaSourceInfo(
       videoUrl: streamUrl,

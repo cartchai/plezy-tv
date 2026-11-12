@@ -3847,6 +3847,11 @@ class Translations$about$en {
 		'The catalog now refreshes itself in the background once a week, so search stays fast without you opening the app — it never runs while you are watching, and it never re-downloads a catalog that is already up to date',
 		'Opening the app after it was in the background checks whether the catalog is due for a refresh, and Settings → IPTV now shows when the last background refresh ran and what happened',
 	];
+	List<String> get changelog2278 => [
+		'Movies and episodes you stop partway through now show up in Continue Watching, so you can pick up where you left off instead of starting over',
+		'Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn\'t add one',
+		'Opening a series now takes you to the episode you were watching',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10482,6 +10487,9 @@ extension on Translations {
 			'about.changelog2275.3' => 'The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type',
 			'about.changelog2277.0' => 'The catalog now refreshes itself in the background once a week, so search stays fast without you opening the app — it never runs while you are watching, and it never re-downloads a catalog that is already up to date',
 			'about.changelog2277.1' => 'Opening the app after it was in the background checks whether the catalog is due for a refresh, and Settings → IPTV now shows when the last background refresh ran and what happened',
+			'about.changelog2278.0' => 'Movies and episodes you stop partway through now show up in Continue Watching, so you can pick up where you left off instead of starting over',
+			'about.changelog2278.1' => 'Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn\'t add one',
+			'about.changelog2278.2' => 'Opening a series now takes you to the episode you were watching',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10597,11 +10605,11 @@ extension on Translations {
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
 			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
 			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
+			_ => null,
+		} ?? switch (path) {
 			'explore.stats.viewersYear' => ({required Object n}) => '${n} watched this year',
 			'explore.stats.viewersAllTime' => ({required Object n}) => '${n} viewers',
 			'explore.stats.planning' => ({required Object n}) => '${n} planning to watch',
-			_ => null,
-		} ?? switch (path) {
 			'explore.stats.favorited' => ({required Object n}) => '${n} favorites',
 			'explore.stats.dropRate' => ({required Object percent}) => '${percent} dropped it',
 			'explore.stats.comments' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} comment', other: '${n} comments', ), 
@@ -11111,11 +11119,11 @@ extension on Translations {
 			'downloads.backgroundWarning.reasonDownloadChannelBlocked' => 'Download notifications are turned off, so progress and controls may be unavailable.',
 			'downloads.backgroundWarning.reasonNotificationsDisabled' => 'Notifications are turned off. On Android 13 or newer, they are required for long background downloads.',
 			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.reasonOemUnknown' => 'Downloads repeatedly stopped while PlezTV was in the background. Check PlezTV\'s battery or background usage settings.',
 			'downloads.backgroundWarning.openSettings' => 'Open settings',
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.stillNotWorkingDescription' => 'See steps for your device, or send a log from Settings › View Logs if the issue continues.',
 			'downloads.backgroundWarning.dialogTitle' => 'Downloads may not finish',
 			'downloads.backgroundWarning.dialogDownloadAnyway' => 'Download anyway',
@@ -11625,11 +11633,11 @@ extension on Translations {
 			'iptv.backgroundSyncSkippedLoad' => 'Skipped — connections could not be read',
 			'iptv.backgroundSyncNoConnections' => 'No IPTV connections',
 			'iptv.catalogSyncNow' => 'Sync catalog now',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.catalogSyncNowDescription' => 'Download all titles for movies, TV and channels now',
 			'iptv.catalogSyncTitle' => 'Refreshing Trex details',
 			'iptv.catalogSyncLive' => 'Live TV',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.catalogSyncMovies' => 'Movies',
 			'iptv.catalogSyncSeries' => 'TV / Series',
 			'iptv.catalogSyncDone' => 'Catalog synced',
