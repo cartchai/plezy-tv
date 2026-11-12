@@ -3855,6 +3855,9 @@ class Translations$about$en {
 	List<String> get changelog2280 => [
 		'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
 		'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
+		'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — the sync stores less and runs faster',
+		'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
+		'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
@@ -4329,6 +4332,15 @@ class Translations$liveTv$en {
 
 	/// en: 'Hide channel'
 	String get hideChannel => 'Hide channel';
+
+	/// en: 'Category: ${name}'
+	String channelCategory({required Object name}) => 'Category: ${name}';
+
+	/// en: 'Hide category'
+	String get hideCategory => 'Hide category';
+
+	/// en: 'Show category'
+	String get showCategory => 'Show category';
 
 	/// en: 'Unhide'
 	String get unhide => 'Unhide';
@@ -10496,6 +10508,9 @@ extension on Translations {
 			'about.changelog2278.2' => 'Opening a series now takes you to the episode you were watching',
 			'about.changelog2280.0' => 'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
 			'about.changelog2280.1' => 'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
+			'about.changelog2280.2' => 'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — the sync stores less and runs faster',
+			'about.changelog2280.3' => 'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
+			'about.changelog2280.4' => 'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10606,11 +10621,11 @@ extension on Translations {
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
 			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
 			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.adult' => '18+',
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
-			_ => null,
-		} ?? switch (path) {
 			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
 			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
 			'explore.stats.viewersYear' => ({required Object n}) => '${n} watched this year',
@@ -10745,6 +10760,9 @@ extension on Translations {
 			'liveTv.noChannelsInCategoryHint' => 'This category has no channels in the guide right now. Pick another category, or turn more categories on in IPTV settings.',
 			'liveTv.showAllCategories' => 'Show all categories',
 			'liveTv.hideChannel' => 'Hide channel',
+			'liveTv.channelCategory' => ({required Object name}) => 'Category: ${name}',
+			'liveTv.hideCategory' => 'Hide category',
+			'liveTv.showCategory' => 'Show category',
 			'liveTv.unhide' => 'Unhide',
 			'liveTv.allChannelsHidden' => 'All channels hidden',
 			'liveTv.allChannelsHiddenHint' => 'You hid every channel in this guide. Unhide them to see the guide again.',
@@ -11117,14 +11135,14 @@ extension on Translations {
 			'downloads.backgroundWarning.bannerDegraded' => 'Background downloads may be limited',
 			'downloads.backgroundWarning.bannerAction' => 'Details',
 			'downloads.backgroundWarning.sheetTitle' => 'Background downloads are blocked',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.backgroundWarning.sheetTitleDegraded' => 'Background downloads may be limited',
 			'downloads.backgroundWarning.sheetIntro' => 'Android is preventing PlezTV from downloading reliably in the background.',
 			'downloads.backgroundWarning.sheetIntroDegraded' => 'Your device is limiting when PlezTV can download in the background.',
 			'downloads.backgroundWarning.reasonBackgroundRestricted' => 'PlezTV\'s background usage is restricted. Set its battery or background usage to "Unrestricted".',
 			'downloads.backgroundWarning.reasonStandbyRestricted' => 'Android has put PlezTV in a restricted standby state. Set its battery usage to "Unrestricted".',
 			'downloads.backgroundWarning.reasonDownloadChannelBlocked' => 'Download notifications are turned off, so progress and controls may be unavailable.',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.reasonNotificationsDisabled' => 'Notifications are turned off. On Android 13 or newer, they are required for long background downloads.',
 			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
 			'downloads.backgroundWarning.reasonOemUnknown' => 'Downloads repeatedly stopped while PlezTV was in the background. Check PlezTV\'s battery or background usage settings.',
@@ -11631,14 +11649,14 @@ extension on Translations {
 			'iptv.catalogSyncWeekly' => 'Once a week',
 			'iptv.backgroundSync' => 'Background sync',
 			'iptv.backgroundSyncNever' => 'Never run',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.backgroundSyncLastRun' => ({required Object date}) => 'Last run ${date}',
 			'iptv.backgroundSyncAllSynced' => 'All catalogs synced',
 			'iptv.backgroundSyncPartial' => ({required Object synced, required Object failed}) => '${synced} synced · ${failed} failed',
 			'iptv.backgroundSyncSkippedPlaying' => 'Skipped — a stream was playing',
 			'iptv.backgroundSyncSkippedRunning' => 'Skipped — a sync was already running',
 			'iptv.backgroundSyncSkippedLoad' => 'Skipped — connections could not be read',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.backgroundSyncNoConnections' => 'No IPTV connections',
 			'iptv.catalogSyncNow' => 'Sync catalog now',
 			'iptv.catalogSyncNowDescription' => 'Download all titles for movies, TV and channels now',

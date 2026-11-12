@@ -382,7 +382,9 @@ void main() {
       final result = await client.syncSearchIndex(force: true);
       // ignore: avoid_print
       print('BUILD23-guard-partial: rows=${result.rows} skipped=${result.skipped}');
-      expect(result.skipped['series'], 'partial');
+      // v1.0.16 dialog fix (35.6): the warm-partial refuse now reports
+      // 'partial-kept' — the old rows are kept, so it is not a failure.
+      expect(result.skipped['series'], 'partial-kept');
       expect(client.searchIndexState.rowCounts['series'], 100);
       final results = await client.searchItems('game of thrones');
       expect(results.map((i) => i.title), contains(_gotName));

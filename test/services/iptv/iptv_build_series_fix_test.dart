@@ -229,7 +229,9 @@ void main() {
       final second = await client.syncSearchIndex(force: true);
       // ignore: avoid_print
       print('F1: second sync skipped=${second.skipped} rows=${second.rows}');
-      expect(second.skipped[IptvSearchIndex.typeSeries], 'partial');
+      // v1.0.16 dialog fix (35.6): the warm-partial refuse now reports
+      // 'partial-kept' — the old rows are kept, so it is not a failure.
+      expect(second.skipped[IptvSearchIndex.typeSeries], 'partial-kept');
       expect(second.partialTypes, isNot(contains(IptvSearchIndex.typeSeries)));
       expect(_seriesRows(client), 46527);
       expect(_seriesLastSync(client), isNotNull);
@@ -349,7 +351,8 @@ void main() {
           syncStampMs: 222,
         ),
       );
-      expect(refused.skippedReason, 'partial');
+      // v1.0.16 dialog fix (35.6): same rename at the isolate level.
+      expect(refused.skippedReason, 'partial-kept');
       expect(refused.rowCount, 0);
       expect(refused.droppedRows, 2);
 
@@ -453,6 +456,31 @@ void main() {
       print('F5: disk VOD file after partial load: ${entry == null ? 'absent' : '${entry.body.length} chars'}');
       expect(entry, isNull,
           reason: 'a partial unfiltered VOD list must never be written as the complete disk catalog');
+    });
+
+    test('F6: partial-kept is not a failure; failed still is (dialog predicate)', () {
+      // The dialog footer reads `hasFailure`: a warm-partial refuse
+      // keeps the landed rows, so it must not read "Catalog sync
+      // failed" — while a real failure still does.
+      expect(
+        const IptvSearchSyncResult(rows: {}, skipped: {'series': 'partial-kept'}).hasFailure,
+        isFalse,
+      );
+      expect(
+        const IptvSearchSyncResult(
+          rows: {},
+          skipped: {'series': 'partial-kept', 'live': 'up-to-date', 'movie': 'up-to-date'},
+        ).hasFailure,
+        isFalse,
+      );
+      expect(
+        const IptvSearchSyncResult(rows: {}, skipped: {'series': 'failed'}).hasFailure,
+        isTrue,
+      );
+      expect(
+        const IptvSearchSyncResult(rows: {}, skipped: {'series': 'up-to-date'}).hasFailure,
+        isFalse,
+      );
     });
   });
 }

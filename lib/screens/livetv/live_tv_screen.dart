@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
+import '../../connection/connection.dart';
+import '../../connection/connection_registry.dart';
 import '../../exceptions/media_server_exceptions.dart';
 import '../../focus/focusable_action_bar.dart';
 import '../../i18n/strings.g.dart';
@@ -893,6 +895,74 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     setState(() => _hiddenChannelKeys.remove(_favoriteKeyForChannel(channel)));
   }
 
+  /// The IPTV client behind a channel, or null for Plex/Jellyfin/Emby
+  /// channels (v1.0.16, guide category submenu).
+  IptvClient? _iptvClientForChannel(LiveTvChannel channel) {
+    final serverId = serverIdOrNull(channel.serverId);
+    if (serverId == null) return null;
+    final client = context.read<MultiServerProvider>().getClientForServer(serverId);
+    return client is IptvClient ? client : null;
+  }
+
+  /// The channel's category for the long-press menu (v1.0.16): the id,
+  /// display name, and whether it is currently hidden. The name comes
+  /// from the client's live categories (an M3U group's title IS its
+  /// name — the group title is both id and name). Null when the channel
+  /// has no IPTV category.
+  Future<({String id, String name, bool hidden})?> _channelCategory(LiveTvChannel channel) async {
+    final categoryId = channel.categoryId;
+    if (categoryId == null) return null;
+    final client = _iptvClientForChannel(channel);
+    if (client == null) return null;
+    var name = categoryId;
+    if (client.connection is XtreamConnection) {
+      final categories = await client.liveCategories();
+      name = categories.where((c) => c.id == categoryId).firstOrNull?.name ?? categoryId;
+    }
+    return (id: categoryId, name: name, hidden: client.isCategoryHidden(categoryId, name));
+  }
+
+  /// Flip a whole category's hidden state (v1.0.16): the submenu's
+  /// Hide/Show action. Flips the per-category id — the same rule as the
+  /// categories screen's per-category row — and swaps the client in
+  /// place, so the guide re-renders immediately. A category hidden by
+  /// its initial can only be shown again from the categories screen
+  /// (un-hiding the initial would un-hide every category sharing it);
+  /// the menu only ever offers this for visible channels, so the
+  /// per-category flip is exact there. The download/cache skip for the
+  /// newly hidden rows happens at the next sync — no second purge path.
+  Future<void> _toggleChannelCategory(LiveTvChannel channel, String categoryId, String categoryName) async {
+    final client = _iptvClientForChannel(channel);
+    if (client == null) return;
+    final connection = client.connection;
+    final hidden = client.isCategoryHidden(categoryId, categoryName);
+    final hiddenIds = switch (connection) {
+      M3uConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+      XtreamConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+      _ => null,
+    };
+    if (hiddenIds == null) return;
+    if (hidden) {
+      hiddenIds.remove(categoryId);
+    } else {
+      hiddenIds.add(categoryId);
+    }
+    final updated = switch (connection) {
+      final M3uConnection c => c.copyWith(hiddenCategoryIds: hiddenIds.toList()),
+      final XtreamConnection c => c.copyWith(hiddenCategoryIds: hiddenIds.toList()),
+      _ => null,
+    };
+    if (updated == null) return;
+    try {
+      await context.read<ConnectionRegistry>().upsert(updated);
+      if (!mounted) return;
+      unawaited(context.read<MultiServerProvider>().refreshIptvConnection(updated));
+    } catch (e) {
+      if (!mounted) return;
+      showErrorSnackBar(context, t.iptvCategories.persistFailed);
+    }
+  }
+
   /// Unhide every hidden channel on every loaded IPTV connection (the
   /// all-hidden empty state's action, build #17, §9).
   Future<void> _unhideAllChannels() async {
@@ -1225,6 +1295,8 @@ class _LiveTvScreenState extends State<LiveTvScreen>
                       isFavoriteChannel: _isFavoriteChannel,
                       onToggleFavorite: _toggleFavorite,
                       onHideChannel: _hideChannel,
+                      channelCategory: _channelCategory,
+                      onToggleCategory: _toggleChannelCategory,
                       onNavigateUp: focusTabBar,
                       onBack: onTabBarBack,
                       guideCategories: _guideCategoryEntries,

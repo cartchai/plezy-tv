@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../utils/app_logger.dart';
+import '../../utils/iptv_initials.dart';
 import '../../utils/json_utils.dart';
 import '../../utils/search_relevance.dart';
 import 'xtream_api.dart';
@@ -625,6 +626,49 @@ class IptvSearchIndex {
     );
   }
 
+  /// Delete every indexed row of [type] whose category is in
+  /// [categoryIds] (v1.0.16, hidden-category purge): rows cached before
+  /// their category was hidden are removed at sync time, so the merge
+  /// in [upsertType] cannot keep them forever. Chunked at 500 ids like
+  /// the upsert delete — a single IN (...) with Trex-scale ids exceeds
+  /// SQLite's bound variable limit. Never throws.
+  void deleteRowsInCategories({
+    required String connectionId,
+    required String type,
+    required Set<String> categoryIds,
+  }) {
+    if (_closed || categoryIds.isEmpty) return;
+    try {
+      _db.execute('BEGIN IMMEDIATE;');
+      try {
+        const batchSize = 500;
+        final ids = categoryIds.toList(growable: false);
+        for (var start = 0; start < ids.length; start += batchSize) {
+          final end = (start + batchSize).clamp(0, ids.length);
+          final batch = ids.sublist(start, end);
+          final placeholders = List.filled(batch.length, '?').join(', ');
+          _db.execute(
+            'DELETE FROM iptv_search_fts WHERE rowid IN '
+            '(SELECT rowid FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders))',
+            [connectionId, type, ...batch],
+          );
+          _db.execute(
+            'DELETE FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders)',
+            [connectionId, type, ...batch],
+          );
+        }
+        _db.execute('COMMIT;');
+      } catch (e) {
+        try {
+          _db.execute('ROLLBACK;');
+        } catch (_) {}
+        rethrow;
+      }
+    } catch (e) {
+      appLogger.w('IPTV search index: hidden-category purge failed', error: e);
+    }
+  }
+
   void _insertRowsLocked(String connectionId, String type, List<IptvSearchIndexRow> rows) {
     final itemStmt = _db.prepare(
       'INSERT INTO iptv_search_item (connection_id, type, stream_id, category_id, name, name_norm, thumb, rating, container_ext, summary, epg_channel_id, has_archive, archive_duration) '
@@ -904,6 +948,8 @@ class IndexWriteParams {
     required this.catalogBody,
     required this.categoryBody,
     required this.syncStampMs,
+    this.hiddenCategoryIds = const [],
+    this.hiddenCategoryInitials = const [],
   });
 
   final String dbPath;
@@ -912,6 +958,13 @@ class IndexWriteParams {
   final String catalogBody;
   final String categoryBody;
   final int syncStampMs;
+
+  /// Categories turned off by the user (v1.0.16, hidden-category skip):
+  /// per-category ids and letter-group initials, exactly as stored on
+  /// the connection. Rows from these categories never land in the index
+  /// (and never reach the disk file — see [IndexWriteResult.filteredBody]).
+  final List<String> hiddenCategoryIds;
+  final List<String> hiddenCategoryInitials;
 }
 
 /// Result of a background-isolate index write.
@@ -924,6 +977,8 @@ class IndexWriteResult {
     this.droppedRows = 0,
     this.coveredCategories = 0,
     this.totalCategories = 0,
+    this.hiddenSkipped = 0,
+    this.filteredBody,
   });
 
   final int rowCount;
@@ -931,11 +986,12 @@ class IndexWriteResult {
 
   /// Non-null when nothing was written: 'no-categories' (the category
   /// list was empty, so the hidden filter and prefix strip would have
-  /// nothing to work from) or 'partial' (the rows cover fewer than half
-  /// the categories — a crawl-shaped / partial source, never a complete
-  /// list — and the index already has rows for the type). The caller
-  /// keeps the old index rows in both cases. 'empty-response' when the
-  /// catalog body parsed to zero rows.
+  /// nothing to work from) or 'partial-kept' (the rows cover fewer than
+  /// half the VISIBLE categories — a crawl-shaped / partial source,
+  /// never a complete list — and the index already has rows for the
+  /// type, so the old rows are kept). The caller keeps the old index
+  /// rows in both cases. 'empty-response' when the catalog body parsed
+  /// to zero rows.
   final String? skippedReason;
 
   /// True when rows WERE written but the fetched list was partial (it
@@ -952,9 +1008,103 @@ class IndexWriteResult {
   final int droppedRows;
 
   /// Categories the fetched rows covered, out of the fetched category
-  /// list — the guard's numbers, for the same diagnostic.
+  /// list — the guard's numbers, for the same diagnostic. Since v1.0.16
+  /// these count VISIBLE categories only (see the hidden-category skip):
+  /// hidden categories are excluded from both numbers.
   final int coveredCategories;
   final int totalCategories;
+
+  /// Rows dropped by the hidden-category skip (v1.0.16) — reported
+  /// separately from [droppedRows] so the C1-vs-C3 diagnosis is not
+  /// polluted by rows the user asked to exclude.
+  final int hiddenSkipped;
+
+  /// The catalog body with hidden-category rows removed (v1.0.16), for
+  /// the caller to write to the disk catalog instead of the raw body —
+  /// so the disk file holds visible rows only. Null when the body did
+  /// not decode to a list (the caller then falls back to the raw body).
+  final String? filteredBody;
+}
+
+/// True when the category with [categoryId] and display [categoryName]
+/// is hidden — by its own switch ([hiddenIds]) or because its category
+/// initial is turned off ([hiddenInitials]). The same rule as
+/// `IptvClient._isHiddenCategory`, shared so the background isolate
+/// (which cannot call the client) resolves it identically. A category
+/// with no initial is only hidden by its own switch.
+bool isHiddenIptvCategory(String? categoryId, String? categoryName, Set<String> hiddenIds, Set<String> hiddenInitials) {
+  if (categoryId != null && hiddenIds.contains(categoryId)) return true;
+  final initial = categoryInitial(categoryName);
+  return initial != null && hiddenInitials.contains(initial);
+}
+
+/// Drop hidden-category entries from a decoded catalog list (v1.0.16).
+/// An entry is hidden when its `category_id` names a category that is
+/// hidden by id or by initial (resolved against [categories], the
+/// id → name map from the category body). Entries with no category id,
+/// or whose category is not in the map, are KEPT — the filter must
+/// never hide what it cannot prove hidden. Malformed (non-map) entries
+/// are kept too; the typed parse counts them as dropped, not hidden.
+({List<dynamic> visible, int hiddenSkipped}) filterHiddenCatalogEntries(
+  List<dynamic> decoded,
+  Map<String, String> categories,
+  Set<String> hiddenIds,
+  Set<String> hiddenInitials,
+) {
+  if (hiddenIds.isEmpty && hiddenInitials.isEmpty) return (visible: decoded, hiddenSkipped: 0);
+  final visible = <dynamic>[];
+  var hiddenSkipped = 0;
+  for (final entry in decoded) {
+    if (entry is Map<String, dynamic>) {
+      final categoryId = entry['category_id']?.toString();
+      if (categoryId != null &&
+          categoryId.isNotEmpty &&
+          isHiddenIptvCategory(categoryId, categories[categoryId], hiddenIds, hiddenInitials)) {
+        hiddenSkipped++;
+        continue;
+      }
+    }
+    visible.add(entry);
+  }
+  return (visible: visible, hiddenSkipped: hiddenSkipped);
+}
+
+/// Params for [filterHiddenCatalogBody]: plain values only, so [compute]
+/// can carry them into a background isolate.
+class FilterHiddenCatalogBodyParams {
+  const FilterHiddenCatalogBodyParams({
+    required this.catalogBody,
+    required this.categoryBody,
+    required this.hiddenCategoryIds,
+    required this.hiddenCategoryInitials,
+  });
+
+  final String catalogBody;
+  final String categoryBody;
+  final List<String> hiddenCategoryIds;
+  final List<String> hiddenCategoryInitials;
+}
+
+/// The catalog body with hidden-category rows removed (v1.0.16), for
+/// the first-load disk write: the browse warm-up writes the raw body
+/// verbatim (build #13 — a main-isolate re-encode of a 200k-row catalog
+/// froze the app), so the filter runs in a background isolate instead.
+/// Returns the filtered JSON; a body that does not decode to a list is
+/// returned unchanged.
+String filterHiddenCatalogBody(FilterHiddenCatalogBodyParams params) {
+  final decoded = _decodeJson(params.catalogBody);
+  if (decoded is! List) return params.catalogBody;
+  final categories = <String, String>{
+    for (final c in parseFlexibleJsonList(_decodeJson(params.categoryBody), XtreamCategory.fromJson))
+      c.id: c.name,
+  };
+  final filtered = filterHiddenCatalogEntries(
+    decoded,
+    categories,
+    params.hiddenCategoryIds.toSet(),
+    params.hiddenCategoryInitials.toSet(),
+  );
+  return jsonEncode(filtered.visible);
 }
 
 /// Background-isolate index write (build #23): parse one type's catalog
@@ -973,12 +1123,46 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     // connection; CREATE IF NOT EXISTS is a no-op when the main
     // isolate already created it).
     IptvSearchIndex.createSchema(db);
-    final parsed = _rowsFromBody(params.type, params.catalogBody);
+    // Decode once: the typed rows feed the index, the decoded list
+    // feeds the filtered body the caller writes to disk — one parse
+    // serves both stores.
+    final decoded = _decodeJson(params.catalogBody);
+    final parsed = _rowsFromDecoded(params.type, decoded);
     final rows = parsed.rows;
     final categories = <String, String>{
       for (final c in parseFlexibleJsonList(_decodeJson(params.categoryBody), XtreamCategory.fromJson))
         c.id: c.name,
     };
+    final hiddenIds = params.hiddenCategoryIds.toSet();
+    final hiddenInitials = params.hiddenCategoryInitials.toSet();
+    // Hidden-category skip (v1.0.16): rows from turned-off categories
+    // never land — not in the index, and not in the disk file (the
+    // caller writes [IndexWriteResult.filteredBody] instead of the raw
+    // body). The typed rows and the filtered body are cut from the same
+    // decoded list, so the two stores agree exactly.
+    final filtered = decoded is List
+        ? filterHiddenCatalogEntries(decoded, categories, hiddenIds, hiddenInitials)
+        : (visible: const <dynamic>[], hiddenSkipped: 0);
+    final filteredBody = decoded is List ? jsonEncode(filtered.visible) : null;
+    final visibleRows = rows
+        .where(
+          (row) => !isHiddenIptvCategory(
+            row.categoryId,
+            row.categoryId == null ? null : categories[row.categoryId],
+            hiddenIds,
+            hiddenInitials,
+          ),
+        )
+        .toList(growable: false);
+    // Categories the visible rows cover, out of the VISIBLE category
+    // list — the guard's denominator counts visible categories only
+    // (v1.0.16): hidden categories must not make every fetch look
+    // partial, or hiding most categories would break the series fix.
+    final visibleCategories = {
+      for (final entry in categories.entries)
+        if (!isHiddenIptvCategory(entry.key, entry.value, hiddenIds, hiddenInitials)) entry.key,
+    };
+    final covered = {for (final row in visibleRows) row.categoryId}.intersection(visibleCategories);
     int ms() => DateTime.now().difference(started).inMilliseconds;
     if (rows.isEmpty) {
       return IndexWriteResult(
@@ -1002,9 +1186,28 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         droppedRows: parsed.dropped,
       );
     }
-    final covered = {for (final row in rows) row.categoryId}.intersection(categories.keys.toSet());
-    final isPartial = covered.length / categories.length < 0.5;
+    final isPartial = visibleCategories.isNotEmpty && covered.length / visibleCategories.length < 0.5;
     final index = IptvSearchIndex._(db, isMemory: false);
+    // Hidden ids to purge: explicitly hidden ids, plus every category
+    // in the list whose initial is hidden. The merge keeps rows the
+    // fetch did not return, so without the purge a show cached before
+    // its category was hidden would linger in search indefinitely —
+    // the purge runs at sync time, on every successful write.
+    final hiddenCategoryIds = {
+      ...hiddenIds,
+      for (final entry in categories.entries)
+        if (isHiddenIptvCategory(entry.key, entry.value, hiddenIds, hiddenInitials)) entry.key,
+    };
+    void purgeHidden() {
+      if (hiddenCategoryIds.isNotEmpty) {
+        index.deleteRowsInCategories(
+          connectionId: params.connectionId,
+          type: params.type,
+          categoryIds: hiddenCategoryIds,
+        );
+      }
+    }
+
     if (isPartial) {
       // COLD-TYPE EXCEPTION (series fix, v1.0.16): when the index has 0
       // rows for the type, refusing the whole write makes the gap
@@ -1015,50 +1218,62 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
       // untouched so the type stays due and the next sync refetches it.
       // A WARM index keeps refusing: a partial list must never shrink
       // good rows (P5a protection — the upsert below never deletes, but
-      // the refuse keeps the warm path's all-or-nothing shape).
+      // the refuse keeps the warm path's all-or-nothing shape). The
+      // refuse is 'partial-kept' (v1.0.16 dialog fix): the old rows are
+      // kept and searchable, so the dialog must not call it a failure.
       final existing = _metaRowCount(db, params.connectionId, params.type);
       if (existing > 0) {
         return IndexWriteResult(
           rowCount: 0,
           ms: ms(),
-          skippedReason: 'partial',
+          skippedReason: 'partial-kept',
           droppedRows: parsed.dropped,
           coveredCategories: covered.length,
-          totalCategories: categories.length,
+          totalCategories: visibleCategories.length,
+          hiddenSkipped: filtered.hiddenSkipped,
         );
       }
       index.upsertType(
         connectionId: params.connectionId,
         type: params.type,
-        rows: rows,
+        rows: visibleRows,
         categories: categories,
         syncStampMs: null, // Partial land: no stamp, stays due for refetch.
       );
+      purgeHidden();
       return IndexWriteResult(
-        rowCount: rows.length,
+        rowCount: visibleRows.length,
         ms: ms(),
         partial: true,
         droppedRows: parsed.dropped,
         coveredCategories: covered.length,
-        totalCategories: categories.length,
+        totalCategories: visibleCategories.length,
+        hiddenSkipped: filtered.hiddenSkipped,
+        filteredBody: filteredBody,
       );
     }
     // Complete list: upsert-merge (series fix, v1.0.16) — rows the fetch
     // did not return are KEPT, so a partial land's rows survive a later
-    // full sync. See [upsertType] for the meta semantics.
+    // full sync. See [upsertType] for the meta semantics. When every
+    // category is hidden the visible list is empty and the guard above
+    // does not treat it as partial: the empty land stamps normally, so
+    // the type is not re-fetched every bind.
     index.upsertType(
       connectionId: params.connectionId,
       type: params.type,
-      rows: rows,
+      rows: visibleRows,
       categories: categories,
       syncStampMs: params.syncStampMs,
     );
+    purgeHidden();
     return IndexWriteResult(
-      rowCount: rows.length,
+      rowCount: visibleRows.length,
       ms: ms(),
       droppedRows: parsed.dropped,
       coveredCategories: covered.length,
-      totalCategories: categories.length,
+      totalCategories: visibleCategories.length,
+      hiddenSkipped: filtered.hiddenSkipped,
+      filteredBody: filteredBody,
     );
   } finally {
     db.close();
@@ -1084,8 +1299,7 @@ int _metaRowCount(Database db, String connectionId, String type) {
   }
 }
 
-({List<IptvSearchIndexRow> rows, int dropped}) _rowsFromBody(String type, String body) {
-  final decoded = _decodeJson(body);
+({List<IptvSearchIndexRow> rows, int dropped}) _rowsFromDecoded(String type, dynamic decoded) {
   switch (type) {
     case IptvSearchIndex.typeLive:
       final parsed = parseFlexibleJsonListCounted(decoded, XtreamLiveStream.fromJson);
@@ -1131,7 +1345,9 @@ class IptvSearchSyncProgress {
   final int rows;
 
   /// Skip reason when [phase] == 'skipped': 'up-to-date' | 'empty-response'
-  /// | 'partial' | 'oversize' | 'failed'.
+  /// | 'partial-kept' | 'oversize' | 'failed' | 'cold'. 'partial-kept'
+  /// means the panel returned a partial list for a warm type and the old
+  /// rows were kept — searchable, not a failure (v1.0.16 dialog fix).
   final String? reason;
 
   /// True when [phase] == 'done' but the landed list was partial (it
@@ -1161,7 +1377,7 @@ class IptvSearchSyncResult {
   /// Types whose fetch failed on the TRANSPORT (connectionError /
   /// connectionTimeout / receiveTimeout). A 4xx, an oversize body, an
   /// empty response or a partial response is a 'failed'/'oversize'/
-  /// 'empty-response'/'partial' skip but NOT a transport failure — the
+  /// 'empty-response'/'partial-kept' skip but NOT a transport failure — the
   /// distinction decides whether a background run is worth retrying
   /// (build v1.0.13, R4, D9): a transport failure retries, a refusal
   /// never does.
@@ -1187,4 +1403,13 @@ class IptvSearchSyncResult {
   final Set<String> partialTypes;
 
   int get totalRows => rows.values.fold(0, (a, b) => a + b);
+
+  /// True when any type failed to sync (v1.0.16 dialog fix): the manual
+  /// refresh footer reads "Catalog sync failed" only on this. A skipped
+  /// type is a failure EXCEPT 'up-to-date' (nothing to do) and
+  /// 'partial-kept' (the panel returned a partial list for a warm type
+  /// and the old rows were kept — searchable, not a failure). A type
+  /// that landed a partial list is in [rows]/[partialTypes], never in
+  /// [skipped], so it never reads as a failure either.
+  bool get hasFailure => skipped.values.any((reason) => reason != 'up-to-date' && reason != 'partial-kept');
 }

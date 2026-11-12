@@ -1597,7 +1597,10 @@
     ],
     "changelog2280": [
       "Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest",
-      "A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can't leave the library half-empty"
+      "A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can't leave the library half-empty",
+      "Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — the sync stores less and runs faster",
+      "Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there",
+      "Refreshing the catalog no longer says it failed when it kept the shows it already had"
     ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
@@ -1899,6 +1902,9 @@
     "noChannelsInCategoryHint": "This category has no channels in the guide right now. Pick another category, or turn more categories on in IPTV settings.",
     "showAllCategories": "Show all categories",
     "hideChannel": "Hide channel",
+    "channelCategory": "Category: ${name}",
+    "hideCategory": "Hide category",
+    "showCategory": "Show category",
     "unhide": "Unhide",
     "allChannelsHidden": "All channels hidden",
     "allChannelsHiddenHint": "You hid every channel in this guide. Unhide them to see the guide again.",

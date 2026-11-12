@@ -460,11 +460,14 @@ void main() {
         // fresh body, so a poll can catch it momentarily empty — retry
         // instead of failing on the transient state (series fix,
         // v1.0.16: the first-load guard adds a category fetch before
-        // the write is scheduled, widening that window).
+        // the write is scheduled, widening that window). A poll can
+        // also land while the file is absent entirely — retry that too.
         try {
           final decoded = jsonDecode(file.readAsStringSync()) as List;
           return decoded.any((row) => (row as Map)['name'] == 'Gamma Movie');
         } on FormatException {
+          return false;
+        } on FileSystemException {
           return false;
         }
       }, 'the disk cache to hold the fresh rows');
@@ -493,10 +496,15 @@ void main() {
       await waitFor(() {
         // Same transient-empty window as above: the file is truncated
         // before the fresh body lands — retry instead of failing on it.
+        // The loader also DELETES the corrupt file first, so a poll
+        // can land while the file is absent entirely — retry that too
+        // instead of failing on the missing file.
         try {
           final decoded = jsonDecode(file.readAsStringSync());
           return decoded is List && decoded.length == 2;
         } on FormatException {
+          return false;
+        } on FileSystemException {
           return false;
         }
       }, 'the corrupted file to be replaced with valid JSON');

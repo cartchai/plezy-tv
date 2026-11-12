@@ -55,6 +55,19 @@ class GuideTab extends StatefulWidget {
   /// channels only — Plex/Jellyfin/Emby have no hide store, so the menu
   /// omits the item for them.
   final void Function(LiveTvChannel)? onHideChannel;
+
+  /// The channel's category for the long-press menu (v1.0.16): the id,
+  /// display name, and whether it is currently hidden. Resolved at
+  /// menu-open time so the submenu reads the current state. Null when
+  /// the channel has no IPTV category (Plex/Jellyfin/Emby) — the menu
+  /// then omits the category row.
+  final Future<({String id, String name, bool hidden})?> Function(LiveTvChannel channel)? channelCategory;
+
+  /// Flip a whole category's hidden state (v1.0.16): the submenu's
+  /// Hide/Show action calls this with the resolved id + name. The screen
+  /// persists it the same way the categories screen does (per-category
+  /// id, same hidden state the download/cache skip uses).
+  final void Function(LiveTvChannel channel, String categoryId, String categoryName)? onToggleCategory;
   final VoidCallback? onNavigateUp;
   final VoidCallback? onBack;
 
@@ -85,6 +98,8 @@ class GuideTab extends StatefulWidget {
     this.isFavoriteChannel,
     this.onToggleFavorite,
     this.onHideChannel,
+    this.channelCategory,
+    this.onToggleCategory,
     this.onNavigateUp,
     this.onBack,
     this.showCatchUpBadge = true,
@@ -1308,7 +1323,9 @@ class GuideTabState extends State<GuideTab>
   /// menu is built from a list of these, so more items (e.g. "Channel
   /// info", "Record this channel") slot in without touching the menu code.
   /// [id] is stable for tests; [onPressed] runs after the menu closes.
-  List<ChannelMenuItem> _channelMenuItems(LiveTvChannel channel) {
+  /// Async (v1.0.16): the category row resolves the channel's category
+  /// at menu-open time, so the submenu reads the current hidden state.
+  Future<List<ChannelMenuItem>> _channelMenuItems(LiveTvChannel channel, {required Rect anchor, required Size size}) async {
     final items = <ChannelMenuItem>[];
     // Hide is IPTV-only: the hide store lives on IptvLiveTvSupport, per
     // IPTV connection. Plex/Jellyfin/Emby channels get the favorite item
@@ -1322,6 +1339,23 @@ class GuideTabState extends State<GuideTab>
           onPressed: () => widget.onHideChannel!(channel),
         ),
       );
+    }
+    // Whole-category row (v1.0.16): the channel's category with a
+    // chevron; tapping it opens the submenu to show or hide the WHOLE
+    // category. Live TV only — a channel with no IPTV category resolves
+    // to null and the row is omitted.
+    if (widget.channelCategory != null && widget.onToggleCategory != null) {
+      final category = await widget.channelCategory!(channel);
+      if (category != null) {
+        items.add(
+          ChannelMenuItem(
+            id: 'category',
+            label: t.liveTv.channelCategory(name: category.name),
+            icon: Symbols.category_rounded,
+            onPressed: () => unawaited(_showCategorySubmenu(channel, category, anchor, size)),
+          ),
+        );
+      }
     }
     if (widget.onToggleFavorite != null) {
       final isFavorite = widget.isFavoriteChannel?.call(channel) ?? false;
@@ -1337,19 +1371,68 @@ class GuideTabState extends State<GuideTab>
     return items;
   }
 
+  /// One row of the guide channel long-press menu (build #17, §9): icon
+  /// + label, with a trailing chevron on the category row (v1.0.16) to
+  /// show it opens a submenu.
+  Widget _channelMenuItemRow(ChannelMenuItem item, {bool chevron = false}) {
+    return Row(
+      mainAxisSize: .min,
+      children: [
+        Icon(item.icon, size: 20),
+        const SizedBox(width: 12),
+        Flexible(child: Text(item.label)),
+        if (chevron) ...[
+          const SizedBox(width: 12),
+          const Icon(Symbols.chevron_right_rounded, size: 20),
+        ],
+      ],
+    );
+  }
+
+  /// The category submenu (v1.0.16): a second dropdown at the same
+  /// anchor with the whole-category Show/Hide action, reflecting the
+  /// current state (Hide when shown, Show when hidden). Flutter's popup
+  /// menu has no nested submenus, so the submenu is a second `showMenu`
+  /// at the same position, opened after the first menu closes.
+  Future<void> _showCategorySubmenu(
+    LiveTvChannel channel,
+    ({String id, String name, bool hidden}) category,
+    Rect anchor,
+    Size size,
+  ) async {
+    final item = ChannelMenuItem(
+      id: 'toggle-category',
+      label: category.hidden ? t.liveTv.showCategory : t.liveTv.hideCategory,
+      icon: category.hidden ? Symbols.visibility_rounded : Symbols.visibility_off_rounded,
+      onPressed: () => widget.onToggleCategory!(channel, category.id, category.name),
+    );
+    final selected = await showMenu<ChannelMenuItem>(
+      context: context,
+      position: RelativeRect.fromRect(anchor, Offset.zero & size),
+      items: [
+        PopupMenuItem<ChannelMenuItem>(
+          value: item,
+          child: _channelMenuItemRow(item),
+        ),
+      ],
+    );
+    selected?.onPressed();
+  }
+
   /// The guide channel long-press menu (build #17, §9): a dropdown
   /// anchored to the channel cell (or the screen centre for keyboard
   /// triggers, which have no cell rect). Long-press opens the menu — it
   /// never toggles anything directly.
   Future<void> _showChannelMenu(LiveTvChannel channel, {BuildContext? anchorContext}) async {
-    final items = _channelMenuItems(channel);
-    if (items.isEmpty) return;
     final size = MediaQuery.sizeOf(context);
     var anchor = Offset.zero & size;
     final box = anchorContext?.findRenderObject() as RenderBox?;
     if (box != null && box.hasSize) {
       anchor = box.localToGlobal(Offset.zero) & box.size;
     }
+    final items = await _channelMenuItems(channel, anchor: anchor, size: size);
+    if (!mounted) return;
+    if (items.isEmpty) return;
     final selected = await showMenu<ChannelMenuItem>(
       context: context,
       position: RelativeRect.fromRect(anchor, Offset.zero & size),
@@ -1357,14 +1440,7 @@ class GuideTabState extends State<GuideTab>
         for (final item in items)
           PopupMenuItem<ChannelMenuItem>(
             value: item,
-            child: Row(
-              mainAxisSize: .min,
-              children: [
-                Icon(item.icon, size: 20),
-                const SizedBox(width: 12),
-                Flexible(child: Text(item.label)),
-              ],
-            ),
+            child: _channelMenuItemRow(item, chevron: item.id == 'category'),
           ),
       ],
     );

@@ -505,9 +505,11 @@ class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
         // A per-type fetch failure is recorded in the result's skipped
         // map, not thrown — without this the dialog said "Catalog
         // synced" with every row reading "failed" (Matt, 2026-11-11:
-        // manual refresh, all three types timed out). Only an
-        // 'up-to-date' skip is a clean sync.
-        if (result.skipped.values.any((reason) => reason != 'up-to-date')) {
+        // manual refresh, all three types timed out). `hasFailure`
+        // (v1.0.16) is the rule: a skipped type is a failure except
+        // 'up-to-date' and 'partial-kept' — a warm-partial refuse keeps
+        // the landed rows, so the footer must read Done, not Failed.
+        if (result.hasFailure) {
           failed = true;
         }
       } catch (_) {
@@ -531,7 +533,10 @@ class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
 
   String _phaseText(IptvSearchSyncProgress p) {
     if (p.phase == 'done') return p.partial ? '${p.rows} · partial' : '${p.rows}';
-    if (p.phase == 'skipped') return p.reason ?? '';
+    // 'partial-kept' reads as 'partial' on the row (v1.0.16): the type
+    // kept its landed rows and the row already read "partial" on a
+    // refuse — the distinct reason is for the footer, not the row.
+    if (p.phase == 'skipped') return p.reason == 'partial-kept' ? 'partial' : (p.reason ?? '');
     if (p.phase == 'fetching') return '…';
     if (p.phase == 'writing') return '${p.rows}…';
     return '';
