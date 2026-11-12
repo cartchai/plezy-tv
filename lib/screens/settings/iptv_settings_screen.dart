@@ -12,6 +12,8 @@ import '../../i18n/strings.g.dart';
 import '../../media/ids.dart';
 import '../../media/iptv_client.dart';
 import '../../media/iptv_live_tv.dart';
+import '../../services/background_work_diagnostics_service.dart';
+import '../../services/iptv/iptv_background_sync.dart';
 import '../../services/iptv/iptv_catalog_cache.dart';
 import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/iptv/iptv_search_index.dart';
@@ -45,7 +47,10 @@ import 'settings_utils.dart';
 /// Things TiviMate has that Plezy TV cannot do yet (recording, multi-view,
 /// a parental PIN) are deliberately left out; see IPTV_FIXES_NOTES.md.
 class IptvSettingsScreen extends StatelessWidget {
-  const IptvSettingsScreen({super.key});
+  const IptvSettingsScreen({super.key, this.backgroundWorkDiagnosticsService});
+
+  /// Injectable diagnostics service for tests; defaults to the singleton.
+  final BackgroundWorkDiagnosticsService? backgroundWorkDiagnosticsService;
 
   @override
   Widget build(BuildContext context) {
@@ -97,6 +102,10 @@ class IptvSettingsScreen extends StatelessWidget {
                 // how often it re-downloads, plus a manual refresh.
                 SettingSelectionTile<int>(
                   pref: settings.SettingsService.iptvCatalogSyncIntervalHours,
+                  // Build v1.0.13 (R4): the periodic job follows the
+                  // interval — a change re-registers it (update, so the
+                  // schedule is preserved); manual-only cancels it.
+                  onAfterWrite: (hours) => IptvBackgroundSync.applyInterval(hours),
                   icon: Symbols.schedule_rounded,
                   title: t.iptv.catalogSyncInterval,
                   subtitleBuilder: (hours) => hours == 0
@@ -124,6 +133,9 @@ class IptvSettingsScreen extends StatelessWidget {
                   onTap: () => _syncCatalogNow(context),
                 ),
                 const _CatalogCacheSizeTile(),
+                _BackgroundSyncTile(
+                  diagnostics: backgroundWorkDiagnosticsService,
+                ),
               ],
             ),
           ),
@@ -638,6 +650,136 @@ class _CatalogCacheSizeTileState extends State<_CatalogCacheSizeTile> {
       total += await cache.sizeBytes(client.connection.id);
     }
     return total;
+  }
+}
+
+/// "Background sync" status tile (build v1.0.13, R4.3): the last
+/// periodic background run — when it ran, what happened — plus the
+/// background-work diagnostics verdict when the OS is deferring the
+/// job, so a run that never lands explains itself instead of looking
+/// broken. Not tappable — it is a status, not an action. Re-reads the
+/// last-run record whenever a run writes one (via
+/// [IptvBackgroundSync.lastRunVersion]).
+class _BackgroundSyncTile extends StatefulWidget {
+  const _BackgroundSyncTile({this.diagnostics});
+
+  final BackgroundWorkDiagnosticsService? diagnostics;
+
+  @override
+  State<_BackgroundSyncTile> createState() => _BackgroundSyncTileState();
+}
+
+class _BackgroundSyncTileState extends State<_BackgroundSyncTile> {
+  Map<String, Object?>? _record;
+  bool _loaded = false;
+
+  BackgroundWorkDiagnosticsService get _diagnostics =>
+      widget.diagnostics ?? BackgroundWorkDiagnosticsService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    IptvBackgroundSync.lastRunVersion.addListener(_load);
+  }
+
+  @override
+  void dispose() {
+    IptvBackgroundSync.lastRunVersion.removeListener(_load);
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final record = await IptvBackgroundSync.readLastRun();
+    if (!mounted) return;
+    setState(() {
+      _record = record;
+      _loaded = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListenableBuilder(
+      listenable: _diagnostics,
+      builder: (context, _) {
+        final status = _diagnostics.status;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            crossAxisAlignment: .start,
+            children: [
+              AppIcon(Symbols.schedule_rounded, fill: 1),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: .start,
+                  children: [
+                    Text(t.iptv.backgroundSync, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Text(_summaryLine(), style: theme.textTheme.bodyMedium),
+                    if (_diagnostics.isSupported && status.probed && !status.isHealthy) ...[
+                      const SizedBox(height: 2),
+                      Text(_verdictLine(status), style: theme.textTheme.bodyMedium),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _summaryLine() {
+    final record = _record;
+    if (!_loaded) return '';
+    if (record == null) return t.iptv.backgroundSyncNever;
+    final ranAtMs = record['ranAtMs'] as int?;
+    final date = ranAtMs == null
+        ? ''
+        : DateFormat.MMMd(LocaleSettings.currentLocale.intlLocaleName).add_jm().format(
+              DateTime.fromMillisecondsSinceEpoch(ranAtMs),
+            );
+    final skipped = record['skipped'] as String?;
+    final outcome = switch (skipped) {
+      'playing' => t.iptv.backgroundSyncSkippedPlaying,
+      'already-running' => t.iptv.backgroundSyncSkippedRunning,
+      'load-failed' => t.iptv.backgroundSyncSkippedLoad,
+      _ => _outcomeSummary(record),
+    };
+    if (date.isEmpty) return outcome;
+    return '${t.iptv.backgroundSyncLastRun(date: date)} \u00b7 $outcome';
+  }
+
+  String _outcomeSummary(Map<String, Object?> record) {
+    final connections = record['connections'];
+    var synced = 0;
+    var failed = 0;
+    var total = 0;
+    if (connections is Map) {
+      for (final outcomes in connections.values) {
+        if (outcomes is! Map) continue;
+        for (final outcome in outcomes.values) {
+          total++;
+          if (outcome == 'synced' || outcome == 'up-to-date') {
+            synced++;
+          } else if (outcome == 'failed') {
+            failed++;
+          }
+        }
+      }
+    }
+    if (total == 0) return t.iptv.backgroundSyncNoConnections;
+    if (failed == 0 && synced == total) return t.iptv.backgroundSyncAllSynced;
+    return t.iptv.backgroundSyncPartial(synced: synced, failed: failed);
+  }
+
+  String _verdictLine(BackgroundWorkStatus status) {
+    if (status.isBlocked) return t.downloads.backgroundWarning.statusBlocked;
+    return t.downloads.backgroundWarning.statusDegraded;
   }
 }
 

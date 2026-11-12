@@ -68,6 +68,7 @@ import 'providers/offline_mode_provider.dart';
 import 'providers/offline_watch_provider.dart';
 import 'providers/shader_provider.dart';
 import 'utils/snackbar_helper.dart';
+import 'services/iptv/iptv_background_sync.dart';
 import 'services/multi_server_manager.dart';
 import 'services/library_events/library_event_service.dart';
 import 'services/offline_watch_sync_service.dart';
@@ -1434,6 +1435,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   /// Last time server health probes ran from a resume event (cooldown for desktop)
   DateTime _lastResumeProbe = DateTime(0);
 
+  /// True when the app went to the background since the last resume
+  /// (build v1.0.13, R4.2): the resume-time catalog due-check runs only
+  /// on a resume that follows a background trip — never at startup (the
+  /// startup rule: the app opens from the local file) and never on a
+  /// plain window-focus resume on desktop.
+  bool _wasBackgrounded = false;
+
   /// Periodic RSS watchdog timer (desktop + Android).
   Timer? _memoryCheckTimer;
 
@@ -1454,6 +1462,14 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     });
 
     _serverManager = MultiServerManager();
+    // Build v1.0.13 (R4): register the periodic background catalog sync
+    // (WorkManager, at the user's sync-interval setting). Registration
+    // is not a run — the app still opens from the local file (startup
+    // rule); the job fires on the OS schedule. Never awaited: a failed
+    // registration must not block startup.
+    unawaited(
+      IptvBackgroundSync.initialize().then((_) => IptvBackgroundSync.ensureRegistered()),
+    );
     _aggregationService = DataAggregationService(_serverManager);
     _libraryEventService = LibraryEventService(_serverManager);
     _appDatabase = widget.appDatabase;
@@ -1765,8 +1781,23 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
             await _serverManager.reoptimizeDemotedServers(reason: 'resume');
           }());
         }
+        // Build v1.0.13 (R4.2): the app was backgrounded — the catalog
+        // may be due for its interval sync. The check is the existing
+        // coalesced sync: 0 requests when up-to-date, and it yields when
+        // the background job is already syncing. Not gated on the probe
+        // cooldown above (a sync is cheaper than a probe and the engine
+        // due-checks). Not run at startup — only on a resume after a
+        // background trip.
+        if (_wasBackgrounded) {
+          _wasBackgrounded = false;
+          unawaited(_serverManager.ensureIptvSearchIndexesSynced());
+        }
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
+        // Build v1.0.13 (R4.2): the next resume runs the catalog
+        // due-check. Registration of the background job is untouched
+        // here (D7) — pausing the app must never cancel the job.
+        _wasBackgrounded = true;
         // Backgrounded: drop the library push sockets — they are
         // foreground-only, and the stale-resume refresh covers the gap.
         _libraryEventService.suspend();

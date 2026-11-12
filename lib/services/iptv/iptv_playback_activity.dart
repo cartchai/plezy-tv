@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../base_shared_preferences_service.dart';
+import '../../utils/app_logger.dart';
+
 /// Whether a stream is currently playing (build #28).
 ///
 /// Background panel work — the weekly catalog sync, the catalog
@@ -35,11 +38,33 @@ class IptvPlaybackActivity {
   /// waiting for idle.
   final ValueNotifier<bool> isPlayingNotifier = ValueNotifier(false);
 
+  /// SharedPreferences key mirroring [isPlaying] for the background
+  /// isolate (build v1.0.13, R4, D4): the in-memory notifier is a fresh
+  /// idle instance in a background isolate, so the periodic sync reads
+  /// this key instead. Written on every [markPlaying]/[markIdle],
+  /// fire-and-forget — a failed write must never break playback.
+  static const String playbackMirrorPrefsKey = 'iptv_playback_active';
+
   bool get isPlaying => isPlayingNotifier.value;
 
-  void markPlaying() => isPlayingNotifier.value = true;
+  void markPlaying() {
+    isPlayingNotifier.value = true;
+    unawaited(_writeMirror(true));
+  }
 
-  void markIdle() => isPlayingNotifier.value = false;
+  void markIdle() {
+    isPlayingNotifier.value = false;
+    unawaited(_writeMirror(false));
+  }
+
+  static Future<void> _writeMirror(bool playing) async {
+    try {
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      await prefs.setBool(playbackMirrorPrefsKey, playing);
+    } catch (e) {
+      appLogger.w('IPTV playback activity: mirror unwritable', error: e);
+    }
+  }
 
   /// Completes when no stream is playing — immediately when already
   /// idle, otherwise when the next [markIdle] lands. Every waiter

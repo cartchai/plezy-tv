@@ -31,6 +31,7 @@ import '../media/playback_report_metadata.dart';
 import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
+import '../services/base_shared_preferences_service.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
 import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/iptv_search_index.dart';
@@ -71,6 +72,15 @@ class IptvCategory {
 /// opens a stream itself — [getPlaybackInitialization] and
 /// [LiveTvSupport.startPlayback] hand out URLs and the player opens exactly
 /// one of them. No prefetching, no preview probing.
+
+/// Thrown by [_IptvClient._waitForIdleUnlessAborted] when the background
+/// playback check finds a stream playing (build v1.0.13, R4, D4). Unlike
+/// the foreground wait, a background run never waits for idle — it bails
+/// so WorkManager can retry.
+class _BackgroundPlaybackActive implements Exception {
+  const _BackgroundPlaybackActive();
+}
+
 class IptvClient implements MediaServerClient {
   /// The connection this client serves. Replaced only via
   /// [updateConnection] (build #17): a filter toggle re-binds the same
@@ -161,7 +171,7 @@ class IptvClient implements MediaServerClient {
     // Build #20: the User-Agent is re-read from Settings on every request,
     // so changing Settings → IPTV → Xtream User-Agent applies to the next
     // request without rebuilding the client (or restarting the app).
-    userAgentProvider: _xtreamUserAgent,
+    userAgentProvider: _userAgentProviderOverride ?? _xtreamUserAgent,
     // Build #27: every refused response and transport failure is handed
     // to the refusal log (Settings → IPTV → Connection refusals) with
     // its headers and body — the 403 the app used to discard is the
@@ -171,6 +181,16 @@ class IptvClient implements MediaServerClient {
     connectionId: connection.id,
     connectionName: _name,
   );
+
+  /// Override for the Xtream User-Agent provider (build v1.0.13, R4):
+  /// the background isolate has no SettingsService, so the callback
+  /// resolves the user's UA from SharedPreferences directly and hands
+  /// it in here before the first request. Must be set before the lazy
+  /// [_xtreamApi] builds; the override wins over [_xtreamUserAgent].
+  String Function()? _userAgentProviderOverride;
+
+  /// See [_userAgentProviderOverride].
+  set userAgentProvider(String Function() provider) => _userAgentProviderOverride = provider;
 
   /// The configured Xtream User-Agent for this client's requests (build
   /// #20). Falls back to VLC when Settings is not initialized yet (tests)
@@ -474,6 +494,69 @@ class IptvClient implements MediaServerClient {
         _ => IptvCatalogDiskCache.seriesCategoriesDataset,
       };
 
+  /// SharedPreferences key holding the start time (epoch ms) of a catalog
+  /// sync currently running in ANOTHER isolate (build v1.0.13, R4, D5).
+  /// The UI isolate and the background job both write it for the duration
+  /// of a sync and clear it when done, so the other side can yield
+  /// instead of duplicating the 6 requests. Best-effort: a crash leaves
+  /// a stale stamp, which ages out after [syncRunningStampStaleAfter].
+  static const String syncRunningStampPrefsKey = 'iptv_catalog_sync_running_since_ms';
+
+  /// A running stamp older than this is dead (the run crashed or was
+  /// killed) and must not block syncs forever.
+  static const Duration syncRunningStampStaleAfter = Duration(minutes: 30);
+
+  /// True when another isolate started a catalog sync recently enough
+  /// that this isolate should yield. Never throws — an unreadable prefs
+  /// store reads as "nobody is syncing".
+  static Future<bool> isSyncRunningElsewhere() async {
+    try {
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      final stampMs = prefs.getInt(syncRunningStampPrefsKey);
+      if (stampMs == null) return false;
+      final age = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(stampMs));
+      return age < syncRunningStampStaleAfter;
+    } catch (e) {
+      appLogger.w('IPTV: running stamp unreadable', error: e);
+      return false;
+    }
+  }
+
+  static Future<void> _writeSyncRunningStamp() async {
+    try {
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      await prefs.setInt(syncRunningStampPrefsKey, DateTime.now().millisecondsSinceEpoch);
+    } catch (e) {
+      appLogger.w('IPTV: running stamp unwritable', error: e);
+    }
+  }
+
+  static Future<void> _clearSyncRunningStamp() async {
+    try {
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      await prefs.remove(syncRunningStampPrefsKey);
+    } catch (e) {
+      appLogger.w('IPTV: running stamp unclearable', error: e);
+    }
+  }
+
+  /// The index's lastSync per type at the moment the memoized catalog was
+  /// populated (build v1.0.13, R4, test 6). A background-isolate sync
+  /// writes the index + disk while this client is warm; when the stamp
+  /// advances past the recorded one the memo is stale and must be
+  /// dropped. A type that never synced stamps the epoch, so the first
+  /// real sync invalidates the memo.
+  final Map<String, DateTime> _memoSyncStamp = {};
+
+  /// True when [e] is a transport failure (the panel did not answer at
+  /// all), as opposed to a refusal or a bad payload (build v1.0.13, R4,
+  /// D9). Only transport failures are worth a background retry.
+  static bool _isTransportError(Object e) =>
+      e is MediaServerHttpException &&
+      (e.type == MediaServerHttpErrorType.connectionError ||
+          e.type == MediaServerHttpErrorType.connectionTimeout ||
+          e.type == MediaServerHttpErrorType.receiveTimeout);
+
   /// Hours between catalog syncs (Settings → IPTV, default once a week,
   /// 0 = manual only). Falls back to weekly when Settings is not
   /// initialized yet (tests).
@@ -516,6 +599,36 @@ class IptvClient implements MediaServerClient {
     );
   }
 
+  /// Background-isolate entry point for the periodic catalog sync (build
+  /// v1.0.13, R4). Same engine as [syncSearchIndex], but: the interval
+  /// comes from the caller (a background isolate has no SettingsService),
+  /// cold types are skipped (D8 — a type with no index rows has no user
+  /// waiting on it, and the job must not pay for a first sync the user
+  /// never asked for), the playback check reads the SharedPreferences
+  /// mirror (D4 — the in-memory activity is a fresh idle instance in a
+  /// background isolate), and a transport failure is reported per type
+  /// (D9) so the caller can decide whether the run is worth retrying.
+  /// Never retries a transport error (the WorkManager backoff is the
+  /// retry). A playback bail returns the partial result with
+  /// [IptvSearchSyncResult.playbackAborted] set.
+  Future<IptvSearchSyncResult> syncSearchIndexForBackground({
+    int? intervalHours,
+    AbortController? abort,
+    Future<bool> Function()? isPlaybackActive,
+  }) {
+    if (!_isXtream) return Future.value(const IptvSearchSyncResult(rows: {}, skipped: {}));
+    return _runIndexWrite(
+      () => _syncSearchIndex(
+        force: false,
+        abort: abort,
+        retryTransportErrors: false,
+        intervalHoursOverride: intervalHours,
+        skipColdTypes: true,
+        backgroundPlaybackCheck: isPlaybackActive,
+      ),
+    );
+  }
+
   /// R2.4: retry a panel fetch ONCE on a transport error only — the
   /// panel closing the connection mid-download ("Connection closed while
   /// receiving data", the series failure in Matt's logs) is worth one
@@ -548,6 +661,9 @@ class IptvClient implements MediaServerClient {
     void Function(IptvSearchSyncProgress)? onProgress,
     AbortController? abort,
     bool retryTransportErrors = false,
+    int? intervalHoursOverride,
+    bool skipColdTypes = false,
+    Future<bool> Function()? backgroundPlaybackCheck,
   }) async {
     final index = await _searchIndex();
     if (index == null) {
@@ -559,7 +675,14 @@ class IptvClient implements MediaServerClient {
     }
     final rows = <String, int>{};
     final skipped = <String, String>{};
-    final intervalHours = _catalogSyncIntervalHours();
+    final transportFailed = <String>{};
+    // R4: panel requests attempted (categories + catalog per type that
+    // reaches the fetch). Exact on the background path (no retries); a
+    // forced sync's R2.4 retry re-fetches without incrementing.
+    var attempts = 0;
+    // R4: the background isolate has no SettingsService, so the caller
+    // hands the interval in directly.
+    final intervalHours = intervalHoursOverride ?? _catalogSyncIntervalHours();
     final dbPath = await IptvSearchIndex.dbFilePath();
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     // Build #28: every sync owns an AbortController, registered so
@@ -569,6 +692,10 @@ class IptvClient implements MediaServerClient {
     abort ??= AbortController();
     _activeBackgroundAborts.add(abort);
     _refreshSearchIndexState(syncing: true);
+    // R4 (D5): mark this sync as running so a concurrent run in another
+    // isolate yields instead of duplicating the 6 requests. Cleared in
+    // the finally below; a crash leaves a stamp that ages out in 30 min.
+    await _writeSyncRunningStamp();
     try {
       for (final type in IptvSearchIndex.types) {
         abort.throwIfAborted();
@@ -589,13 +716,23 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'up-to-date'));
           continue;
         }
+        if (skipColdTypes && indexedCount == 0) {
+          // Build v1.0.13 (R4, D8): the background job never pays for a
+          // first sync — a type with no index rows has no user waiting
+          // on it, and the foreground bind/manual refresh owns first
+          // syncs. Skipping is not a failure: the type stays cold until
+          // the user opens it.
+          skipped[type] = 'cold';
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'cold'));
+          continue;
+        }
         // Build #28: background work waits while a stream is playing.
         // A forced (manual) refresh is the user asking explicitly, so
         // it is not gated. Otherwise the sync pauses between types and
         // resumes when playback stops — it is not abandoned. The abort
         // races the wait, so a background cancel still stops a sync
         // that is parked on playback.
-        if (!force) await _waitForIdleUnlessAborted(abort);
+        if (!force) await _waitForIdleUnlessAborted(abort, backgroundPlaybackCheck: backgroundPlaybackCheck);
         onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'fetching'));
         List<XtreamCategory> categories;
         int fetchedCount;
@@ -607,6 +744,7 @@ class IptvClient implements MediaServerClient {
           // R2.4: each fetch gets its own retry (categories and catalog
           // separately) — retrying the whole per-type block would cost
           // +2 requests instead of +1.
+          attempts++;
           categories = await _fetchWithTransportRetry(
             () => _fetchCategoriesFor(type, abort),
             retry: retryTransportErrors,
@@ -619,6 +757,7 @@ class IptvClient implements MediaServerClient {
           final List<Object> fetched;
           switch (type) {
             case IptvSearchIndex.typeLive:
+              attempts++;
               fetched = await _fetchWithTransportRetry(
                 () => _xtreamApi.getLiveStreams(abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
@@ -626,6 +765,7 @@ class IptvClient implements MediaServerClient {
               );
               catalogBody = _xtreamApi.lastLiveStreamsBody;
             case IptvSearchIndex.typeMovie:
+              attempts++;
               fetched = await _fetchWithTransportRetry(
                 () => _xtreamApi.getVodStreams(abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
@@ -633,6 +773,7 @@ class IptvClient implements MediaServerClient {
               );
               catalogBody = _xtreamApi.lastVodStreamsBody;
             default:
+              attempts++;
               fetched = await _fetchWithTransportRetry(
                 () => _xtreamApi.getSeries(abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
@@ -648,6 +789,7 @@ class IptvClient implements MediaServerClient {
           continue;
         } catch (e) {
           appLogger.w('IPTV: catalog sync fetch failed for $type', error: e);
+          if (_isTransportError(e)) transportFailed.add(type);
           skipped[type] = 'failed';
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
           continue;
@@ -716,9 +858,21 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
         }
       }
-      return IptvSearchSyncResult(rows: rows, skipped: skipped);
+      return IptvSearchSyncResult(rows: rows, skipped: skipped, transportFailedTypes: transportFailed, requests: attempts);
+    } on _BackgroundPlaybackActive {
+      // R4 (D4): playback started mid-run — bail with the partial
+      // result; the caller maps it to a retry, and the types already
+      // synced stay synced.
+      return IptvSearchSyncResult(
+        rows: rows,
+        skipped: skipped,
+        transportFailedTypes: transportFailed,
+        playbackAborted: true,
+        requests: attempts,
+      );
     } finally {
       _activeBackgroundAborts.remove(abort);
+      await _clearSyncRunningStamp();
       _refreshSearchIndexState();
     }
   }
@@ -730,7 +884,19 @@ class IptvClient implements MediaServerClient {
   /// a sync parked on playback still stops when the app backgrounds.
   /// (The parked `waitForIdle` listener self-cleans at the next
   /// `markIdle` when the abort wins the race.)
-  Future<void> _waitForIdleUnlessAborted(AbortController? abort) async {
+  Future<void> _waitForIdleUnlessAborted(
+    AbortController? abort, {
+    Future<bool> Function()? backgroundPlaybackCheck,
+  }) async {
+    // R4 (D4): in a background isolate the in-memory activity is a fresh
+    // (idle) instance, so the check reads the SharedPreferences mirror
+    // instead — and the job never WAITS for idle, it bails so WorkManager
+    // can retry. The foreground path keeps waiting (build #28).
+    final backgroundCheck = backgroundPlaybackCheck;
+    if (backgroundCheck != null) {
+      if (await backgroundCheck()) throw const _BackgroundPlaybackActive();
+      return;
+    }
     final activity = IptvPlaybackActivity.instance;
     if (!activity.isPlaying) return;
     final trigger = abort?.trigger;
@@ -740,6 +906,59 @@ class IptvClient implements MediaServerClient {
     }
     await Future.any([activity.waitForIdle(), trigger]);
     abort?.throwIfAborted();
+  }
+
+  /// Drop a memoized catalog when the index was written out-of-band after
+  /// it was populated (build v1.0.13, R4): a background-isolate sync
+  /// writes the DB + disk while this client is warm, and the memo would
+  /// otherwise serve stale rows until restart. The stamp is the index's
+  /// lastSync for the type; a newer stamp means the memo predates a sync.
+  /// The check is one small SQLite query on an already-open index — no
+  /// panel traffic. Never throws; on any failure the memo is kept.
+  Future<void> _invalidateMemoIfIndexAdvanced(String type) async {
+    if (_closed) return;
+    final stamp = _memoSyncStamp[type];
+    if (stamp == null) return;
+    try {
+      final index = await _searchIndex();
+      if (index == null) return;
+      final current = index.lastSync(connection.id)[type];
+      if (current == null || !current.isAfter(stamp)) return;
+      switch (type) {
+        case IptvSearchIndex.typeLive:
+          _liveStreamsFuture = null;
+          _liveStreamsLoaded = false;
+          _liveCategoriesFuture = null;
+          _liveCategoryNamesFuture = null;
+        case IptvSearchIndex.typeMovie:
+          _vodStreamsFuture = null;
+          _vodStreamsLoaded = false;
+          _vodCategoriesFuture = null;
+          _vodCategoryNamesFuture = null;
+        default:
+          _seriesFuture = null;
+          _seriesListLoaded = false;
+          _seriesCategoriesFuture = null;
+          _seriesCategoryNamesFuture = null;
+      }
+      _memoSyncStamp.remove(type);
+    } catch (e) {
+      appLogger.w('IPTV: memo stamp check failed for $type', error: e);
+    }
+  }
+
+  /// Record the index's lastSync for [type] as the memo's stamp, so a
+  /// later background run is detectable. A type that never synced stamps
+  /// the epoch, so the first real sync invalidates the memo.
+  Future<void> _recordMemoStamp(String type) async {
+    if (_closed) return;
+    try {
+      final index = await _searchIndex();
+      _memoSyncStamp[type] =
+          index?.lastSync(connection.id)[type] ?? DateTime.fromMillisecondsSinceEpoch(0);
+    } catch (e) {
+      appLogger.w('IPTV: memo stamp record failed for $type', error: e);
+    }
   }
 
   /// Publish freshly synced rows into the memoized catalog futures
@@ -783,6 +1002,14 @@ class IptvClient implements MediaServerClient {
     // re-fetch EPG for the visible channels (build #14, SA-4 partial),
     // so the event carries which catalog actually changed.
     notifyCatalogRefreshed(liveCatalogChanged: type == IptvSearchIndex.typeLive);
+    // R4: the sync just stamped the index — record it as the memo's
+    // stamp, so a LATER background run is detectable (the publish is
+    // this type's memo population).
+    final index = _searchIndexInstance;
+    if (index != null) {
+      _memoSyncStamp[type] =
+          index.lastSync(connection.id)[type] ?? DateTime.fromMillisecondsSinceEpoch(0);
+    }
   }
 
   Future<List<XtreamCategory>> _fetchCategoriesFor(String type, AbortController? abort) {
@@ -814,7 +1041,18 @@ class IptvClient implements MediaServerClient {
     final existing = _ensureSyncedInFlight;
     if (existing != null) return existing;
     final future = _runIndexWrite(() async {
+      // R4 (D5): another isolate is already syncing — yield instead of
+      // duplicating the 6 requests. Best-effort (a stamp written after
+      // this check still races), and the in-flight coalescing above
+      // covers the same-isolate case. The stamp read runs CONCURRENTLY
+      // with the seed: the read may pay a first-load cost on the prefs
+      // cache, and awaiting it serially before the seed delayed the
+      // sync's first fetch past a search's return (build18 D4). The
+      // seed does not depend on the stamp, so the two overlap; the
+      // yield decision still gates the fetch loop below.
+      final stampElsewhereFuture = isSyncRunningElsewhere();
       await _seedSearchIndexFromDisk();
+      if (await stampElsewhereFuture) return;
       await _syncSearchIndex(
         force: false,
         onProgress: null,
@@ -1524,6 +1762,7 @@ class IptvClient implements MediaServerClient {
   }
 
   Future<List<XtreamLiveStream>> _liveStreams() async {
+    await _invalidateMemoIfIndexAdvanced(IptvSearchIndex.typeLive);
     final cached = _liveStreamsFuture;
     if (cached != null) return cached;
     final future = _loadLiveStreamsCached().catchError((Object e) {
@@ -1539,6 +1778,7 @@ class IptvClient implements MediaServerClient {
     } else {
       _liveStreamsLoaded = true;
     }
+    await _recordMemoStamp(IptvSearchIndex.typeLive);
     return result;
   }
 
@@ -1564,6 +1804,7 @@ class IptvClient implements MediaServerClient {
   }
 
   Future<List<XtreamVodStream>> _vodStreams() async {
+    await _invalidateMemoIfIndexAdvanced(IptvSearchIndex.typeMovie);
     final cached = _vodStreamsFuture;
     if (cached != null) return cached;
     final future = _loadVodStreamsCached().catchError((Object e) {
@@ -1584,6 +1825,7 @@ class IptvClient implements MediaServerClient {
     } else {
       _vodStreamsLoaded = true;
     }
+    await _recordMemoStamp(IptvSearchIndex.typeMovie);
     return result;
   }
 
@@ -1668,6 +1910,7 @@ class IptvClient implements MediaServerClient {
   }
 
   Future<List<XtreamSeries>> _seriesList() async {
+    await _invalidateMemoIfIndexAdvanced(IptvSearchIndex.typeSeries);
     final cached = _seriesFuture;
     if (cached != null) return cached;
     final future = _loadSeriesCached().catchError((Object e) {
@@ -1684,6 +1927,7 @@ class IptvClient implements MediaServerClient {
     } else {
       _seriesListLoaded = true;
     }
+    await _recordMemoStamp(IptvSearchIndex.typeSeries);
     return result;
   }
 
@@ -2527,6 +2771,7 @@ class IptvClient implements MediaServerClient {
     _seriesFuture = Future.value(disk.rows);
     _seriesListLoaded = true;
     _seriesLoadSource = 'disk';
+    _memoSyncStamp[IptvSearchIndex.typeSeries] = disk.fetchedAt;
   }
 
   /// Same warm-up for the VOD catalog (build #13): the first Movies
@@ -2550,6 +2795,7 @@ class IptvClient implements MediaServerClient {
     _vodStreamsFuture = Future.value(disk.rows);
     _vodStreamsLoaded = true;
     _vodLoadSource = 'disk';
+    _memoSyncStamp[IptvSearchIndex.typeMovie] = disk.fetchedAt;
   }
 
   /// Same warm-up for the live catalog (build #13): the first Live TV
@@ -2573,6 +2819,7 @@ class IptvClient implements MediaServerClient {
     _liveStreamsFuture = Future.value(disk.rows);
     _liveStreamsLoaded = true;
     _liveLoadSource = 'disk';
+    _memoSyncStamp[IptvSearchIndex.typeLive] = disk.fetchedAt;
   }
 
   /// On-device series catalog diagnostics (build #10, diagnosis

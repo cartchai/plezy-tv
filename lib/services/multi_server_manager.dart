@@ -362,6 +362,39 @@ class MultiServerManager {
     if (client is PlexClient) _plexScopeByServer[client.serverId] = client.profileScopeId;
   }
 
+  /// Test-only IPTV registration (build v1.0.13, R4): mirrors
+  /// [debugRegisterClientForTesting] and also files the client under
+  /// its connection id, so [ensureIptvSearchIndexesSynced] can find it.
+  @visibleForTesting
+  void debugRegisterIptvClientForTesting(IptvClient client, {bool online = true}) {
+    _iptvByConnectionId[client.connection.id] = client;
+    _clients[client.serverId] = client;
+    _serverStatus[client.serverId] = online;
+  }
+
+  /// Resume-time due-check (build v1.0.13, R4.2): after the app was
+  /// backgrounded, each bound IPTV client's catalog may be due for its
+  /// interval sync — run the existing coalesced
+  /// [IptvClient.ensureSearchIndexSynced] for each, which fetches only
+  /// due types (0 requests when up-to-date) and yields when the
+  /// background job is already syncing (D5). Fire-and-forget from the
+  /// resume handler; the awaitable future is returned for tests.
+  /// Deliberately NOT run at startup (the startup rule: the app opens
+  /// from the local file) — only on a resume that follows a background
+  /// trip.
+  Future<void> ensureIptvSearchIndexesSynced() async {
+    await Future.wait(
+      _iptvByConnectionId.values.map(
+        (client) => client.ensureSearchIndexSynced().catchError((Object e) {
+          // A failed due-check must not throw into the resume handler
+          // (or stop the other connections' checks) — the next bind /
+          // manual refresh is the retry.
+          appLogger.w('IPTV: resume sync failed for ${client.connection.id}', error: e);
+        }),
+      ),
+    );
+  }
+
   @visibleForTesting
   void debugMarkAuthErrorForTesting(ServerId serverId) {
     _serverStatus[serverId] = false;

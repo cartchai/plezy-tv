@@ -1586,6 +1586,10 @@
       "When the provider closes a download halfway through, the catalog refresh tries once more before giving up — only for a manual refresh or an Enter search, never in the background",
       "The wait after each keystroke is now 100 milliseconds instead of 500, so results start appearing almost as you type"
     ],
+    "changelog2277": [
+      "The catalog now refreshes itself in the background once a week, so search stays fast without you opening the app — it never runs while you are watching, and it never re-downloads a catalog that is already up to date",
+      "Opening the app after it was in the background checks whether the catalog is due for a refresh, and Settings \u2192 IPTV now shows when the last background refresh ran and what happened"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
@@ -2848,6 +2852,15 @@
     "catalogSyncInterval": "Catalog sync interval",
     "catalogSyncIntervalDescription": "How often the catalog (channels, movies and series) re-downloads for search",
     "catalogSyncWeekly": "Once a week",
+    "backgroundSync": "Background sync",
+    "backgroundSyncNever": "Never run",
+    "backgroundSyncLastRun": "Last run ${date}",
+    "backgroundSyncAllSynced": "All catalogs synced",
+    "backgroundSyncPartial": "${synced} synced \u00b7 ${failed} failed",
+    "backgroundSyncSkippedPlaying": "Skipped \u2014 a stream was playing",
+    "backgroundSyncSkippedRunning": "Skipped \u2014 a sync was already running",
+    "backgroundSyncSkippedLoad": "Skipped \u2014 connections could not be read",
+    "backgroundSyncNoConnections": "No IPTV connections",
     "catalogSyncNow": "Sync catalog now",
     "catalogSyncNowDescription": "Download all titles for movies, TV and channels now",
     "catalogSyncTitle": "Refreshing Trex details",

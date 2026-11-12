@@ -918,13 +918,40 @@ class IptvSearchSyncProgress {
 
 /// Outcome of one [IptvClient.syncSearchIndex] run, per type.
 class IptvSearchSyncResult {
-  const IptvSearchSyncResult({required this.rows, required this.skipped});
+  const IptvSearchSyncResult({
+    required this.rows,
+    required this.skipped,
+    this.transportFailedTypes = const {},
+    this.playbackAborted = false,
+    this.requests = 0,
+  });
 
   /// Rows written per type (0 when the type was skipped).
   final Map<String, int> rows;
 
   /// Skip reason per type that did not sync (see [IptvSearchSyncProgress.reason]).
   final Map<String, String> skipped;
+
+  /// Types whose fetch failed on the TRANSPORT (connectionError /
+  /// connectionTimeout / receiveTimeout). A 4xx, an oversize body, an
+  /// empty response or a partial response is a 'failed'/'oversize'/
+  /// 'empty-response'/'partial' skip but NOT a transport failure — the
+  /// distinction decides whether a background run is worth retrying
+  /// (build v1.0.13, R4, D9): a transport failure retries, a refusal
+  /// never does.
+  final Set<String> transportFailedTypes;
+
+  /// True when the run bailed because a stream started playing mid-run
+  /// (build v1.0.13, R4, D4). The partial result stands; the caller maps
+  /// this to a retry instead of a success.
+  final bool playbackAborted;
+
+  /// Panel requests this run attempted (build v1.0.13, R4): one per
+  /// category-list fetch and one per catalog fetch that started. Exact
+  /// for the background path (which never retries); a forced sync's
+  /// transport retry (R2.4) re-fetches without incrementing, so it reads
+  /// as a lower bound there. Only the background record consumes it.
+  final int requests;
 
   int get totalRows => rows.values.fold(0, (a, b) => a + b);
 }
