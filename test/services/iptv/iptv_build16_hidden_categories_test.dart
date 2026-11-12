@@ -66,13 +66,27 @@ const _movieRows = [
   XtreamVodStream(streamId: 13, name: 'NF Movie', categoryId: 'mov3'),
 ];
 
+List<XtreamCategory> get _bigLiveCategories =>
+    [for (var i = 1; i <= 600; i++) XtreamCategory(id: 'L$i', name: 'Live $i')];
+List<XtreamLiveStream> get _bigLiveRows =>
+    [for (var i = 1; i <= 600; i++) XtreamLiveStream(streamId: i, name: 'Live $i', categoryId: 'L$i')];
+
 /// Fake panel: complete lists for all three types.
 class _HiddenPanel extends http.BaseClient {
   int totalRequests = 0;
+  // Test switches (each defaults to the healthy panel):
+  // fail — every request throws a transport error (panel down);
+  // bigLive — a 600-category / 600-row live catalog (purge chunking);
+  // partialSeries — get_series returns only cat1's 2 rows (warm
+  // partial-kept guard: 2 < 8 ~/ 2).
+  bool fail = false;
+  bool bigLive = false;
+  bool partialSeries = false;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     totalRequests++;
+    if (fail) throw http.ClientException('panel unreachable (test)', request.url);
     final action = request.url.queryParameters['action'];
     final body = _bodyFor(action);
     return http.StreamedResponse(
@@ -90,17 +104,18 @@ class _HiddenPanel extends http.BaseClient {
           'user_info': {'status': 'Active', 'exp_date': '1790000000'},
         });
       case 'get_live_categories':
-        return jsonEncode(_liveCategories.map((c) => c.toJson()).toList());
+        return jsonEncode((bigLive ? _bigLiveCategories : _liveCategories).map((c) => c.toJson()).toList());
       case 'get_vod_categories':
         return jsonEncode(_movieCategories.map((c) => c.toJson()).toList());
       case 'get_series_categories':
         return jsonEncode(_seriesCategories.map((c) => c.toJson()).toList());
       case 'get_live_streams':
-        return jsonEncode(_liveRows.map((r) => r.toJson()).toList());
+        return jsonEncode((bigLive ? _bigLiveRows : _liveRows).map((r) => r.toJson()).toList());
       case 'get_vod_streams':
         return jsonEncode(_movieRows.map((r) => r.toJson()).toList());
       case 'get_series':
-        return jsonEncode(_seriesRows().map((r) => r.toJson()).toList());
+        final rows = partialSeries ? _seriesRows().where((r) => r.categoryId == 'cat1').toList() : _seriesRows();
+        return jsonEncode(rows.map((r) => r.toJson()).toList());
       case 'get_series_info':
         return jsonEncode({
           'info': {'name': 'Show'},
@@ -363,6 +378,102 @@ void main() {
         IptvSearchIndex.typeMovie: 2,
         IptvSearchIndex.typeSeries: 8,
       });
+    });
+
+    test('H10: all-hidden sync keeps the raw body on disk, not an empty file', () async {
+      // An empty disk file is a miss (_readDiskCatalog deletes it and
+      // refetches), so the all-hidden write falls back to the raw body.
+      final client = _clientWith(
+        _HiddenPanel(),
+        hiddenCategoryIds: const ['cat1', 'cat2', 'cat3', 'cat4', 'cat5', 'cat6'],
+      );
+
+      final result = await client.syncSearchIndex(force: true);
+      // ignore: avoid_print
+      print('H10: rows=${result.rows} skipped=${result.skipped}');
+
+      expect(result.rows[IptvSearchIndex.typeSeries], 0);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 0);
+      expect(client.searchIndexState.lastSync[IptvSearchIndex.typeSeries], isNotNull);
+      final diskRows = await _readDiskSeriesRows();
+      expect(diskRows.length, 12,
+          reason: 'all-hidden falls back to the raw body — an empty file would be deleted as a miss on next load');
+    });
+
+    test('H11: hiding 600 categories purges past the 500-variable chunk', () async {
+      final panel = _HiddenPanel()..bigLive = true;
+      final client = _clientWith(panel);
+
+      await client.syncSearchIndex(force: true);
+      expect(_rows(client, IptvSearchIndex.typeLive), 600);
+
+      _setHidden(client, ids: [for (var i = 1; i <= 600; i++) 'L$i']);
+      await client.syncSearchIndex(force: true);
+      // ignore: avoid_print
+      print('H11: liveIndexRows=${_rows(client, IptvSearchIndex.typeLive)}');
+
+      expect(_rows(client, IptvSearchIndex.typeLive), 0,
+          reason: 'the purge must delete all 600 categories worth of rows, chunked at 500 ids');
+      expect((await client.searchItems('Live 599')).map((m) => m.title), isNot(contains('Live 599')));
+    });
+
+    test('H12: a failed sync after re-enable must NOT mark the hidden state synced', () async {
+      // D1: re-enable, then the panel goes down for the whole sync. The
+      // failed run must not claim the re-enable as synced — the next
+      // plain sync must retry the fetch instead of skipping as
+      // up-to-date, or the rows stay missing for up to a week.
+      final panel = _HiddenPanel();
+      final client = _clientWith(panel);
+
+      await client.syncSearchIndex(force: true);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      _setHidden(client, ids: const ['cat3', 'cat4']);
+      await client.syncSearchIndex(force: true);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+
+      _setHidden(client);
+      panel.fail = true;
+      final failed = await client.syncSearchIndex(force: true);
+      expect(failed.skipped[IptvSearchIndex.typeSeries], 'failed');
+      panel.fail = false;
+
+      final retry = await client.syncSearchIndex();
+      // ignore: avoid_print
+      print('H12: retry skipped=${retry.skipped} rows=${retry.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
+      expect(retry.skipped[IptvSearchIndex.typeSeries], isNull,
+          reason: 'a transport-failed run must leave the type due so the next sync retries it');
+      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+    });
+
+    test('H13: a partial-kept sync after re-enable must NOT mark the hidden state synced', () async {
+      // D1, second trigger: the panel answers but with a partial list
+      // (2 rows < half of 8 indexed), so the warm guard keeps the old
+      // rows. The run did not apply the re-enable either, so the
+      // fingerprint must stay unwritten and the next plain sync must
+      // retry — otherwise the type looks fresh (recent lastSync) and the
+      // re-enabled rows stay missing for up to a week.
+      final panel = _HiddenPanel();
+      final client = _clientWith(panel);
+
+      await client.syncSearchIndex(force: true);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      _setHidden(client, ids: const ['cat3', 'cat4']);
+      await client.syncSearchIndex(force: true);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+
+      _setHidden(client);
+      panel.partialSeries = true;
+      final partial = await client.syncSearchIndex(force: true);
+      expect(partial.skipped[IptvSearchIndex.typeSeries], 'partial-kept');
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+      panel.partialSeries = false;
+
+      final retry = await client.syncSearchIndex();
+      // ignore: avoid_print
+      print('H13: retry skipped=${retry.skipped} rows=${retry.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
+      expect(retry.skipped[IptvSearchIndex.typeSeries], isNull,
+          reason: 'a partial-kept run must leave the type due so the next sync retries it');
+      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
     });
   });
 }

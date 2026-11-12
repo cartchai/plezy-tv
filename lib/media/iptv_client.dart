@@ -980,11 +980,35 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
         }
       }
-      // v1.0.16: the run completed — record the hidden sets as synced,
-      // so the next run only re-fetches when they change again. (An
-      // aborted run never reaches here, so it cannot claim the new
-      // hidden state is synced.)
-      await _writeHiddenFingerprint(hiddenFingerprint);
+      // v1.0.16 (D1 fix): record the hidden sets as synced ONLY when
+      // the run actually applied them. A type skipped 'failed',
+      // 'empty-response', 'oversize' or 'partial-kept' kept its old
+      // rows with a recent lastSync, so writing the fingerprint would
+      // make the next bind skip it as up-to-date and the re-enabled
+      // rows would not come back for up to a week (the 168 h default)
+      // with no indication why. The partial-kept trigger is the one
+      // Matt's panel hits every day (it persistently returns partial
+      // series lists); the transport trigger is the one his flaky
+      // panel hits right now. Deliberately NOT the hasFailure mirror:
+      // 'cold' does not block (a cold type has no rows and no lastSync,
+      // so it stays due and its first fetch filters with the
+      // then-current hidden state), and 'partial-kept' DOES block (see
+      // above). An aborted run never reaches here, so it cannot claim
+      // the new hidden state is synced either.
+      final hiddenStateApplied = !skipped.values.any(
+        (reason) =>
+            reason == 'failed' ||
+            reason == 'empty-response' ||
+            reason == 'oversize' ||
+            reason == 'partial-kept',
+      ) && transportFailed.isEmpty;
+      if (hiddenStateApplied) {
+        await _writeHiddenFingerprint(hiddenFingerprint);
+      } else {
+        appLogger.w(
+          'IPTV: catalog sync did not apply the hidden state (skipped=$skipped transportFailed=$transportFailed) - the hidden fingerprint is not updated, so the next sync retries',
+        );
+      }
       return IptvSearchSyncResult(rows: rows, skipped: skipped, transportFailedTypes: transportFailed, requests: attempts, partialTypes: partialTypes);
     } on _BackgroundPlaybackActive {
       // R4 (D4): playback started mid-run — bail with the partial

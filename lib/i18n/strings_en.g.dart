@@ -3855,7 +3855,7 @@ class Translations$about$en {
 	List<String> get changelog2280 => [
 		'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
 		'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
-		'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — the sync stores less and runs faster',
+		'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — what your phone stores is smaller and there is less to search through',
 		'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
 		'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 	];
@@ -10508,7 +10508,7 @@ extension on Translations {
 			'about.changelog2278.2' => 'Opening a series now takes you to the episode you were watching',
 			'about.changelog2280.0' => 'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
 			'about.changelog2280.1' => 'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
-			'about.changelog2280.2' => 'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — the sync stores less and runs faster',
+			'about.changelog2280.2' => 'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — what your phone stores is smaller and there is less to search through',
 			'about.changelog2280.3' => 'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
 			'about.changelog2280.4' => 'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
