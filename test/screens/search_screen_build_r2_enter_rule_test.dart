@@ -59,12 +59,16 @@ void main() {
   });
 
   // Yield to the real event loop (sqlite + isolate work) until [until]
-  // holds or the budget (40 × 100 ms) expires. The search's disk-read
+  // holds or the budget (60 x 100 ms) expires. The search's disk-read
   // legs are real dart:io — they only complete on the real loop, so a
   // pump-only wait never lets them finish (same pattern as the
   // sync-dialog test).
+  // Budget is 60, not 40: the hidden-category fingerprint prefs await(s)
+  // in the sync path cost one extra real-async turn, so the rows land one
+  // poll later (poll 39 vs 38) and the old 40-iteration budget sat within
+  // 1 poll of the landing time. The extra 20 iterations are margin.
   Future<void> waitFor(WidgetTester tester, bool Function() until) async {
-    for (var i = 0; i < 40 && !until(); i++) {
+    for (var i = 0; i < 60 && !until(); i++) {
       await tester.runAsync(
         () async => await Future<void>.delayed(const Duration(milliseconds: 100)),
       );
