@@ -3852,6 +3852,10 @@ class Translations$about$en {
 		'Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn\'t add one',
 		'Opening a series now takes you to the episode you were watching',
 	];
+	List<String> get changelog2280 => [
+		'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
+		'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10490,6 +10494,8 @@ extension on Translations {
 			'about.changelog2278.0' => 'Movies and episodes you stop partway through now show up in Continue Watching, so you can pick up where you left off instead of starting over',
 			'about.changelog2278.1' => 'Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn\'t add one',
 			'about.changelog2278.2' => 'Opening a series now takes you to the episode you were watching',
+			'about.changelog2280.0' => 'Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest',
+			'about.changelog2280.1' => 'A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can\'t leave the library half-empty',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10603,10 +10609,10 @@ extension on Translations {
 			'explore.badge.adult' => '18+',
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
-			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
-			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
 			_ => null,
 		} ?? switch (path) {
+			'explore.stats.viewersWeek' => ({required Object n}) => '${n} watched this week',
+			'explore.stats.viewersMonth' => ({required Object n}) => '${n} watched this month',
 			'explore.stats.viewersYear' => ({required Object n}) => '${n} watched this year',
 			'explore.stats.viewersAllTime' => ({required Object n}) => '${n} viewers',
 			'explore.stats.planning' => ({required Object n}) => '${n} planning to watch',
@@ -11117,10 +11123,10 @@ extension on Translations {
 			'downloads.backgroundWarning.reasonBackgroundRestricted' => 'PlezTV\'s background usage is restricted. Set its battery or background usage to "Unrestricted".',
 			'downloads.backgroundWarning.reasonStandbyRestricted' => 'Android has put PlezTV in a restricted standby state. Set its battery usage to "Unrestricted".',
 			'downloads.backgroundWarning.reasonDownloadChannelBlocked' => 'Download notifications are turned off, so progress and controls may be unavailable.',
-			'downloads.backgroundWarning.reasonNotificationsDisabled' => 'Notifications are turned off. On Android 13 or newer, they are required for long background downloads.',
-			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.backgroundWarning.reasonNotificationsDisabled' => 'Notifications are turned off. On Android 13 or newer, they are required for long background downloads.',
+			'downloads.backgroundWarning.reasonDataSaver' => 'Data Saver is on, which blocks background downloads on mobile data. Downloads should still run on Wi-Fi.',
 			'downloads.backgroundWarning.reasonOemUnknown' => 'Downloads repeatedly stopped while PlezTV was in the background. Check PlezTV\'s battery or background usage settings.',
 			'downloads.backgroundWarning.openSettings' => 'Open settings',
 			'downloads.backgroundWarning.stillNotWorking' => 'Device-specific help',
@@ -11631,10 +11637,10 @@ extension on Translations {
 			'iptv.backgroundSyncSkippedPlaying' => 'Skipped — a stream was playing',
 			'iptv.backgroundSyncSkippedRunning' => 'Skipped — a sync was already running',
 			'iptv.backgroundSyncSkippedLoad' => 'Skipped — connections could not be read',
-			'iptv.backgroundSyncNoConnections' => 'No IPTV connections',
-			'iptv.catalogSyncNow' => 'Sync catalog now',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.backgroundSyncNoConnections' => 'No IPTV connections',
+			'iptv.catalogSyncNow' => 'Sync catalog now',
 			'iptv.catalogSyncNowDescription' => 'Download all titles for movies, TV and channels now',
 			'iptv.catalogSyncTitle' => 'Refreshing Trex details',
 			'iptv.catalogSyncLive' => 'Live TV',

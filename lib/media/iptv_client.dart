@@ -474,6 +474,13 @@ class IptvClient implements MediaServerClient {
             appLogger.i(
               'IPTV: search index seed skipped $type (${result.skippedReason}) — the sync will fetch it',
             );
+          } else if (result.partial) {
+            // Series fix (v1.0.16): same cold-type rule as the sync —
+            // the partial disk file lands, and the type stays due so the
+            // sync completes it.
+            appLogger.i(
+              'IPTV: search index seed landed $type partial (${result.rowCount} rows, ${result.coveredCategories}/${result.totalCategories} categories) - the sync will complete it',
+            );
           }
         } catch (e) {
           appLogger.w('IPTV: search index seed failed for $type', error: e);
@@ -678,6 +685,9 @@ class IptvClient implements MediaServerClient {
     final rows = <String, int>{};
     final skipped = <String, String>{};
     final transportFailed = <String>{};
+    // Series fix (v1.0.16): types that landed a partial list on a cold
+    // index — searchable now, still due for refetch. Not a failure.
+    final partialTypes = <String>{};
     // R4: panel requests attempted (categories + catalog per type that
     // reaches the fetch). Exact on the background path (no retries); a
     // forced sync's R2.4 retry re-fetches without incrementing.
@@ -829,9 +839,23 @@ class IptvClient implements MediaServerClient {
             onProgress?.call(
               IptvSearchSyncProgress(type: type, phase: 'skipped', reason: result.skippedReason),
             );
+            // Series fix (v1.0.16): the numbers that separate a
+            // panel-truncated list (C1: dropped 0) from a parse-dropped
+            // one (C3: dropped > 0) on the next failure.
+            if (result.skippedReason == 'partial') {
+              appLogger.i(
+                'IPTV: catalog sync skipped $type as partial (covered ${result.coveredCategories}/${result.totalCategories} categories, ${result.droppedRows} rows dropped in parse)',
+              );
+            }
             continue;
           }
           rows[type] = result.rowCount;
+          if (result.partial) {
+            partialTypes.add(type);
+            appLogger.i(
+              'IPTV: catalog sync landed $type partial (${result.rowCount} rows, ${result.coveredCategories}/${result.totalCategories} categories, ${result.droppedRows} rows dropped in parse) - the type stays due for refetch, the disk catalog is untouched',
+            );
+          }
           // Build #23 (startup rule): the sync is the ONLY catalog
           // fetcher, so it also refreshes the disk catalog the browse
           // screens and the warm-ups read from (raw body + category
@@ -840,27 +864,36 @@ class IptvClient implements MediaServerClient {
           // guarded-out sync leaves both the disk file and the index
           // untouched. A disk-write failure never fails the sync — the
           // index is the primary store.
-          try {
-            await _catalogCache.write(connection.id, _diskDatasetFor(type), body);
-            await _catalogCache.write(
-              connection.id,
-              _diskCategoryDatasetFor(type),
-              jsonEncode(categories.map((c) => c.toJson()).toList()),
-            );
-            // fetchedRows is set by the fetch try above; every failure
-            // path (throw, empty, partial, oversize) continues past here.
-            _publishSyncedCatalog(type, fetchedRows, categories);
-          } catch (e) {
-            appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
+          //
+          // Series fix (v1.0.16): a partial land is INDEX-ONLY — it
+          // never overwrites the disk catalog and never publishes into
+          // the memoized catalog (P5a: a 635-row partial list must not
+          // clobber a 46,527-row good disk file). The disk file only
+          // ever gets complete lists; the next sync (the type stays
+          // due) refreshes it when the panel answers in full.
+          if (!result.partial) {
+            try {
+              await _catalogCache.write(connection.id, _diskDatasetFor(type), body);
+              await _catalogCache.write(
+                connection.id,
+                _diskCategoryDatasetFor(type),
+                jsonEncode(categories.map((c) => c.toJson()).toList()),
+              );
+              // fetchedRows is set by the fetch try above; every failure
+              // path (throw, empty, partial, oversize) continues past here.
+              _publishSyncedCatalog(type, fetchedRows, categories);
+            } catch (e) {
+              appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
+            }
           }
-          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'done', rows: result.rowCount));
+          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'done', rows: result.rowCount, partial: result.partial));
         } catch (e) {
           appLogger.w('IPTV: catalog sync write failed for $type', error: e);
           skipped[type] = 'failed';
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
         }
       }
-      return IptvSearchSyncResult(rows: rows, skipped: skipped, transportFailedTypes: transportFailed, requests: attempts);
+      return IptvSearchSyncResult(rows: rows, skipped: skipped, transportFailedTypes: transportFailed, requests: attempts, partialTypes: partialTypes);
     } on _BackgroundPlaybackActive {
       // R4 (D4): playback started mid-run — bail with the partial
       // result; the caller maps it to a retry, and the types already
@@ -1896,6 +1929,39 @@ class IptvClient implements MediaServerClient {
     return result;
   }
 
+  /// Coverage guard for first-load disk writes (series fix, v1.0.16):
+  /// an unfiltered list covering fewer than half the categories is a
+  /// partial panel answer, not the catalog — serve it in memory, never
+  /// persist it as the complete disk file (the P5a poison: a partial
+  /// write bakes the filter into storage, and the seed then refuses the
+  /// file forever). Mirrors the isolate write's 0.5 threshold. The
+  /// [complete] flag alone cannot tell: a non-empty unfiltered answer
+  /// can still be a partial one. Fail-closed: when the category list
+  /// cannot be read, the rows are served but not persisted.
+  Future<bool> _coversEnoughCategories(String type, Iterable<String> rowCategoryIds) async {
+    List<XtreamCategory> categories;
+    try {
+      categories = await switch (type) {
+        IptvSearchIndex.typeLive => _liveCategories(),
+        IptvSearchIndex.typeMovie => _vodCategories(),
+        _ => _seriesCategories(),
+      };
+    } catch (e) {
+      appLogger.w('IPTV: category list unavailable for first-load guard ($type)', error: e);
+      return false;
+    }
+    if (categories.isEmpty) return false;
+    final ids = {for (final c in categories) c.id};
+    final covered = rowCategoryIds.toSet().intersection(ids);
+    final ok = covered.length / categories.length >= 0.5;
+    if (!ok) {
+      appLogger.i(
+        'IPTV: partial unfiltered $type load not persisted (covered ${covered.length}/${categories.length} categories)',
+      );
+    }
+    return ok;
+  }
+
   /// Disk first (build #11); the network load (with its per-category
   /// fallback) runs only on a miss, and the merged rows are written to
   /// disk — so a panel whose unfiltered call returns [] still gets a
@@ -1918,7 +1984,11 @@ class IptvClient implements MediaServerClient {
     }
     final loaded = await _loadVodStreams();
     _vodLoadSource = loaded.complete ? 'network' : 'crawl';
-    if (loaded.complete) {
+    if (loaded.complete &&
+        await _coversEnoughCategories(
+          IptvSearchIndex.typeMovie,
+          loaded.rows.map((r) => r.categoryId).whereType<String>(),
+        )) {
       _writeCatalogRows(IptvCatalogDiskCache.vodDataset, loaded.rows, (r) => r.toJson(), _xtreamApi.lastVodStreamsBody);
     }
     return loaded.rows;
@@ -2020,7 +2090,11 @@ class IptvClient implements MediaServerClient {
     }
     final loaded = await _loadSeries();
     _seriesLoadSource = loaded.complete ? 'network' : 'crawl';
-    if (loaded.complete) {
+    if (loaded.complete &&
+        await _coversEnoughCategories(
+          IptvSearchIndex.typeSeries,
+          loaded.rows.map((r) => r.categoryId).whereType<String>(),
+        )) {
       _writeCatalogRows(IptvCatalogDiskCache.seriesDataset, loaded.rows, (r) => r.toJson(), _xtreamApi.lastSeriesBody);
     }
     return loaded.rows;

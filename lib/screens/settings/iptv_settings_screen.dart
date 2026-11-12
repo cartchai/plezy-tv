@@ -530,7 +530,7 @@ class _CatalogSyncDialogState extends State<_CatalogSyncDialog> {
   };
 
   String _phaseText(IptvSearchSyncProgress p) {
-    if (p.phase == 'done') return '${p.rows}';
+    if (p.phase == 'done') return p.partial ? '${p.rows} · partial' : '${p.rows}';
     if (p.phase == 'skipped') return p.reason ?? '';
     if (p.phase == 'fetching') return '…';
     if (p.phase == 'writing') return '${p.rows}…';

@@ -1595,6 +1595,10 @@
       "Finishing a movie or episode removes it from Continue Watching, and stopping in the first few seconds doesn't add one",
       "Opening a series now takes you to the episode you were watching"
     ],
+    "changelog2280": [
+      "Series search works again: when the provider only sends back part of the series list, the app now saves the shows it did get instead of throwing the whole list away, so you can search what it has while it keeps trying for the rest",
+      "A half-downloaded series list no longer gets saved as if it were the whole catalog, so one bad download can't leave the library half-empty"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"

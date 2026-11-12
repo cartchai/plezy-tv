@@ -456,8 +456,17 @@ void main() {
       await waitFor(() => api.vodCalls >= 2, 'the background refresh to run');
       // ...and rewrote the disk cache with the fresh rows.
       await waitFor(() {
-        final decoded = jsonDecode(file.readAsStringSync()) as List;
-        return decoded.any((row) => (row as Map)['name'] == 'Gamma Movie');
+        // The replacement write truncates the file before writing the
+        // fresh body, so a poll can catch it momentarily empty — retry
+        // instead of failing on the transient state (series fix,
+        // v1.0.16: the first-load guard adds a category fetch before
+        // the write is scheduled, widening that window).
+        try {
+          final decoded = jsonDecode(file.readAsStringSync()) as List;
+          return decoded.any((row) => (row as Map)['name'] == 'Gamma Movie');
+        } on FormatException {
+          return false;
+        }
       }, 'the disk cache to hold the fresh rows');
 
       // A third launch reads the fresh rows without the network.
@@ -482,8 +491,14 @@ void main() {
       final page = await relaunched.fetchLibraryPagedContent(_moviesLibraryId, query: const LibraryQuery());
       expect(page.items.map((i) => i.title), ['Alpha Movie', 'Beta Movie']);
       await waitFor(() {
-        final decoded = jsonDecode(file.readAsStringSync());
-        return decoded is List && decoded.length == 2;
+        // Same transient-empty window as above: the file is truncated
+        // before the fresh body lands — retry instead of failing on it.
+        try {
+          final decoded = jsonDecode(file.readAsStringSync());
+          return decoded is List && decoded.length == 2;
+        } on FormatException {
+          return false;
+        }
       }, 'the corrupted file to be replaced with valid JSON');
     });
 

@@ -955,6 +955,13 @@ void main() {
       expect(find.text('Version 1.0.14-2.25.0'), findsOneWidget);
       final newest14 = tester.getTopLeft(find.text('Version 1.0.14-2.25.0')).dy;
       expect(newest14, lessThan(newest13));
+      // Series fix (v1.0.16): same guard for the new version — it must
+      // be present and sit above 1.0.14. (1.0.15 is build #26's slot,
+      // building in parallel; the guard covers the entry this build
+      // owns.)
+      expect(find.text('Version 1.0.16-2.25.0'), findsOneWidget);
+      final newest16 = tester.getTopLeft(find.text('Version 1.0.16-2.25.0')).dy;
+      expect(newest16, lessThan(newest14));
     });
   });
 }

@@ -73,16 +73,29 @@ Map<String, dynamic>? firstFlexibleMap(Object? value) {
 
 /// Parse every valid JSON object independently, dropping malformed entries
 /// instead of letting one row discard an otherwise usable response.
-List<T> parseFlexibleJsonList<T>(Object? value, T Function(Map<String, dynamic> json) parse) {
+List<T> parseFlexibleJsonList<T>(Object? value, T Function(Map<String, dynamic> json) parse) =>
+    parseFlexibleJsonListCounted(value, parse).rows;
+
+/// Like [parseFlexibleJsonList] but also reports how many entries were
+/// dropped as malformed — the catalog sync diagnostics need the number to
+/// tell a panel-truncated list apart from a parse-dropped one (series,
+/// C1 vs C3: the provider's 46k-row series list contains mistyped fields,
+/// and a silent drop can wipe whole categories).
+({List<T> rows, int dropped}) parseFlexibleJsonListCounted<T>(
+  Object? value,
+  T Function(Map<String, dynamic> json) parse,
+) {
   final result = <T>[];
+  var dropped = 0;
   for (final json in flexibleMapList(value)) {
     try {
       result.add(parse(json));
     } catch (_) {
       // A malformed row does not invalidate its siblings.
+      dropped++;
     }
   }
-  return result;
+  return (rows: result, dropped: dropped);
 }
 
 /// Parse the first JSON object, returning null for missing or malformed data.

@@ -544,6 +544,69 @@ class IptvSearchIndex {
     }
   }
 
+  /// Merge one type's rows into the index (series fix, v1.0.16): rows the
+  /// incoming list contains are upserted (the old row for the same
+  /// stream id is deleted and the new one inserted, so title/category
+  /// updates land); rows it does NOT contain are KEPT, so a partial
+  /// land's rows survive a later full sync and a full sync's rows
+  /// survive a later partial one. Categories merge the same way.
+  ///
+  /// Meta semantics — the two numbers mean different things on purpose:
+  /// * [IptvSearchIndexState.rowCounts] for the type is the rows in the
+  ///   LATEST FETCH (the panel's catalog size — what the cache line and
+  ///   the sync dialog show), while the FTS table may hold MORE rows
+  ///   merged in from earlier partial lands. The probe's P1c pins this:
+  ///   after a partial land (5 rows) and a full sync (46,527 rows) the
+  ///   meta reads 46,527 AND the partial rows are searchable.
+  /// * [IptvSearchIndexState.lastSync] is stamped ONLY by a complete
+  ///   sync ([syncStampMs] != null). A partial land leaves it untouched
+  ///   (0 on a fresh row, which reads back as null — `last_sync_ms` is
+  ///   NOT NULL, so the meta write splits into two statements rather
+  ///   than passing a null stamp) — lastSync == null (or rows == 0) is
+  ///   what marks a type due for refetch, so the next bind/manual sync
+  ///   retries it. A complete sync after a partial land stamps normally.
+  /// The cache-line count is the meta count, so a partial land shows
+  /// its real row count (e.g. 5 series rows) instead of the misleading 0.
+  void upsertType({
+    required String connectionId,
+    required String type,
+    required List<IptvSearchIndexRow> rows,
+    required Map<String, String> categories,
+    required int? syncStampMs,
+  }) {
+    if (_closed) return;
+    _db.execute('BEGIN IMMEDIATE;');
+    try {
+      _upsertRowsLocked(connectionId, type, rows);
+      _upsertCategoriesLocked(connectionId, type, categories);
+      // A null stamp means "not synced": last_sync_ms is NOT NULL, so a
+      // partial land stores 0 on a fresh row (which [lastSync] reads
+      // back as null) and leaves the column untouched on conflict — it
+      // must never clear a stamp a complete sync set.
+      if (syncStampMs != null) {
+        _db.execute(
+          'INSERT INTO iptv_search_meta (connection_id, type, row_count, last_sync_ms) '
+          'VALUES (?, ?, ?, ?) '
+          'ON CONFLICT(connection_id, type) DO UPDATE SET row_count = excluded.row_count, last_sync_ms = excluded.last_sync_ms',
+          [connectionId, type, rows.length, syncStampMs],
+        );
+      } else {
+        _db.execute(
+          'INSERT INTO iptv_search_meta (connection_id, type, row_count, last_sync_ms) '
+          'VALUES (?, ?, ?, 0) '
+          'ON CONFLICT(connection_id, type) DO UPDATE SET row_count = excluded.row_count',
+          [connectionId, type, rows.length],
+        );
+      }
+      _db.execute('COMMIT;');
+    } catch (e) {
+      try {
+        _db.execute('ROLLBACK;');
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
   void _deleteTypeLocked(String connectionId, String type) {
     // The FTS rows are addressed by the item rowids they index: delete
     // them by the same join the search uses, then the items.
@@ -598,6 +661,47 @@ class IptvSearchIndex {
   void _insertCategoriesLocked(String connectionId, String type, Map<String, String> categories) {
     final stmt = _db.prepare(
       'INSERT INTO iptv_search_category (connection_id, type, category_id, name) VALUES (?, ?, ?, ?)',
+    );
+    try {
+      for (final entry in categories.entries) {
+        stmt.execute([connectionId, type, entry.key, entry.value]);
+      }
+    } finally {
+      stmt.close();
+    }
+  }
+
+  /// Delete-then-insert for exactly the incoming stream ids (upsert
+  /// shape): the FTS row is addressed by the item rowid, so replacing
+  /// the item row means its FTS row must go with it — the same join
+  /// [_deleteTypeLocked] uses, scoped to the incoming ids. Rows the
+  /// list does not contain are untouched. Chunked: one DELETE per 500
+  /// ids — a single IN (...) with all ids exceeds SQLite's bound
+  /// variable limit at Trex scale (46,527 series rows in one sync
+  /// throws "too many SQL variables" and fails the whole write).
+  void _upsertRowsLocked(String connectionId, String type, List<IptvSearchIndexRow> rows) {
+    const batchSize = 500;
+    for (var start = 0; start < rows.length; start += batchSize) {
+      final end = (start + batchSize).clamp(0, rows.length);
+      final batch = rows.sublist(start, end);
+      final placeholders = List.filled(batch.length, '?').join(', ');
+      _db.execute(
+        'DELETE FROM iptv_search_fts WHERE rowid IN '
+        '(SELECT rowid FROM iptv_search_item WHERE connection_id = ? AND type = ? AND stream_id IN ($placeholders))',
+        [connectionId, type, ...batch.map((r) => r.streamId)],
+      );
+      _db.execute(
+        'DELETE FROM iptv_search_item WHERE connection_id = ? AND type = ? AND stream_id IN ($placeholders)',
+        [connectionId, type, ...batch.map((r) => r.streamId)],
+      );
+    }
+    _insertRowsLocked(connectionId, type, rows);
+  }
+
+  void _upsertCategoriesLocked(String connectionId, String type, Map<String, String> categories) {
+    final stmt = _db.prepare(
+      'INSERT INTO iptv_search_category (connection_id, type, category_id, name) VALUES (?, ?, ?, ?) '
+      'ON CONFLICT(connection_id, type, category_id) DO UPDATE SET name = excluded.name',
     );
     try {
       for (final entry in categories.entries) {
@@ -812,7 +916,15 @@ class IndexWriteParams {
 
 /// Result of a background-isolate index write.
 class IndexWriteResult {
-  const IndexWriteResult({required this.rowCount, required this.ms, this.skippedReason});
+  const IndexWriteResult({
+    required this.rowCount,
+    required this.ms,
+    this.skippedReason,
+    this.partial = false,
+    this.droppedRows = 0,
+    this.coveredCategories = 0,
+    this.totalCategories = 0,
+  });
 
   final int rowCount;
   final int ms;
@@ -821,16 +933,36 @@ class IndexWriteResult {
   /// list was empty, so the hidden filter and prefix strip would have
   /// nothing to work from) or 'partial' (the rows cover fewer than half
   /// the categories — a crawl-shaped / partial source, never a complete
-  /// list). The caller keeps the old index rows in both cases.
+  /// list — and the index already has rows for the type). The caller
+  /// keeps the old index rows in both cases. 'empty-response' when the
+  /// catalog body parsed to zero rows.
   final String? skippedReason;
+
+  /// True when rows WERE written but the fetched list was partial (it
+  /// covered fewer than half the categories) — a cold-type land only
+  /// (series fix, v1.0.16). The caller must NOT treat this as a failure:
+  /// the type is searchable now, and it stays due for refetch (a partial
+  /// land leaves last_sync_ms untouched — see [upsertType]).
+  final bool partial;
+
+  /// Rows the panel returned that failed to parse (dropped by
+  /// [parseFlexibleJsonListCounted]) — the diagnostic that separates a
+  /// panel-truncated list (C1: dropped == 0) from a parse-dropped one
+  /// (C3: dropped > 0) on the next failure.
+  final int droppedRows;
+
+  /// Categories the fetched rows covered, out of the fetched category
+  /// list — the guard's numbers, for the same diagnostic.
+  final int coveredCategories;
+  final int totalCategories;
 }
 
 /// Background-isolate index write (build #23): parse one type's catalog
-/// + category bodies and atomically replace that type's rows in the
-/// index file. Top-level so [compute] can run it off the UI thread —
-/// a 200k-row trigram build is seconds of synchronous SQLite work.
-/// Returns the written row count. Throws on a corrupt body (the caller
-/// keeps the old index rows — a failed sync never wipes good data).
+/// + category bodies and write that type's rows into the index file.
+/// Top-level so [compute] can run it off the UI thread — a 200k-row
+/// trigram build is seconds of synchronous SQLite work. Returns the
+/// written row count. Throws on a corrupt body (the caller keeps the old
+/// index rows — a failed sync never wipes good data).
 Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) async {
   final started = DateTime.now();
   final db = sqlite3.open(params.dbPath);
@@ -841,52 +973,139 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     // connection; CREATE IF NOT EXISTS is a no-op when the main
     // isolate already created it).
     IptvSearchIndex.createSchema(db);
-    final rows = _rowsFromBody(params.type, params.catalogBody);
+    final parsed = _rowsFromBody(params.type, params.catalogBody);
+    final rows = parsed.rows;
     final categories = <String, String>{
       for (final c in parseFlexibleJsonList(_decodeJson(params.categoryBody), XtreamCategory.fromJson))
         c.id: c.name,
     };
+    int ms() => DateTime.now().difference(started).inMilliseconds;
+    if (rows.isEmpty) {
+      return IndexWriteResult(
+        rowCount: 0,
+        ms: ms(),
+        skippedReason: 'empty-response',
+        droppedRows: parsed.dropped,
+      );
+    }
     // Completeness guard (the seed's P5a): a crawl-shaped / partial
     // source covers only a subset of the categories — indexing it would
     // make search MISS rows the panel has, with no heal to cover the
-    // gap (the index is the authority when warm). Refuse the write and
-    // keep the old index (or stay cold, so the fallback sweep still
-    // heals). A complete list covers (nearly) every category; a few
-    // legitimately empty categories are fine at the 50% threshold.
+    // gap (the index is the authority when warm). A complete list covers
+    // (nearly) every category; a few legitimately empty categories are
+    // fine at the 50% threshold.
     if (categories.isEmpty) {
-      return IndexWriteResult(rowCount: 0, ms: DateTime.now().difference(started).inMilliseconds, skippedReason: 'no-categories');
+      return IndexWriteResult(
+        rowCount: 0,
+        ms: ms(),
+        skippedReason: 'no-categories',
+        droppedRows: parsed.dropped,
+      );
     }
     final covered = {for (final row in rows) row.categoryId}.intersection(categories.keys.toSet());
-    if (covered.length / categories.length < 0.5) {
-      return IndexWriteResult(rowCount: 0, ms: DateTime.now().difference(started).inMilliseconds, skippedReason: 'partial');
-    }
-    // Reuse the main-isolate writer through a short-lived instance so
-    // the transaction shape cannot drift between the two paths.
+    final isPartial = covered.length / categories.length < 0.5;
     final index = IptvSearchIndex._(db, isMemory: false);
-    index.replaceType(
+    if (isPartial) {
+      // COLD-TYPE EXCEPTION (series fix, v1.0.16): when the index has 0
+      // rows for the type, refusing the whole write makes the gap
+      // permanent — every later sync fetches the same partial list and
+      // refuses it again, so search stays empty forever (Matt's phone:
+      // series index 0 rows while live/movies land on the same run).
+      // Land what the panel returned instead, and leave last_sync_ms
+      // untouched so the type stays due and the next sync refetches it.
+      // A WARM index keeps refusing: a partial list must never shrink
+      // good rows (P5a protection — the upsert below never deletes, but
+      // the refuse keeps the warm path's all-or-nothing shape).
+      final existing = _metaRowCount(db, params.connectionId, params.type);
+      if (existing > 0) {
+        return IndexWriteResult(
+          rowCount: 0,
+          ms: ms(),
+          skippedReason: 'partial',
+          droppedRows: parsed.dropped,
+          coveredCategories: covered.length,
+          totalCategories: categories.length,
+        );
+      }
+      index.upsertType(
+        connectionId: params.connectionId,
+        type: params.type,
+        rows: rows,
+        categories: categories,
+        syncStampMs: null, // Partial land: no stamp, stays due for refetch.
+      );
+      return IndexWriteResult(
+        rowCount: rows.length,
+        ms: ms(),
+        partial: true,
+        droppedRows: parsed.dropped,
+        coveredCategories: covered.length,
+        totalCategories: categories.length,
+      );
+    }
+    // Complete list: upsert-merge (series fix, v1.0.16) — rows the fetch
+    // did not return are KEPT, so a partial land's rows survive a later
+    // full sync. See [upsertType] for the meta semantics.
+    index.upsertType(
       connectionId: params.connectionId,
       type: params.type,
       rows: rows,
       categories: categories,
       syncStampMs: params.syncStampMs,
     );
-    return IndexWriteResult(rowCount: rows.length, ms: DateTime.now().difference(started).inMilliseconds);
+    return IndexWriteResult(
+      rowCount: rows.length,
+      ms: ms(),
+      droppedRows: parsed.dropped,
+      coveredCategories: covered.length,
+      totalCategories: categories.length,
+    );
   } finally {
     db.close();
   }
 }
 
-List<IptvSearchIndexRow> _rowsFromBody(String type, String body) {
+/// Meta row_count for one type (0 when never synced). Read inside the
+/// isolate so the cold/warm decision sees the same rows the write will
+/// touch — the main isolate's cached counts can lag a just-finished
+/// background write.
+int _metaRowCount(Database db, String connectionId, String type) {
+  try {
+    final found = db.select(
+      'SELECT row_count FROM iptv_search_meta WHERE connection_id = ? AND type = ?',
+      [connectionId, type],
+    );
+    if (found.isEmpty) return 0;
+    return found.first['row_count'] as int;
+  } catch (_) {
+    // A meta read can only fail on a corrupt DB, in which case the write
+    // below fails too and the caller keeps the old rows — treat as cold.
+    return 0;
+  }
+}
+
+({List<IptvSearchIndexRow> rows, int dropped}) _rowsFromBody(String type, String body) {
   final decoded = _decodeJson(body);
-  return switch (type) {
-    IptvSearchIndex.typeLive => parseFlexibleJsonList(decoded, XtreamLiveStream.fromJson)
-        .map(IptvSearchIndexRow.fromLive)
-        .toList(growable: false),
-    IptvSearchIndex.typeMovie => parseFlexibleJsonList(decoded, XtreamVodStream.fromJson)
-        .map(IptvSearchIndexRow.fromMovie)
-        .toList(growable: false),
-    _ => parseFlexibleJsonList(decoded, XtreamSeries.fromJson).map(IptvSearchIndexRow.fromSeries).toList(growable: false),
-  };
+  switch (type) {
+    case IptvSearchIndex.typeLive:
+      final parsed = parseFlexibleJsonListCounted(decoded, XtreamLiveStream.fromJson);
+      return (
+        rows: parsed.rows.map(IptvSearchIndexRow.fromLive).toList(growable: false),
+        dropped: parsed.dropped,
+      );
+    case IptvSearchIndex.typeMovie:
+      final parsed = parseFlexibleJsonListCounted(decoded, XtreamVodStream.fromJson);
+      return (
+        rows: parsed.rows.map(IptvSearchIndexRow.fromMovie).toList(growable: false),
+        dropped: parsed.dropped,
+      );
+    default:
+      final parsed = parseFlexibleJsonListCounted(decoded, XtreamSeries.fromJson);
+      return (
+        rows: parsed.rows.map(IptvSearchIndexRow.fromSeries).toList(growable: false),
+        dropped: parsed.dropped,
+      );
+  }
 }
 
 dynamic _decodeJson(String body) {
@@ -902,7 +1121,7 @@ dynamic _decodeJson(String body) {
 /// finished type landed (0 when it was skipped — see
 /// [IptvSearchSyncResult.skipped]).
 class IptvSearchSyncProgress {
-  const IptvSearchSyncProgress({required this.type, required this.phase, this.rows = 0, this.reason});
+  const IptvSearchSyncProgress({required this.type, required this.phase, this.rows = 0, this.reason, this.partial = false});
 
   /// 'live' | 'movie' | 'series'.
   final String type;
@@ -914,6 +1133,12 @@ class IptvSearchSyncProgress {
   /// Skip reason when [phase] == 'skipped': 'up-to-date' | 'empty-response'
   /// | 'partial' | 'oversize' | 'failed'.
   final String? reason;
+
+  /// True when [phase] == 'done' but the landed list was partial (it
+  /// covered fewer than half the categories) — a cold-type land that
+  /// stays due for refetch (series fix, v1.0.16). The dialog shows the
+  /// count with a partial marker instead of a plain count.
+  final bool partial;
 }
 
 /// Outcome of one [IptvClient.syncSearchIndex] run, per type.
@@ -924,6 +1149,7 @@ class IptvSearchSyncResult {
     this.transportFailedTypes = const {},
     this.playbackAborted = false,
     this.requests = 0,
+    this.partialTypes = const {},
   });
 
   /// Rows written per type (0 when the type was skipped).
@@ -952,6 +1178,13 @@ class IptvSearchSyncResult {
   /// transport retry (R2.4) re-fetches without incrementing, so it reads
   /// as a lower bound there. Only the background record consumes it.
   final int requests;
+
+  /// Types that landed a partial list (cold-type land, series fix,
+  /// v1.0.16): the rows are searchable now, but the type stays due and
+  /// the next sync refetches it. Not a failure — the dialog shows the
+  /// count with a partial marker, and the background record counts it
+  /// as synced (a partial land still beats no rows at all).
+  final Set<String> partialTypes;
 
   int get totalRows => rows.values.fold(0, (a, b) => a + b);
 }
