@@ -3887,6 +3887,10 @@ class Translations$about$en {
 		'Show all now turns every group back on, including ones too small to have their own switch',
 		'When a search comes up empty because a group is turned off, it now names the group',
 	];
+	List<String> get changelog2284 => [
+		'The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up',
+		'Channels with no guide data no longer show one big block for the whole guide window',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -4243,9 +4247,6 @@ class Translations$liveTv$en {
 
 	/// en: 'No information available'
 	String get noInformationAvailable => 'No information available';
-
-	/// en: 'No guide data for this channel'
-	String get noGuideDataForChannel => 'No guide data for this channel';
 
 	/// en: 'Live stream failed'
 	String get liveStreamFailed => 'Live stream failed';
@@ -10557,6 +10558,8 @@ extension on Translations {
 			'about.changelog2283.1' => 'The groups screen now counts groups instead of categories, and each row says its count covers Live TV, Movies and TV Series',
 			'about.changelog2283.2' => 'Show all now turns every group back on, including ones too small to have their own switch',
 			'about.changelog2283.3' => 'When a search comes up empty because a group is turned off, it now names the group',
+			'about.changelog2284.0' => 'The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up',
+			'about.changelog2284.1' => 'Channels with no guide data no longer show one big block for the whole guide window',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10653,10 +10656,10 @@ extension on Translations {
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
-			'explore.badge.available' => 'Available',
-			'explore.badge.partiallyAvailable' => 'Partly available',
 			_ => null,
 		} ?? switch (path) {
+			'explore.badge.available' => 'Available',
+			'explore.badge.partiallyAvailable' => 'Partly available',
 			'explore.badge.availableIn4k' => '4K available',
 			'explore.badge.requested' => 'Requested',
 			'explore.badge.pendingApproval' => 'Pending approval',
@@ -10767,7 +10770,6 @@ extension on Translations {
 			'liveTv.serverNotConnected' => 'Live TV server is not connected.',
 			'liveTv.noPrograms' => 'No program data available',
 			'liveTv.noInformationAvailable' => 'No information available',
-			'liveTv.noGuideDataForChannel' => 'No guide data for this channel',
 			'liveTv.liveStreamFailed' => 'Live stream failed',
 			'liveTv.unknownProgram' => 'Unknown Program',
 			'liveTv.unknownHub' => 'Unknown',
@@ -11168,9 +11170,9 @@ extension on Translations {
 			'downloads.editEpisodeCount' => 'Episode count',
 			'downloads.editSyncFilter' => 'Sync filter',
 			'downloads.syncAllItems' => 'Syncing all items',
-			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
 			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
 			'downloads.syncRuleAvailable' => 'Available',
 			'downloads.syncRuleOffline' => 'Offline',
@@ -11682,9 +11684,9 @@ extension on Translations {
 			'iptv.connections' => 'Connections',
 			'iptv.addConnection' => 'Add IPTV connection',
 			'iptv.addConnectionDescription' => 'Add an M3U playlist or Xtream Codes account',
-			'iptv.noConnections' => 'No IPTV connections yet',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.noConnections' => 'No IPTV connections yet',
 			'iptv.noConnectionsHint' => 'Add an M3U playlist or Xtream Codes account to watch live TV.',
 			'iptv.categoriesOff' => ({required Object count}) => '${count} categories off',
 			'iptv.categoriesAllOn' => 'All categories on',

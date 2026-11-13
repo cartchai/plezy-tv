@@ -1626,6 +1626,10 @@
       "Show all now turns every group back on, including ones too small to have their own switch",
       "When a search comes up empty because a group is turned off, it now names the group"
     ],
+    "changelog2284": [
+      "The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up",
+      "Channels with no guide data no longer show one big block for the whole guide window"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
@@ -1887,7 +1891,6 @@
     "serverNotConnected": "Live TV server is not connected.",
     "noPrograms": "No program data available",
     "noInformationAvailable": "No information available",
-    "noGuideDataForChannel": "No guide data for this channel",
     "liveStreamFailed": "Live stream failed",
     "unknownProgram": "Unknown Program",
     "unknownHub": "Unknown",

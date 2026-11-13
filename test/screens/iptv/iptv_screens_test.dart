@@ -983,6 +983,11 @@ void main() {
       expect(find.text('Version 1.1.0-2.25.0'), findsOneWidget);
       final newest110 = tester.getTopLeft(find.text('Version 1.1.0-2.25.0')).dy;
       expect(newest110, lessThan(newest18));
+      // Hour-blocks fix (v1.1.1): same guard for the new version — it
+      // must be present and sit above 1.1.0.
+      expect(find.text('Version 1.1.1-2.25.0'), findsOneWidget);
+      final newest111 = tester.getTopLeft(find.text('Version 1.1.1-2.25.0')).dy;
+      expect(newest111, lessThan(newest110));
     });
   });
 }

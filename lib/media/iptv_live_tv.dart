@@ -1257,7 +1257,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   ///
   /// This is the "Clear guide" behaviour: [fetchEpgForChannel] stays empty
   /// until something refreshes ([refreshEpgCache] or the start-up refresh),
-  /// so the guide shows "No guide data for this channel" blocks.
+  /// so the guide shows "No information available" hour blocks.
   Future<void> clearEpgCache() async {
     _epgCache.clear();
     _xmltvCache.clear();

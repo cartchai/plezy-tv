@@ -1016,17 +1016,6 @@ class GuideTabState extends State<GuideTab>
     final gridEndEpoch = _gridEnd.millisecondsSinceEpoch ~/ 1000;
     if (gridEndEpoch <= gridStartEpoch) return real;
 
-    // A channel whose fetch finished with no programmes at all — neither
-    // the feed nor get_short_epg had anything — says so once, for the
-    // whole window (build #17, §10), instead of an hour of "No
-    // information available" blocks, which implied the app failed to load
-    // rather than the source having no data. (A channel whose fetch
-    // FAILED never reaches this list: the row builder short-circuits it
-    // to the retry row first.)
-    if (real.isEmpty) {
-      return [_noGuideDataPlaceholder(channel, gridStartEpoch, gridEndEpoch)];
-    }
-
     // Covered intervals, clipped to the window and merged.
     final covered = <(int, int)>[];
     for (final program in real) {
@@ -1079,23 +1068,6 @@ class GuideTabState extends State<GuideTab>
       if (cursor >= end) return;
     }
     if (cursor < end) out.add(_hourPlaceholder(channel, cursor, end));
-  }
-
-  /// One "No guide data for this channel" block, spanning the whole
-  /// window (build #17, §10). Same shape as [_hourPlaceholder] — a real
-  /// program entry marked [LiveTvProgram.isPlaceholder], so the grid
-  /// renders it muted and the sheet offers only the slot actions.
-  LiveTvProgram _noGuideDataPlaceholder(LiveTvChannel channel, int beginsAt, int endsAt) {
-    return LiveTvProgram(
-      key: 'no-guide-data:${channel.key}:$beginsAt',
-      title: t.liveTv.noGuideDataForChannel,
-      beginsAt: beginsAt,
-      endsAt: endsAt,
-      channelIdentifier: channel.key,
-      serverId: channel.serverId,
-      serverName: channel.serverName,
-      isPlaceholder: true,
-    );
   }
 
   /// One "No information available" block. It is a real program entry (same
