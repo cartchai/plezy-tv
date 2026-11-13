@@ -3859,6 +3859,10 @@ class Translations$about$en {
 		'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
 		'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 	];
+	List<String> get changelog2281 => [
+		'Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away',
+		'Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10511,6 +10515,8 @@ extension on Translations {
 			'about.changelog2280.2' => 'Categories you turn off are now skipped when the catalog is saved, so they take up no space and never show up in search — what your phone stores is smaller and there is less to search through',
 			'about.changelog2280.3' => 'Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there',
 			'about.changelog2280.4' => 'Refreshing the catalog no longer says it failed when it kept the shows it already had',
+			'about.changelog2281.0' => 'Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away',
+			'about.changelog2281.1' => 'Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10619,10 +10625,10 @@ extension on Translations {
 			'explore.badge.seasonsAvailable' => ({required Object available, required Object total}) => '${available}/${total} seasons',
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
-			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
-			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
 			_ => null,
 		} ?? switch (path) {
+			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
+			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
 			'explore.badge.adult' => '18+',
 			'explore.stats.listed' => ({required Object n}) => '${n} listed',
 			'explore.stats.viewersDay' => ({required Object n}) => '${n} watched today',
@@ -11133,10 +11139,10 @@ extension on Translations {
 			'downloads.syncRuleListCreated' => 'Sync rule created',
 			'downloads.backgroundWarning.bannerBlocked' => 'Downloads will stop when you leave the app',
 			'downloads.backgroundWarning.bannerDegraded' => 'Background downloads may be limited',
-			'downloads.backgroundWarning.bannerAction' => 'Details',
-			'downloads.backgroundWarning.sheetTitle' => 'Background downloads are blocked',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.backgroundWarning.bannerAction' => 'Details',
+			'downloads.backgroundWarning.sheetTitle' => 'Background downloads are blocked',
 			'downloads.backgroundWarning.sheetTitleDegraded' => 'Background downloads may be limited',
 			'downloads.backgroundWarning.sheetIntro' => 'Android is preventing PlezTV from downloading reliably in the background.',
 			'downloads.backgroundWarning.sheetIntroDegraded' => 'Your device is limiting when PlezTV can download in the background.',
@@ -11647,10 +11653,10 @@ extension on Translations {
 			'iptv.catalogSyncInterval' => 'Catalog sync interval',
 			'iptv.catalogSyncIntervalDescription' => 'How often the catalog (channels, movies and series) re-downloads for search',
 			'iptv.catalogSyncWeekly' => 'Once a week',
-			'iptv.backgroundSync' => 'Background sync',
-			'iptv.backgroundSyncNever' => 'Never run',
 			_ => null,
 		} ?? switch (path) {
+			'iptv.backgroundSync' => 'Background sync',
+			'iptv.backgroundSyncNever' => 'Never run',
 			'iptv.backgroundSyncLastRun' => ({required Object date}) => 'Last run ${date}',
 			'iptv.backgroundSyncAllSynced' => 'All catalogs synced',
 			'iptv.backgroundSyncPartial' => ({required Object synced, required Object failed}) => '${synced} synced · ${failed} failed',

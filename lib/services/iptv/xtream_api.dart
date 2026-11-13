@@ -519,6 +519,9 @@ dynamic _decodeCatalogJson(String body) {
 /// 46k-row series list contains mistyped fields (e.g. a numeric `cover`),
 /// and the old `.map(X.fromJson)` parse threw the entire list away — Movies
 /// loaded while Series showed nothing. Each row parses independently now.
+/// The string reads coerce mistyped values (flexibleString) instead of
+/// casting, so one bad field can't drop a row either: backdrop_path
+/// arrives as an array, and a bare cast dropped ~95% of the series list.
 List<XtreamLiveStream> _parseLiveStreams(String body) =>
     parseFlexibleJsonList(_decodeCatalogJson(body), XtreamLiveStream.fromJson);
 
@@ -577,9 +580,9 @@ class XtreamLiveStream {
   factory XtreamLiveStream.fromJson(Map<String, dynamic> json) {
     return XtreamLiveStream(
       streamId: flexibleInt(json['stream_id']) ?? 0,
-      name: (json['name'] as String?) ?? '',
-      streamIcon: json['stream_icon'] as String?,
-      epgChannelId: json['epg_channel_id'] as String?,
+      name: flexibleString(json['name']) ?? '',
+      streamIcon: flexibleString(json['stream_icon']),
+      epgChannelId: flexibleString(json['epg_channel_id']),
       categoryId: json['category_id']?.toString(),
       tvArchive: flexibleInt(json['tv_archive']) == 1,
       tvArchiveDuration: archiveDurationSeconds(flexibleInt(json['tv_archive_duration']) ?? 0),
@@ -625,12 +628,12 @@ class XtreamVodStream {
   factory XtreamVodStream.fromJson(Map<String, dynamic> json) {
     return XtreamVodStream(
       streamId: flexibleInt(json['stream_id']) ?? 0,
-      name: (json['name'] as String?) ?? '',
-      streamIcon: json['stream_icon'] as String?,
-      cover: json['cover'] as String?,
+      name: flexibleString(json['name']) ?? '',
+      streamIcon: flexibleString(json['stream_icon']),
+      cover: flexibleString(json['cover']),
       rating: flexibleDouble(json['rating']),
       categoryId: json['category_id']?.toString(),
-      containerExtension: (json['container_extension'] as String?) ?? 'mp4',
+      containerExtension: flexibleString(json['container_extension']) ?? 'mp4',
       added: flexibleInt(json['added']),
     );
   }
@@ -682,17 +685,17 @@ class XtreamSeries {
   factory XtreamSeries.fromJson(Map<String, dynamic> json) {
     return XtreamSeries(
       seriesId: flexibleInt(json['series_id']) ?? 0,
-      name: (json['name'] as String?) ?? '',
-      cover: json['cover'] as String?,
-      plot: json['plot'] as String?,
-      cast: json['cast'] as String?,
-      director: json['director'] as String?,
-      genre: json['genre'] as String?,
-      releaseDate: json['releaseDate'] as String?,
+      name: flexibleString(json['name']) ?? '',
+      cover: flexibleString(json['cover']),
+      plot: flexibleString(json['plot']),
+      cast: flexibleString(json['cast']),
+      director: flexibleString(json['director']),
+      genre: flexibleString(json['genre']),
+      releaseDate: flexibleString(json['releaseDate']),
       rating: flexibleDouble(json['rating']),
       categoryId: json['category_id']?.toString(),
-      backdropPath: json['backdrop_path'] as String?,
-      youtubeTrailer: json['youtube_trailer'] as String?,
+      backdropPath: flexibleString(json['backdrop_path']),
+      youtubeTrailer: flexibleString(json['youtube_trailer']),
       episodeRunTime: flexibleInt(json['episode_run_time']),
     );
   }

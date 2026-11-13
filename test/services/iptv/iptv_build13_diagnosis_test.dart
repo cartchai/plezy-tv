@@ -6,7 +6,8 @@
 // scale and on his shape of connection — cold start, real-scale catalogs
 // (150 visible categories per section here, standing in for his ~270
 // series / ~500 live / ~300 VOD categories), LTE-like per-call latency,
-// and his filter state (161 of 171 category initials hidden, EN shown).
+// and his filter state (32 hidden initials, 0 hidden ids, EN shown,
+// 2026-11-12 phone state).
 // A test that FAILS here fails the way his phone fails; a fix that makes
 // these pass has proven the drop point instead of guessing it.
 //

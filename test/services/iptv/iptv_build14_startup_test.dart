@@ -9,8 +9,8 @@
 // These tests drive the REAL startup load with BOTH servers present:
 // a dummy Plex server (HOME PC: Movies, TV Shows, Music, global hubs,
 // Continue Watching) registered first, then Trex bound through the real
-// addIptvConnection path with Matt's migrated v2.25.8 state (161 hidden
-// initials, v2.25.8-format disk cache). The load under test is exactly
+// addIptvConnection path with Matt's migrated v2.25.8 state (32 hidden
+// initials, 0 hidden ids, v2.25.8-format disk cache). The load under test is exactly
 // what the Discover (Home) tab — the default first tab — runs on mount:
 // LibrariesProvider.loadLibraries() + DiscoverProvider.load() (On Deck +
 // hubs from all servers, in parallel).
@@ -335,8 +335,9 @@ class _FakePlexClient implements MediaServerClient {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// Matt's 161 hidden initials: region codes his provider repeats, EN
-/// deliberately NOT in the list (he left EN on).
+/// Matt's 32 hidden initials (2026-11-12 phone state: 32 groups off, 0
+/// hidden ids): region codes his provider repeats, EN deliberately NOT
+/// in the list (he left EN on).
 List<String> _mattHiddenInitials() {
   const base = [
     'AR', 'FR', 'DE', 'PL', 'ES', 'IN', 'NL', 'SE', 'EX', 'AL', 'PT', 'IT',
@@ -349,14 +350,10 @@ List<String> _mattHiddenInitials() {
     'LV', 'LT', 'IE', 'GB', 'UK', 'US', 'PR', 'DO', 'CU', 'HT', 'JM', 'TT',
     'BB', 'GY', 'SR', 'BO', 'PE', 'CL', 'AR', 'UY', 'PY', 'EC', 'CO', 'VE',
   ];
-  final out = <String>{...base};
-  const tags = ['NF', 'VIP', 'HD', 'FHD', '4K', '3D', 'PPV', 'XXX', 'DOC', 'KIDS', 'NEWS', 'SPORT', 'MOV', 'SER'];
-  var i = 0;
-  while (out.length < 161) {
-    out.add('${tags[i % tags.length]}${i ~/ tags.length + 2}');
-    i++;
-  }
-  return out.toList();
+  // First 32 unique region codes — the 2026-11-12 phone state. (The
+  // 2026-11-07 fixture topped this up to 161 with provider-style tags;
+  // the phone now has 32 groups off.)
+  return <String>{...base}.take(32).toList();
 }
 
 /// Trex-shaped fake panel reproducing MATT'S panel behaviour:

@@ -39,6 +39,28 @@ double? flexibleDouble(Object? v) => switch (v) {
   _ => null,
 };
 
+/// Coerce a mistyped JSON value to a nullable String without throwing.
+///
+/// The provider's catalogs return string fields in the wrong shape: a
+/// number, or an array where the docs say a string (series
+/// `backdrop_path` is an ARRAY of backdrop URLs). A bare `as String?`
+/// cast throws and the whole row is dropped from the catalog, so one bad
+/// field can wipe a category. `null` stays `null`; a String passes
+/// through; a List contributes its first non-empty String element, else
+/// `null`; anything else is stringified. Used by the Xtream `fromJson`
+/// readers so a mistyped field can never discard a row.
+String? flexibleString(Object? v) {
+  if (v == null) return null;
+  if (v is String) return v;
+  if (v is List) {
+    for (final e in v) {
+      if (e is String && e.isNotEmpty) return e;
+    }
+    return null;
+  }
+  return v.toString();
+}
+
 /// `@JsonKey(readValue:)` adapter — coerces the named field to a String via
 /// `toString()` before the generated cast. Use for required `String` fields
 /// that Plex may return as int in some endpoints.

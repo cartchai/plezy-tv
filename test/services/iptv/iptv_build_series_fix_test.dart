@@ -285,10 +285,12 @@ void main() {
     test('F3: isolate writer counts drops, merges, and refuses once warm', () async {
       final dbPath = '${tempDir.path}/series_fix.db';
       final catBody = jsonEncode(_cats('cat', 237).map((c) => c.toJson()).toList());
-      // 3 good rows in cat1 + 2 malformed rows: a numeric name and a
-      // numeric cover both throw in XtreamSeries.fromJson (the `as
-      // String?` casts), so they must be counted as dropped, not
-      // silently swallowed.
+      // 3 good rows in cat1 + 2 mistyped rows: a numeric name and a
+      // numeric cover. v1.0.17 coerces them (flexibleString) instead of
+      // throwing, so they land too — 5 rows, 0 dropped. (Before 1.0.17
+      // the `as String?` casts threw and both counted as dropped; the
+      // counting itself is now pinned by the mechanism test in
+      // iptv_series_parse_drop_test.dart.)
       final partialBody = jsonEncode([
         {'series_id': 7001, 'name': 'NF - Alice', 'category_id': 'cat1'},
         {'series_id': 7002, 'name': 'NF - Babel', 'category_id': 'cat1'},
@@ -308,14 +310,14 @@ void main() {
         ),
       );
       expect(landed.partial, isTrue);
-      expect(landed.rowCount, 3);
-      expect(landed.droppedRows, 2);
+      expect(landed.rowCount, 5);
+      expect(landed.droppedRows, 0);
       expect(landed.coveredCategories, 1);
       expect(landed.totalCategories, 237);
       expect(landed.skippedReason, isNull);
 
-      // Meta says 3 rows, no stamp (partial land stays due); the FTS
-      // table holds exactly the 3 landed rows.
+      // Meta says 5 rows, no stamp (partial land stays due); the FTS
+      // table holds exactly the 5 landed rows.
       var db = sqlite3.open(dbPath);
       try {
         expect(
@@ -325,7 +327,7 @@ void main() {
                 [_connId, IptvSearchIndex.typeSeries],
               )
               .first['n'],
-          3,
+          5,
         );
         final meta = db
             .select(
@@ -333,7 +335,7 @@ void main() {
               [_connId, IptvSearchIndex.typeSeries],
             )
             .first;
-        expect(meta['row_count'], 3);
+        expect(meta['row_count'], 5);
         expect(meta['last_sync_ms'], 0,
             reason: 'a partial land stores 0 (reads back as null), never a stamp');
       } finally {
@@ -354,10 +356,10 @@ void main() {
       // v1.0.16 dialog fix (35.6): same rename at the isolate level.
       expect(refused.skippedReason, 'partial-kept');
       expect(refused.rowCount, 0);
-      expect(refused.droppedRows, 2);
+      expect(refused.droppedRows, 0);
 
       // A full fetch merges: 238 incoming rows (237 fresh + 'NF - Alice'
-      // updated in place) over the 3 landed rows = 240 FTS rows, meta
+      // updated in place) over the 5 landed rows = 242 FTS rows, meta
       // 238 (the latest fetch), stamp set.
       final fullRows = [
         {'series_id': 7001, 'name': 'NF - Alice (Updated)', 'category_id': 'cat1'},
@@ -385,8 +387,8 @@ void main() {
                 [_connId, IptvSearchIndex.typeSeries],
               )
               .first['n'],
-          240,
-          reason: 'the 3 partial rows survive the full sync (merge, not wipe)',
+          242,
+          reason: 'the 5 partial rows survive the full sync (merge, not wipe)',
         );
         final meta = db
             .select(

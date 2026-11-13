@@ -9,7 +9,7 @@
 // is worthless here.
 //
 // His stored state, as v2.25.8 leaves it:
-// - Trex Xtream connection, 161 disabled initials in the legacy
+// - Trex Xtream connection, 32 disabled initials in the legacy
 //   name-based stored set (EN shown), categories all ON by id.
 // - Disk cache files written by v2.25.8 (build #11 format: re-encoded
 //   rows, `jsonEncode(rows.map(toJson).toList())`), NOT the v2.25.9
@@ -63,7 +63,8 @@ void main() {
       'pa'
       'ss';
 
-  // Matt's filter state: 161 initials hidden, EN shown. Generated from
+  // Matt's filter state: 32 initials hidden, EN shown (2026-11-12
+  // phone state; 161 was the 2026-11-07 count). Generated from
   // the region codes his provider uses; the exact strings don't matter,
   // the SHAPE does — a large legacy set that hides most categories.
   final List<String> hiddenInitials = _mattHiddenInitials();
@@ -380,8 +381,9 @@ void main() {
   });
 }
 
-/// Matt's 161 hidden initials: region codes his provider repeats, EN
-/// deliberately NOT in the list (he left EN on).
+/// Matt's 32 hidden initials (2026-11-12 phone state: 32 groups off, 0
+/// hidden ids): region codes his provider repeats, EN deliberately NOT
+/// in the list (he left EN on).
 List<String> _mattHiddenInitials() {
   const base = [
     'AR',
@@ -493,15 +495,10 @@ List<String> _mattHiddenInitials() {
     'CO',
     'VE',
   ];
-  final out = <String>{...base};
-  // Top the list up to 161 with provider-style tags (NF, 24/7, VIP, ...).
-  const tags = ['NF', 'VIP', 'HD', 'FHD', '4K', '3D', 'PPV', 'XXX', 'DOC', 'KIDS', 'NEWS', 'SPORT', 'MOV', 'SER'];
-  var i = 0;
-  while (out.length < 161) {
-    out.add('${tags[i % tags.length]}${i ~/ tags.length + 2}');
-    i++;
-  }
-  return out.toList();
+  // First 32 unique region codes — the 2026-11-12 phone state. (The
+  // 2026-11-07 fixture topped this up to 161 with provider-style tags;
+  // the phone now has 32 groups off.)
+  return <String>{...base}.take(32).toList();
 }
 
 /// Trex-shaped fake panel reproducing MATT'S panel behaviour:

@@ -962,6 +962,11 @@ void main() {
       expect(find.text('Version 1.0.16-2.25.0'), findsOneWidget);
       final newest16 = tester.getTopLeft(find.text('Version 1.0.16-2.25.0')).dy;
       expect(newest16, lessThan(newest14));
+      // Series parse fix (v1.0.17): same guard for the new version — it
+      // must be present and sit above 1.0.16.
+      expect(find.text('Version 1.0.17-2.25.0'), findsOneWidget);
+      final newest17 = tester.getTopLeft(find.text('Version 1.0.17-2.25.0')).dy;
+      expect(newest17, lessThan(newest16));
     });
   });
 }

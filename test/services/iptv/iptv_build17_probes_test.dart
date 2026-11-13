@@ -273,10 +273,11 @@ void main() {
     test('C2: warm catalog, EN hidden — the filter hides the show BY DESIGN', () async {
       // Control: hiding EN must hide EN shows from search. If Matt's
       // phone behaves like this, search is working as designed and the
-      // show's category initial is in his hidden 161 — the fix is UX
+      // show's category initial is in his hidden 32 (2026-11-12 phone
+      // state: 32 groups off, 0 hidden ids) — the fix is UX
       // (tell him which filter hides it), not search. EN was ON in his
-      // 2026-11-06 screenshot, but its state after the build #10
-      // redesign + build #15 migration is UNVERIFIED on his phone.
+      // 2026-11-06 screenshot and is not among the 32 hidden initials
+      // in the 2026-11-12 phone state.
       final client = await clientWith(
         api: _GotFakeApi(unfilteredSeriesDelay: Duration.zero),
         hiddenInitials: const ['EN'],

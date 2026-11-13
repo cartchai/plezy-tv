@@ -1602,6 +1602,10 @@
       "Long-pressing a channel in the guide now shows its category, and you can hide or show the whole category from there",
       "Refreshing the catalog no longer says it failed when it kept the shows it already had"
     ],
+    "changelog2281": [
+      "Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away",
+      "Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
