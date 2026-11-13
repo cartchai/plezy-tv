@@ -13,7 +13,9 @@
 // - a corrupted cache file falls back to the network and is replaced
 // - two connections never share each other's cache
 // - the disabled-category / category-initial filters still hide items
-//   read from disk (filtering is at read time, never baked into storage)
+//   read from disk — 1.2.4: hidden rows are pruned at write time, so a
+//   fresh disk file holds visible rows only; the read-time filter still
+//   hides rows from a legacy full disk file (and from the memo)
 // - M3U playlists are cached the same way (images/posters are NOT cached
 //   — Matt: images don't have to be cached — and nothing here touches them)
 //

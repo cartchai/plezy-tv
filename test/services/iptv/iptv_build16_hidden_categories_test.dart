@@ -1,20 +1,23 @@
-// HIDDEN CATEGORIES, READ-TIME ONLY — PlezTV v1.1.0 (Option B).
+// HIDDEN CATEGORIES, PRUNED AT WRITE TIME — PlezTV v1.2.4 (FORK §45).
 //
-// Reversal of the v1.0.16 write-time skip (Matt, 2026-11-12: "make it so
-// data from turned off categories doesn't download or cache" — the skip
-// made un-hiding unable to bring rows back, because they were never
-// written: Matt's phone could not find GoT/Friends with EN/CA/US-only
-// until a sync). Data from turned-off (hidden) categories now LANDS in
-// the search index, the seed, and the disk catalog — all three types —
-// and is filtered ONLY at read time (browse, categories, guide,
-// search). The hidden state is the country/region filter: per-category
-// ids plus letter-group initials, resolved by the existing
-// `IptvClient._isHiddenCategory` rule (id OR initial).
+// Matt's prune decision (2026-11-13, supersedes the v1.1.0 Option B
+// "disk stays full" split this file pinned): rows in hidden (turned-off)
+// categories are PRUNED from the search index, the seed, and the disk
+// catalog at write time — all three types. The wire still downloads
+// the full lists; only the stored catalog is visible-only. The hidden
+// state is the country/region filter: per-category ids plus
+// letter-group initials, resolved by `IptvClient._isHiddenCategory`
+// (id OR initial) at read time AND by `VisibleCatalogFilter` at write
+// time. The trade-off Matt accepted: un-hiding a category does NOT
+// bring its rows back until a re-sync (the un-hide notice + Refresh
+// action guards that — see iptv_catalog_memory_test.dart T2/T2b).
+// The search diagnostics' hiddenMatches/hiddenInitials now read 0 /
+// empty after a prune: a pruned row is not stored, so it can never
+// match a search to be counted as hidden.
 //
-// The v1.0.16 suite pinned the skip (rows 12 -> 8, disk visible-only,
-// purge on hide, fingerprint-forced re-fetch). Every test below is
-// rewritten to the Option B expectation; the test numbers H1-H13 are
-// kept so the history stays readable.
+// The v1.1.0 suite pinned Option B (rows 12, disk full, no purge).
+// Every test below is rewritten to the 1.2.4 expectation; the test
+// numbers H1-H13 are kept so the history stays readable.
 
 import 'dart:async';
 import 'dart:convert';
@@ -200,49 +203,53 @@ void main() {
     }
   });
 
-  group('hidden categories, read-time only v1.1.0', () {
-    test('H1: hidden-by-id rows land in the index but stay unsearchable', () async {
+  group('hidden categories, pruned at write time v1.2.4', () {
+    test('H1: hidden-by-id rows are pruned at write time and stay unsearchable', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryIds: const ['cat3', 'cat4']);
 
       final result = await client.syncSearchIndex(force: true);
       // ignore: avoid_print
       print('H1: rows=${result.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
 
-      expect(result.rows[IptvSearchIndex.typeSeries], 12);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      // 1.2.4: only the 8 visible rows land (cat3/cat4's 4 are pruned).
+      expect(result.rows[IptvSearchIndex.typeSeries], 8);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       expect((await client.searchItems('|EN| Drama Show 1')).map((m) => m.title), contains('|EN| Drama Show 1'));
       expect(
         (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
         isNot(contains('AR - Series Show 1')),
         reason: 'a hidden category must not be searchable',
       );
-      // The diagnostic can see the hidden row now that the index holds it.
-      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 1);
-      expect(client.lastSearchDiagnostics!.series.hiddenInitials, ['AR']);
+      // The pruned row is not stored, so it can never match a search:
+      // the hidden-match diagnostic reads 0 now (see the file header).
+      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 0);
+      expect(client.lastSearchDiagnostics!.series.hiddenInitials, isEmpty);
     });
 
-    test('H2: hidden-by-initial rows land in the index but stay unsearchable', () async {
+    test('H2: hidden-by-initial rows are pruned at write time and stay unsearchable', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryInitials: const ['AR']);
 
       final result = await client.syncSearchIndex(force: true);
       // ignore: avoid_print
       print('H2: rows=${result.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
 
-      expect(result.rows[IptvSearchIndex.typeSeries], 12);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      // 1.2.4: only the 8 visible rows land (both AR categories pruned).
+      expect(result.rows[IptvSearchIndex.typeSeries], 8);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       expect(
         (await client.searchItems('AR - Kids Show 1')).map((m) => m.title),
         isNot(contains('AR - Kids Show 1')),
         reason: 'hiding the AR initial hides every AR category',
       );
-      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 1);
-      expect(client.lastSearchDiagnostics!.series.hiddenInitials, ['AR']);
+      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 0);
+      expect(client.lastSearchDiagnostics!.series.hiddenInitials, isEmpty);
     });
 
-    test('H3: the 0.5 guard counts all categories — hiding most is not partial', () async {
-      // 5 of 6 categories hidden: the fetch still covers all 6
-      // categories (the rows land regardless of the hidden state), so
-      // it is a complete catalog — not partial.
+    test('H3: the 0.5 guard counts visible categories — hiding most is not partial', () async {
+      // 5 of 6 categories hidden: only cat1 is visible (2 rows), and
+      // the fetch covers the whole VISIBLE catalog, so it is complete
+      // — not partial. (1.2.4: the guard compares visible-fetched
+      // against visible-indexed, not against the full catalog.)
       final client = _clientWith(
         _HiddenPanel(),
         hiddenCategoryIds: const ['cat2', 'cat3', 'cat4', 'cat5', 'cat6'],
@@ -252,14 +259,14 @@ void main() {
       // ignore: avoid_print
       print('H3: rows=${result.rows} partial=${result.partialTypes}');
 
-      expect(result.rows[IptvSearchIndex.typeSeries], 12);
+      expect(result.rows[IptvSearchIndex.typeSeries], 2);
       expect(result.partialTypes, isNot(contains(IptvSearchIndex.typeSeries)),
-          reason: '6 of 6 categories is complete, not partial');
+          reason: '2 of 2 visible categories is complete, not partial');
       expect(client.searchIndexState.lastSync[IptvSearchIndex.typeSeries], isNotNull,
           reason: 'a complete land stamps lastSync like any complete sync');
     });
 
-    test('H3b: hiding every category still lands the full, stamped type', () async {
+    test('H3b: hiding every category lands an empty, stamped type', () async {
       final client = _clientWith(
         _HiddenPanel(),
         hiddenCategoryIds: const ['cat1', 'cat2', 'cat3', 'cat4', 'cat5', 'cat6'],
@@ -269,16 +276,18 @@ void main() {
       // ignore: avoid_print
       print('H3b: rows=${result.rows} skipped=${result.skipped}');
 
-      expect(result.rows[IptvSearchIndex.typeSeries], 12);
+      // 1.2.4: a complete land with every category hidden stamps 0
+      // rows — a deliberate empty land, not a cold type (FORK §45.7).
+      expect(result.rows[IptvSearchIndex.typeSeries], 0);
       expect(result.skipped[IptvSearchIndex.typeSeries], isNull);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 0);
       expect(client.searchIndexState.lastSync[IptvSearchIndex.typeSeries], isNotNull,
-          reason: 'a full land stamps, so the type is not re-fetched every bind');
+          reason: 'a stamped empty land is not re-fetched every bind');
       // Every row is hidden at read time, so search finds nothing.
       expect((await client.searchItems('Show 1')).map((m) => m.title), isEmpty);
     });
 
-    test('H4: hiding a category hides its rows at read time — the index keeps them', () async {
+    test('H4: hiding a category prunes its rows at the next sync — the index drops them', () async {
       final client = _clientWith(_HiddenPanel());
 
       await client.syncSearchIndex(force: true);
@@ -290,37 +299,48 @@ void main() {
       // ignore: avoid_print
       print('H4: rows=${result.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
 
-      // No purge anymore: the rows stay indexed, hidden only at read time.
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      // 1.2.4: the sync prunes cat3/cat4's rows from the index (the
+      // read-time filter still hides them too, for a legacy full index).
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       expect(
         (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
         isNot(contains('AR - Series Show 1')),
         reason: 'a hidden category must not be searchable',
       );
-      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 1);
+      expect(client.lastSearchDiagnostics!.series.hiddenMatches, 0);
     });
 
-    test('H5: re-enabling a category restores its rows with no sync at all', () async {
+    test('H5: re-enabling a category does NOT restore its rows without a sync (prune trade-off)', () async {
       final client = _clientWith(_HiddenPanel());
 
       await client.syncSearchIndex(force: true);
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       _setHidden(client, ids: const ['cat3', 'cat4']);
       await client.syncSearchIndex(force: true);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       expect(
         (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
         isNot(contains('AR - Series Show 1')),
       );
 
-      // Turn cat3/cat4 back on. The rows were never removed, so the
-      // show is findable immediately — no sync, no re-fetch.
+      // Turn cat3/cat4 back on. 1.2.4: the rows were PRUNED, so the
+      // show stays unfindable until a re-sync — the trade-off Matt
+      // accepted (the un-hide notice + Refresh guards it in the app).
       _setHidden(client);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+      expect(
+        (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
+        isNot(contains('AR - Series Show 1')),
+        reason: 'pruned rows need a re-sync, they do not come back on toggle alone',
+      );
+
+      // The re-sync brings them back.
+      await client.syncSearchIndex(force: true);
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       expect((await client.searchItems('AR - Series Show 1')).map((m) => m.title), contains('AR - Series Show 1'));
     });
 
-    test('H6: the disk catalog holds all rows, hidden ones included', () async {
+    test('H6: the disk catalog holds visible rows only', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryIds: const ['cat3', 'cat4']);
 
       await client.syncSearchIndex(force: true);
@@ -328,11 +348,14 @@ void main() {
       // ignore: avoid_print
       print('H6: disk series rows=${diskRows.length}');
 
-      expect(diskRows.length, 12);
-      expect(diskRows.map((r) => r['category_id']), containsAll(['cat3', 'cat4']));
+      // 1.2.4 (Matt's prune decision): cat3/cat4's rows are pruned
+      // from the disk file too, not just the index.
+      expect(diskRows.length, 8);
+      expect(diskRows.map((r) => r['category_id']), isNot(contains('cat3')));
+      expect(diskRows.map((r) => r['category_id']), isNot(contains('cat4')));
     });
 
-    test('H7: the seed lands the full disk file', () async {
+    test('H7: the seed lands visible rows from a full disk file (prunes at write time)', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryIds: const ['cat3', 'cat4']);
       final cache = IptvCatalogDiskCache();
       await cache.write(
@@ -351,15 +374,17 @@ void main() {
       // ignore: avoid_print
       print('H7: seriesIndexRows after seed=${_rows(client, IptvSearchIndex.typeSeries)}');
 
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      // 1.2.4: the seed prunes the hidden rows at write time — a
+      // pre-1.2.4 full disk file lands visible-only in the index.
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       expect(
         (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
         isNot(contains('AR - Series Show 1')),
-        reason: 'hidden at read time, not dropped by the seed',
+        reason: 'pruned by the seed, not just hidden at read time',
       );
     });
 
-    test('H8: a first-load browse write keeps hidden rows on disk', () async {
+    test('H8: a first-load browse write prunes hidden rows from disk', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryIds: const ['cat3', 'cat4']);
 
       final hubs = await client.fetchGlobalHubs();
@@ -373,8 +398,9 @@ void main() {
       }
       // ignore: avoid_print
       print('H8: disk series rows=${diskRows.length}');
-      expect(diskRows.length, 12);
-      expect(diskRows.map((r) => r['category_id']), containsAll(['cat3', 'cat4']));
+      expect(diskRows.length, 8);
+      expect(diskRows.map((r) => r['category_id']), isNot(contains('cat3')));
+      expect(diskRows.map((r) => r['category_id']), isNot(contains('cat4')));
     });
 
     test('H9: sync counts reflect the full catalog across all three types', () async {
@@ -387,17 +413,19 @@ void main() {
       // ignore: avoid_print
       print('H9: rows=${result.rows}');
 
+      // 1.2.4: the counts are the VISIBLE landed counts (one hidden
+      // category per type: live2, mov2, cat3+cat4).
       expect(result.rows, {
-        IptvSearchIndex.typeLive: 3,
-        IptvSearchIndex.typeMovie: 3,
-        IptvSearchIndex.typeSeries: 12,
+        IptvSearchIndex.typeLive: 2,
+        IptvSearchIndex.typeMovie: 2,
+        IptvSearchIndex.typeSeries: 8,
       });
     });
 
-    test('H10: all-hidden sync lands the full catalog on disk and in the index', () async {
-      // The disk file holds the full raw body now — there is no filtered
-      // body that could come out empty, so the old empty-file fallback
-      // is gone.
+    test('H10: all-hidden sync lands an empty, stamped catalog on disk and in the index', () async {
+      // 1.2.4: an all-hidden type writes an empty-array disk file, not
+      // no file — so the next load reads the deliberate empty instead
+      // of re-fetching (FORK §45.3). The land still stamps lastSync.
       final client = _clientWith(
         _HiddenPanel(),
         hiddenCategoryIds: const ['cat1', 'cat2', 'cat3', 'cat4', 'cat5', 'cat6'],
@@ -407,15 +435,15 @@ void main() {
       // ignore: avoid_print
       print('H10: rows=${result.rows} skipped=${result.skipped}');
 
-      expect(result.rows[IptvSearchIndex.typeSeries], 12);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(result.rows[IptvSearchIndex.typeSeries], 0);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 0);
       expect(client.searchIndexState.lastSync[IptvSearchIndex.typeSeries], isNotNull);
       final diskRows = await _readDiskSeriesRows();
-      expect(diskRows.length, 12,
-          reason: 'the disk file holds the full catalog, filtered at read time');
+      expect(diskRows.length, 0,
+          reason: 'the disk file holds visible rows only — here, none');
     });
 
-    test('H11: hiding 600 categories keeps 600 rows — no purge, hidden at read time', () async {
+    test('H11: hiding 600 categories prunes all 600 rows at the next sync', () async {
       final panel = _HiddenPanel()..bigLive = true;
       final client = _clientWith(panel);
 
@@ -427,20 +455,19 @@ void main() {
       // ignore: avoid_print
       print('H11: liveIndexRows=${_rows(client, IptvSearchIndex.typeLive)}');
 
-      // The purge is gone with the write-time skip: the rows stay
-      // indexed (the old 500-variable chunking concern with it).
-      expect(_rows(client, IptvSearchIndex.typeLive), 600);
+      // 1.2.4: the prune deletes the hidden rows in one transaction
+      // (upsertType deleteCategoryIds) — no 500-row chunking concern.
+      expect(_rows(client, IptvSearchIndex.typeLive), 0);
       expect((await client.searchItems('Live 599')).map((m) => m.title), isNot(contains('Live 599')));
-      expect(client.lastSearchDiagnostics!.live.hiddenMatches, 1);
+      expect(client.lastSearchDiagnostics!.live.hiddenMatches, 0);
     });
 
-    test('H12: a failed sync after re-enable leaves the type up-to-date', () async {
-      // D1, new shape: the hidden fingerprint is gone — a hidden-set
-      // change no longer forces a sync at all, since the stored catalog
-      // is unaffected by toggles. Re-enable, then the panel goes down
-      // for the whole sync: the failed run changes nothing (the rows
-      // were never removed), and the next plain sync correctly skips
-      // the type as up-to-date instead of re-fetching it.
+    test('H12: a failed sync after re-enable leaves the type up-to-date — and the rows still pruned', () async {
+      // D1, 1.2.4 shape: the hide-sync pruned cat3/cat4's rows. Re-enable,
+      // then the panel goes down for the whole sync: the failed run
+      // changes nothing, and the next plain sync correctly skips the
+      // type as up-to-date instead of re-fetching it — so the rows
+      // stay pruned until a FORCED sync (the notice's Refresh).
       final panel = _HiddenPanel();
       final client = _clientWith(panel);
 
@@ -448,7 +475,7 @@ void main() {
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       _setHidden(client, ids: const ['cat3', 'cat4']);
       await client.syncSearchIndex(force: true);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
 
       _setHidden(client);
       panel.fail = true;
@@ -460,17 +487,27 @@ void main() {
       // ignore: avoid_print
       print('H12: retry skipped=${retry.skipped} rows=${retry.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
       expect(retry.skipped[IptvSearchIndex.typeSeries], 'up-to-date',
-          reason: 'nothing is due: the rows are already full, the toggle changed no stored data');
+          reason: 'nothing is due: the last sync stamped recently');
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+      expect(
+        (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
+        isNot(contains('AR - Series Show 1')),
+        reason: 'up-to-date skips the re-fetch, so the pruned rows stay pruned',
+      );
+
+      // A forced sync (the notice's Refresh) restores them.
+      await client.syncSearchIndex(force: true);
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       expect((await client.searchItems('AR - Series Show 1')).map((m) => m.title), contains('AR - Series Show 1'));
     });
 
-    test('H13: a partial-kept sync after re-enable leaves the type up-to-date', () async {
-      // D1, second trigger, new shape: the panel answers but with a
-      // partial list (2 rows < half of 12 indexed), so the warm guard
-      // keeps the old rows. The re-enabled rows were never removed, so
-      // nothing is owed — the next plain sync correctly skips the type
-      // as up-to-date, and the show stays findable throughout.
+    test('H13: a partial-kept sync after re-enable leaves the type up-to-date — and the rows still pruned', () async {
+      // D1, second trigger, 1.2.4 shape: the panel answers but with a
+      // partial list (2 visible rows < half of 8 visible-indexed), so
+      // the warm guard keeps the old rows. The re-enabled rows were
+      // pruned, so nothing is owed — the next plain sync correctly
+      // skips the type as up-to-date, and the show stays unfindable
+      // until a FORCED sync.
       final panel = _HiddenPanel();
       final client = _clientWith(panel);
 
@@ -478,20 +515,29 @@ void main() {
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       _setHidden(client, ids: const ['cat3', 'cat4']);
       await client.syncSearchIndex(force: true);
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
 
       _setHidden(client);
       panel.partialSeries = true;
       final partial = await client.syncSearchIndex(force: true);
       expect(partial.skipped[IptvSearchIndex.typeSeries], 'partial-kept');
-      expect(_rows(client, IptvSearchIndex.typeSeries), 12);
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
       panel.partialSeries = false;
 
       final retry = await client.syncSearchIndex();
       // ignore: avoid_print
       print('H13: retry skipped=${retry.skipped} rows=${retry.rows} seriesIndexRows=${_rows(client, IptvSearchIndex.typeSeries)}');
       expect(retry.skipped[IptvSearchIndex.typeSeries], 'up-to-date',
-          reason: 'nothing is due: the rows are already full, the toggle changed no stored data');
+          reason: 'nothing is due: the last sync stamped recently');
+      expect(_rows(client, IptvSearchIndex.typeSeries), 8);
+      expect(
+        (await client.searchItems('AR - Series Show 1')).map((m) => m.title),
+        isNot(contains('AR - Series Show 1')),
+        reason: 'up-to-date skips the re-fetch, so the pruned rows stay pruned',
+      );
+
+      // A forced sync (the notice's Refresh) restores them.
+      await client.syncSearchIndex(force: true);
       expect(_rows(client, IptvSearchIndex.typeSeries), 12);
       expect((await client.searchItems('AR - Series Show 1')).map((m) => m.title), contains('AR - Series Show 1'));
     });

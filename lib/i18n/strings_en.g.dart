@@ -3920,6 +3920,12 @@ class Translations$about$en {
 		'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
 		'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
 	];
+	List<String> get changelog2290 => [
+		'The app now only keeps the categories you\'ve switched on in memory and on disk — hidden categories are removed after each download, so the app uses far less memory on phones and TV sticks',
+		'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
+		'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
+		'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -7398,6 +7404,18 @@ class Translations$iptvCategories$en {
 
 	/// en: 'Could not save that change. Try again.'
 	String get persistFailed => 'Could not save that change. Try again.';
+
+	/// en: 'Those categories were cleared to save space. Refresh the catalog to bring their shows back.'
+	String get unhiddenNeedsRefresh => 'Those categories were cleared to save space. Refresh the catalog to bring their shows back.';
+
+	/// en: 'Refresh'
+	String get unhiddenRefresh => 'Refresh';
+
+	/// en: 'Catalog refreshed — the shows are back.'
+	String get unhiddenRefreshDone => 'Catalog refreshed — the shows are back.';
+
+	/// en: 'That refresh didn't finish. Try again.'
+	String get unhiddenRefreshFailed => 'That refresh didn\'t finish. Try again.';
 }
 
 // Path: appIcon.names
@@ -10836,6 +10854,10 @@ extension on Translations {
 			'about.changelog2289.3' => 'The guide shows a banner when the panel denies access or doesn\'t answer, with a retry button',
 			'about.changelog2288.0' => 'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
 			'about.changelog2288.1' => 'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
+			'about.changelog2290.0' => 'The app now only keeps the categories you\'ve switched on in memory and on disk — hidden categories are removed after each download, so the app uses far less memory on phones and TV sticks',
+			'about.changelog2290.1' => 'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
+			'about.changelog2290.2' => 'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
+			'about.changelog2290.3' => 'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10909,12 +10931,12 @@ extension on Translations {
 			'explore.status.upcoming' => 'Upcoming',
 			'explore.episodeCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
 			'explore.cast' => 'Cast',
+			_ => null,
+		} ?? switch (path) {
 			'explore.characters' => 'Characters',
 			'explore.addToWatchlist' => 'Add to Watchlist',
 			'explore.removeFromWatchlist' => 'Remove from Watchlist',
 			'explore.addedToWatchlist' => 'Added to watchlist',
-			_ => null,
-		} ?? switch (path) {
 			'explore.removedFromWatchlist' => 'Removed from watchlist',
 			'explore.watchlistUpdateFailed' => 'Couldn\'t update watchlist',
 			'explore.watchlistNoMatch' => 'Couldn\'t match this item to a watchlist',
@@ -11423,12 +11445,12 @@ extension on Translations {
 			'downloads.customAmount' => 'Custom amount...',
 			'downloads.includeSpecials' => 'Include Specials',
 			'downloads.howManyEpisodes' => 'How many episodes?',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.invalidEpisodeCount' => 'Enter a valid episode count.',
 			'downloads.keepSynced' => 'Keep synced',
 			'downloads.downloadOnce' => 'Download once',
 			'downloads.keepNUnwatched' => ({required Object count}) => 'Keep ${count} unwatched',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.editSyncRule' => 'Edit sync rule',
 			'downloads.removeSyncRule' => 'Remove sync rule',
 			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"? Downloaded episodes will be kept.',
@@ -11937,12 +11959,12 @@ extension on Translations {
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
 			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
 			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.showLink' => 'Show link',
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',
 			'deepLinks.showHint' => 'Opening this link plays the next episode. Add &mode=shuffle to play the show on shuffle.',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.movieHint' => 'Opening this link plays the movie.',
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
@@ -12197,6 +12219,10 @@ extension on Translations {
 			'iptvCategories.empty' => 'No categories found for this connection.',
 			'iptvCategories.retry' => 'Retry',
 			'iptvCategories.persistFailed' => 'Could not save that change. Try again.',
+			'iptvCategories.unhiddenNeedsRefresh' => 'Those categories were cleared to save space. Refresh the catalog to bring their shows back.',
+			'iptvCategories.unhiddenRefresh' => 'Refresh',
+			'iptvCategories.unhiddenRefreshDone' => 'Catalog refreshed — the shows are back.',
+			'iptvCategories.unhiddenRefreshFailed' => 'That refresh didn\'t finish. Try again.',
 			_ => null,
 		};
 	}

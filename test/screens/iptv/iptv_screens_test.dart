@@ -1016,11 +1016,21 @@ void main() {
       expect(find.text('Version 1.2.1-2.25.0'), findsOneWidget);
       final newest121 = tester.getTopLeft(find.text('Version 1.2.1-2.25.0')).dy;
       expect(newest121, lessThan(newest120));
-      // EPG silence fix (v1.2.3): same guard for the new version — it
+      // EPG efficiency (v1.2.2): same guard for the new version — it
       // must be present and sit above 1.2.1.
+      expect(find.text('Version 1.2.2-2.25.0'), findsOneWidget);
+      final newest122 = tester.getTopLeft(find.text('Version 1.2.2-2.25.0')).dy;
+      expect(newest122, lessThan(newest121));
+      // EPG silence fix (v1.2.3): same guard for the new version — it
+      // must be present and sit above 1.2.2.
       expect(find.text('Version 1.2.3-2.25.0'), findsOneWidget);
       final newest123 = tester.getTopLeft(find.text('Version 1.2.3-2.25.0')).dy;
-      expect(newest123, lessThan(newest121));
+      expect(newest123, lessThan(newest122));
+      // Catalog memory (v1.2.4): same guard for the new version — it
+      // must be present and sit above 1.2.3.
+      expect(find.text('Version 1.2.4-2.25.0'), findsOneWidget);
+      final newest124 = tester.getTopLeft(find.text('Version 1.2.4-2.25.0')).dy;
+      expect(newest124, lessThan(newest123));
     });
   });
 }

@@ -2651,6 +2651,22 @@ class IptvLiveTvSupport implements LiveTvSupport {
     return true;
   }
 
+  /// Drop the in-memory EPG caches under memory pressure (1.2.4, item
+  /// 1): clear the per-channel EPG map and the parsed XMLTV guides,
+  /// and bump [epgVersion] so the guide drops its own per-channel
+  /// state (its merged-programs cache) and re-fetches visible rows
+  /// lazily. A RELIEF VALVE, not a clear — unlike [clearEpgCache] it
+  /// deletes NO persisted EPG, sets NO `_epgCleared` (the guide
+  /// refetches instead of staying empty), and touches NO "Last updated"
+  /// stamp. The failed-feed negative cache and the playback-gate
+  /// deferrals are kept: a pressure drop must not re-download a feed
+  /// that just failed, or re-poison a channel the gate deferred.
+  void dropEpgFromMemory() {
+    _epgCache.clear();
+    _xmltvCache.clear();
+    _epgVersion++;
+  }
+
   /// Empty the EPG caches (Update now / Clear guide). The next guide visit
   /// re-fetches visible channels; the guide watches [epgVersion] to reset
   /// its own per-channel state.

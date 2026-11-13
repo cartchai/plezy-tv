@@ -18,6 +18,7 @@ import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
+import '../../widgets/iptv_unhide_refresh_notice.dart';
 import '../../widgets/loading_indicator_box.dart';
 import '../../widgets/settings_section.dart';
 
@@ -273,6 +274,11 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
 
   Future<void> _persist(Connection updated) async {
     final previous = _connection;
+    // 1.2.4: the newly-unhidden category ids — by id, plus every row
+    // whose initial was just un-hidden. Resolved from the loaded rows
+    // now: the notice must appear at the moment of the toggle, not
+    // buried in Settings.
+    final unhidden = _unhiddenCategoryIds(previous, updated);
     // Optimistic: the row and the counts update in the same frame as the
     // tap. The persist below is local storage; if it fails, revert.
     setState(() {
@@ -286,7 +292,26 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       // profile rebind, no Plex involvement. The new client carries the
       // new filter, and the catalog-refreshed event re-renders the guide,
       // libraries and Discover past the RefreshPacer cooldown.
-      unawaited(context.read<MultiServerProvider>().refreshIptvConnection(updated));
+      unawaited(
+        context.read<MultiServerProvider>().refreshIptvConnection(updated).then((_) {
+          // 1.2.4: the rebind above starts the memo re-derive on the
+          // bound client; the notice awaits it and shows only when the
+          // un-hidden rows were pruned (a refresh is needed to bring
+          // them back). Resolved after the rebind so an unbound
+          // connection's fresh client is the one checked — never the
+          // screen's throwaway (its memos are cold).
+          if (!mounted || unhidden.isEmpty) return;
+          final client = _boundClient();
+          if (client == null) return;
+          unawaited(
+            maybeShowUnhideRefreshNotice(
+              context,
+              client: client,
+              unhiddenCategoryIds: unhidden,
+            ),
+          );
+        }),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -295,6 +320,45 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       });
       showErrorSnackBar(context, t.iptvCategories.persistFailed);
     }
+  }
+
+  /// The bound client for this connection, if it is bound right now
+  /// (1.2.4): the notice check must run against the bound client's
+  /// memos, never a throwaway. Null when unbound (the rebind failed or
+  /// has not landed) — then no notice, never a cold-client load.
+  IptvClient? _boundClient() {
+    try {
+      final bound = context.read<MultiServerProvider>().getClientForServer(ServerId(widget.connection.id));
+      if (bound is IptvClient) return bound;
+    } catch (_) {
+      // No provider above us, or the connection isn't bound.
+    }
+    return null;
+  }
+
+  /// Category ids the [updated] connection un-hides relative to
+  /// [previous] (1.2.4): ids removed from the hidden list, plus every
+  /// loaded row whose initial was removed from the hidden initials.
+  Set<String> _unhiddenCategoryIds(Connection previous, Connection updated) {
+    Set<String> hiddenIdsOf(Connection c) => switch (c) {
+      M3uConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+      XtreamConnection(:final hiddenCategoryIds) => hiddenCategoryIds.toSet(),
+      _ => <String>{},
+    };
+    Set<String> hiddenInitialsOf(Connection c) => switch (c) {
+      M3uConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials.toSet(),
+      XtreamConnection(:final hiddenCategoryInitials) => hiddenCategoryInitials.toSet(),
+      _ => <String>{},
+    };
+    final unhiddenIds = hiddenIdsOf(previous).difference(hiddenIdsOf(updated));
+    final unhiddenInitials = hiddenInitialsOf(previous).difference(hiddenInitialsOf(updated));
+    if (unhiddenInitials.isEmpty) return unhiddenIds;
+    final rows = <_CategoryRow>[...?_live, ...?_movies, ...?_series, ...?_groups];
+    return {
+      ...unhiddenIds,
+      for (final row in rows)
+        if (unhiddenInitials.contains(categoryInitial(row.name))) row.id,
+    };
   }
 
   Connection _withHiddenIds(Set<String> next) => switch (_connection) {

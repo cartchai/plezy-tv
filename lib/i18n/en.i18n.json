@@ -1659,6 +1659,12 @@
       "The guide now only keeps the programmes it can show, so it uses less memory while you browse",
       "When a guide source reports it hasn't changed, the app skips downloading it again and reuses the copy it already has"
     ],
+    "changelog2290": [
+      "The app now only keeps the categories you've switched on in memory and on disk — hidden categories are removed after each download, so the app uses far less memory on phones and TV sticks",
+      "Turning a category back on brings its shows back right away when they're still saved; when they were removed, the app says so and offers a refresh to bring them back",
+      "Favourites and Continue Watching still open for shows in a category you've since switched off",
+      "When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
@@ -3163,6 +3169,10 @@
     "sectionLoadFailed": "Could not load this section.",
     "empty": "No categories found for this connection.",
     "retry": "Retry",
-    "persistFailed": "Could not save that change. Try again."
+    "persistFailed": "Could not save that change. Try again.",
+    "unhiddenNeedsRefresh": "Those categories were cleared to save space. Refresh the catalog to bring their shows back.",
+    "unhiddenRefresh": "Refresh",
+    "unhiddenRefreshDone": "Catalog refreshed — the shows are back.",
+    "unhiddenRefreshFailed": "That refresh didn't finish. Try again."
   }
 }

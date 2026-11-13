@@ -18,6 +18,14 @@ class IptvFavoriteItem {
   final String? parentId;
   final String? parentTitle;
 
+  /// The item's category id (1.2.4, catalog memory): the precise signal
+  /// for whether a pruned favourite needs a refresh — the category is
+  /// visible now but the item does not resolve (see
+  /// [IptvClient.itemNeedsCatalogRefresh]). Null for rows saved before
+  /// 1.2.4, which recorded no category; those fall back to the snapshot
+  /// with no refresh signal.
+  final String? categoryId;
+
   const IptvFavoriteItem({
     required this.id,
     required this.kind,
@@ -26,6 +34,7 @@ class IptvFavoriteItem {
     this.libraryId,
     this.parentId,
     this.parentTitle,
+    this.categoryId,
   });
 
   Map<String, dynamic> toJson() => {
@@ -36,6 +45,7 @@ class IptvFavoriteItem {
     if (libraryId != null) 'libraryId': libraryId,
     if (parentId != null) 'parentId': parentId,
     if (parentTitle != null) 'parentTitle': parentTitle,
+    if (categoryId != null) 'categoryId': categoryId,
   };
 
   factory IptvFavoriteItem.fromJson(Map<String, dynamic> json) {
@@ -52,6 +62,7 @@ class IptvFavoriteItem {
       libraryId: json['libraryId'] as String?,
       parentId: json['parentId'] as String?,
       parentTitle: json['parentTitle'] as String?,
+      categoryId: json['categoryId'] as String?,
     );
   }
 }

@@ -34,6 +34,7 @@ import '../../utils/serial_future_queue.dart';
 import 'guide_category.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/focusable_tab_chip.dart';
+import '../../widgets/iptv_unhide_refresh_notice.dart';
 import '../../widgets/overlay_sheet.dart';
 import '../libraries/state_messages.dart';
 import 'guide_search_sheet.dart';
@@ -929,8 +930,10 @@ class _LiveTvScreenState extends State<LiveTvScreen>
   /// its initial can only be shown again from the categories screen
   /// (un-hiding the initial would un-hide every category sharing it);
   /// the menu only ever offers this for visible channels, so the
-  /// per-category flip is exact there. The download/cache skip for the
-  /// newly hidden rows happens at the next sync — no second purge path.
+  /// per-category flip is exact there. 1.2.4: hiding a category no
+  /// longer waits for the next sync to leave the stores — the rows are
+  /// pruned at the next sync, and un-hiding a pruned category shows the
+  /// refresh notice (see [maybeShowUnhideRefreshNotice]).
   Future<void> _toggleChannelCategory(LiveTvChannel channel, String categoryId, String categoryName) async {
     final client = _iptvClientForChannel(channel);
     if (client == null) return;
@@ -956,7 +959,22 @@ class _LiveTvScreenState extends State<LiveTvScreen>
     try {
       await context.read<ConnectionRegistry>().upsert(updated);
       if (!mounted) return;
-      unawaited(context.read<MultiServerProvider>().refreshIptvConnection(updated));
+      unawaited(
+        context.read<MultiServerProvider>().refreshIptvConnection(updated).then((_) {
+          // 1.2.4: the rebind starts the memo re-derive on this same
+          // client (a filter-only change updates it in place); when
+          // this toggle UN-hid the category, the notice awaits the
+          // re-derive and shows only when the rows were pruned.
+          if (!mounted || !hidden) return;
+          unawaited(
+            maybeShowUnhideRefreshNotice(
+              context,
+              client: client,
+              unhiddenCategoryIds: {categoryId},
+            ),
+          );
+        }),
+      );
     } catch (e) {
       if (!mounted) return;
       showErrorSnackBar(context, t.iptvCategories.persistFailed);

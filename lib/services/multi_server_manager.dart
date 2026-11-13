@@ -1721,6 +1721,21 @@ class MultiServerManager {
     }
   }
 
+  /// Drop the in-memory IPTV catalogs + EPG guides on every connection
+  /// (1.2.4, item 1): the relief valve under memory pressure — the
+  /// memo heap (visible rows only now, still tens of MB) and the guide
+  /// are shed, and the next browse/search/guide re-reads from disk (no
+  /// network). Called from [didHaveMemoryPressure] and the RSS watchdog
+  /// (main.dart). Safe with nothing loaded (no-op). The connections
+  /// stay usable afterwards — only the in-memory copies are dropped,
+  /// never the disk catalog, the index, or the persisted EPG.
+  void dropIptvCachesFromMemory() {
+    for (final client in _iptvByConnectionId.values) {
+      client.dropCatalogFromMemory();
+      client.dropEpgFromMemory();
+    }
+  }
+
   /// Re-probe one IPTV connection's health and apply the verdict (build
   /// #21). Used by [_reconnectIptvServer] and by the deferred probe a
   /// search defers: the client fires its [IptvClient.onDeferredHealthProbe]

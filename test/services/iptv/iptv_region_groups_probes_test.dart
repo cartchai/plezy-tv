@@ -1,4 +1,4 @@
-// Region-groups probes (v1.1.0, Option B) — moved in from the research
+// Region-groups probes (v1.2.4, FORK §45) — moved in from the research
 // worktree (~/workspace/tmp_work/plezy-tv-research-region-groups).
 //
 // Matt's report (2026-11-12 ~23:05 EST, on v1.0.17): series search works,
@@ -6,22 +6,23 @@
 // "Game of Thrones". With "Show all" he can. The region grouping "must be
 // messed up".
 //
-// Failing-first on base ac9430507 (v1.0.18): 5/7 pass, R2b + R2c FAIL for
-// the product reason (toggle to EN/CA/US-only leaves GoT at [], Show all
-// leaves GoT at [] — the sync had landed 1 visible series row, 7 hidden
-// rows skipped). Research verdict: the grouping was CORRECT
+// Research verdict: the grouping was CORRECT
 // (categoryInitial('|EN| TOP SERIES') == 'EN'; GoT and Friends both map
 // to EN) — the bug was STALENESS: the v1.0.16 write-time skip dropped
 // hidden rows from the index AND the disk file, and a toggle triggers no
 // sync, no re-index, no re-seed, so un-hiding could not bring back rows
-// that were never written.
+// that were never written. Option B (v1.1.0) fixed the staleness by
+// holding the FULL catalog and filtering only at read time, so the
+// toggle restored the shows immediately.
 //
-// Option B (v1.1.0): the index + disk hold the FULL catalog and filter
-// only at read time, so the toggle restores the shows immediately with no
-// sync — R2b/R2c flip to PASS, and R2b pins the diagnostic that the
-// full index makes possible (hiddenMatches == 1, hiddenInitials ==
-// ['EN'] while EN is hidden). R3's expectation changes with it: the seed
-// holds full rows now.
+// v1.2.4 (Matt's prune decision) DELIBERATELY re-introduces the
+// staleness for storage: hidden rows are pruned from the index + disk
+// again, so a toggle alone does NOT restore GoT — a re-sync does (the
+// un-hide notice + Refresh action is the guard against the silent
+// 1.0.16 breakage). R2b/R2c/R2d/R3 are rewritten to that contract:
+// toggle -> still unfound; forced sync -> found. The grouping itself
+// is unchanged (R1 pins it). The hidden-match diagnostic now reads 0
+// after a prune: a pruned row is not stored, so it can never match.
 //
 // These probes model Matt's exact scenario with a small fake panel.
 // Friends' real category is UNKNOWN (no fixture has it) — it is modelled
@@ -148,61 +149,76 @@ void main() {
     });
   });
 
-  group('R2: the toggle restores rows immediately (the fix)', () {
-    // Shared setup: sync with the OLD hidden set (EN hidden). Option B:
-    // the sync lands ALL 8 rows and the read-time filter hides the EN
-    // ones — so the shows are unfindable while EN is off, and come back
-    // the moment it is on. Returns the client in that state.
+  group('R2: the toggle does NOT restore pruned rows — a re-sync does (1.2.4)', () {
+    // Shared setup: sync with the OLD hidden set (EN hidden). 1.2.4:
+    // the sync lands only the 1 visible row (Breaking Bad, ungrouped)
+    // — GoT/Friends are PRUNED, not hidden at read time — so the
+    // shows are unfindable while EN is off, and stay unfindable until
+    // a re-sync after the toggle. Returns the client in that state.
     Future<IptvClient> staleClient() async {
       final client = await clientWith(
         api: _RegionFakeApi(),
         hiddenInitials: hiddenOld32.toList(),
       );
       await client.ensureSearchIndexSynced();
-      expect(seriesRowCount(client), 8);
+      expect(seriesRowCount(client), 1);
       expect(await client.searchItems('game of thrones'), isEmpty);
       expect(await client.searchItems('friends'), isEmpty);
       return client;
     }
 
-    test('R2b: toggle to EN/CA/US-only restores GoT immediately', () async {
+    test('R2b: toggle to EN/CA/US-only does NOT restore GoT — a forced sync does', () async {
       final client = await staleClient();
       try {
-        // Before the toggle, the shows are hidden — and the diagnostics
-        // can now SEE them, because the index holds the full rows.
+        // Before the toggle, the shows are pruned, not hidden — so the
+        // diagnostic cannot count them (0 hidden matches, not 1).
         expect(await client.searchItems('game of thrones'), isEmpty);
-        expect(client.lastSearchDiagnostics!.series.hiddenMatches, 1);
-        expect(client.lastSearchDiagnostics!.series.hiddenInitials, ['EN']);
-        // The toggle changes the read-time filter — no sync, no
-        // re-index — and the shows come back at once.
-        await toggleTo(client, hiddenEnCaUsOnly);
-        final gotAfterToggle = await client.searchItems('game of thrones');
-        expect(
-          gotAfterToggle.map((i) => i.title),
-          contains('EN - Game Of Thrones (2011)'),
-        );
-        expect(seriesRowCount(client), 8); // no re-index happened
-        // Nothing hidden for this query now that EN is on.
         expect(client.lastSearchDiagnostics!.series.hiddenMatches, 0);
         expect(client.lastSearchDiagnostics!.series.hiddenInitials, isEmpty);
-        // Search itself still works — the ungrouped control is found.
+        // The toggle re-derives the memos from disk — but the disk
+        // file holds only the 1 visible row, so GoT stays unfound.
+        await toggleTo(client, hiddenEnCaUsOnly);
+        final gotAfterToggle = await client.searchItems('game of thrones');
+        expect(gotAfterToggle, isEmpty);
+        expect(seriesRowCount(client), 1); // no re-index happened
+        // Search itself still works — the ungrouped control (still on
+        // disk) is found.
         final breakingBad = await client.searchItems('breaking bad');
         expect(breakingBad.map((i) => i.title), contains('EN - Breaking Bad (2008)'));
+        // The forced sync (the notice's Refresh) brings GoT back: 5
+        // visible rows under EN/CA/US-only (GoT, Friends, Office,
+        // Breaking Bad, Filler).
+        await client.syncSearchIndex(force: true);
+        final gotAfterSync = await client.searchItems('game of thrones');
+        expect(
+          gotAfterSync.map((i) => i.title),
+          contains('EN - Game Of Thrones (2011)'),
+        );
+        expect(seriesRowCount(client), 5);
+        final friendsAfterSync = await client.searchItems('friends');
+        expect(friendsAfterSync.map((i) => i.title), contains('EN - Friends (1994)'));
+        // And the UK/FR/AR shows stay hidden, as designed.
+        expect(await client.searchItems('sherlock'), isEmpty);
       } finally {
         client.close();
       }
     });
 
-    test('R2c: Show all restores GoT immediately', () async {
+    test('R2c: Show all does NOT restore GoT — a forced sync does', () async {
       final client = await staleClient();
       try {
         await toggleTo(client, hiddenEnCaUsOnly);
-        // Clearing the filter brings the rows back at once — they were
-        // in the index all along.
+        // Clearing the filter does NOT bring the rows back — they were
+        // pruned, not hidden at read time.
         await toggleTo(client, <String>{});
         final gotAfterShowAll = await client.searchItems('game of thrones');
+        expect(gotAfterShowAll, isEmpty);
+        expect(seriesRowCount(client), 1);
+        // The forced sync restores all 8 rows.
+        await client.syncSearchIndex(force: true);
+        final gotAfterSync = await client.searchItems('game of thrones');
         expect(
-          gotAfterShowAll.map((i) => i.title),
+          gotAfterSync.map((i) => i.title),
           contains('EN - Game Of Thrones (2011)'),
         );
         expect(seriesRowCount(client), 8);
@@ -211,14 +227,19 @@ void main() {
       }
     });
 
-    test('R2d: a sync after the toggle keeps them found (recovery path)', () async {
+    test('R2d: a non-forced sync after the toggle does NOT restore them — a forced sync does', () async {
       final client = await staleClient();
       try {
         await toggleTo(client, hiddenEnCaUsOnly);
         await toggleTo(client, <String>{});
-        // The toggle already restored them; the sync must keep them
-        // found, not lose them.
+        // A plain (non-forced) sync skips the type as up-to-date — the
+        // last sync stamped recently — so the pruned rows stay pruned.
         await client.ensureSearchIndexSynced();
+        final gotAfterPlainSync = await client.searchItems('game of thrones');
+        expect(gotAfterPlainSync, isEmpty);
+        expect(seriesRowCount(client), 1);
+        // The forced sync (the notice's Refresh) restores them.
+        await client.syncSearchIndex(force: true);
         final gotAfterSync = await client.searchItems('game of thrones');
         expect(gotAfterSync.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));
         final friendsAfterSync = await client.searchItems('friends');
@@ -229,23 +250,32 @@ void main() {
     });
   });
 
-  group('R3: the seed holds the full catalog', () {
-    test('R3: re-seed after a toggle keeps the full index, GoT found', () async {
+  group('R3: the seed holds the pruned catalog', () {
+    test('R3: re-seed after a toggle keeps the pruned index, GoT stays unfound', () async {
       final client = await clientWith(
         api: _RegionFakeApi(),
         hiddenInitials: hiddenOld32.toList(),
       );
       try {
         await client.ensureSearchIndexSynced();
-        // Option B: the sync landed all 8 rows and the disk file holds
-        // them too, so the seed (which only fills empty types) has
-        // nothing to heal — and nothing to lose.
-        expect(seriesRowCount(client), 8);
+        // 1.2.4: the sync landed only the 1 visible row, and the disk
+        // file holds it too — the seed (which only fills empty types)
+        // has nothing to heal, and nothing pruned to restore.
+        expect(seriesRowCount(client), 1);
         await toggleTo(client, hiddenEnCaUsOnly);
         await client.seedSearchIndexFromDisk();
-        expect(seriesRowCount(client), 8);
+        expect(seriesRowCount(client), 1);
         final got = await client.searchItems('game of thrones');
-        expect(got.map((i) => i.title), contains('EN - Game Of Thrones (2011)'));
+        expect(got, isEmpty);
+        // The forced sync restores GoT (5 visible rows under
+        // EN/CA/US-only).
+        await client.syncSearchIndex(force: true);
+        final gotAfterSync = await client.searchItems('game of thrones');
+        expect(
+          gotAfterSync.map((i) => i.title),
+          contains('EN - Game Of Thrones (2011)'),
+        );
+        expect(seriesRowCount(client), 5);
       } finally {
         client.close();
       }

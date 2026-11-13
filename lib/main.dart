@@ -1453,6 +1453,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 1.2.4: assigned before the observer registers — didHaveMemoryPressure
+    // can fire as soon as this observes, and it drops the IPTV caches
+    // through _serverManager (a late final: reading it before this line
+    // would throw).
+    _serverManager = MultiServerManager();
     WidgetsBinding.instance.addObserver(this);
 
     // The watchdog's first useful sample is at least 15 seconds away; install
@@ -1461,7 +1466,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       if (mounted) _startRssWatchdog();
     });
 
-    _serverManager = MultiServerManager();
     // Build v1.0.13 (R4): register the periodic background catalog sync
     // (WorkManager, at the user's sync-interval setting). Registration
     // is not a run — the app still opens from the local file (startup
@@ -1598,8 +1602,14 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   @override
   void didHaveMemoryPressure() {
     super.didHaveMemoryPressure();
-    appLogger.w('System memory pressure, evicting image caches');
+    appLogger.w('System memory pressure, evicting image caches + IPTV catalogs/EPG');
     _evictImageCaches();
+    // 1.2.4 (catalog memory, item 1): the memo heap + guide are the
+    // actual hogs (Matt's Fold: RSS 700MB with the image cache at
+    // 0–6MB) — shedding them here is what makes the pressure callback
+    // do anything. Relief valve only: the next browse/search/guide
+    // re-reads from disk, no network.
+    _serverManager.dropIptvCachesFromMemory();
   }
 
   /// RSS-based image-cache eviction. Desktop keeps its fixed 1.5GB bar;
@@ -1627,15 +1637,25 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
       final rss = ProcessInfo.currentRss;
       if (rss <= threshold) return;
       final cache = PaintingBinding.instance.imageCache;
-      // Floor + cooldown: clearing an already-small cache buys nothing, and
-      // refetch churn is its own memory-spike and jank source. Inside the
-      // cooldown, re-evict only if RSS kept climbing past the last eviction.
-      if (cache.currentSizeBytes < (8 << 20)) return;
+      // Cooldown: refetch churn is its own memory-spike and jank
+      // source. Inside the cooldown, re-evict only if RSS kept climbing
+      // past the last eviction.
       final now = DateTime.now();
       final inCooldown = now.difference(_lastRssEviction) < const Duration(seconds: 60);
       if (inCooldown && rss <= _lastEvictionRss) return;
       _lastRssEviction = now;
       _lastEvictionRss = rss;
+      // 1.2.4 (catalog memory, item 1): the IPTV drop is NOT gated on
+      // the image cache size — Matt's Fold hit RSS 700MB with the image
+      // cache at 0–6MB, so the old ≥8MB floor let the memo heap (the
+      // actual hog) ride out every watchdog trip. It shares the
+      // cooldown gate above; the image eviction keeps its own ≥8MB
+      // floor (clearing an already-small cache buys nothing).
+      _serverManager.dropIptvCachesFromMemory();
+      appLogger.w(
+        'RSS high (${rss >> 20}MB > ${threshold >> 20}MB), dropped IPTV catalogs + EPG from memory',
+      );
+      if (cache.currentSizeBytes < (8 << 20)) return;
       appLogger.w(
         'RSS high (${rss >> 20}MB > ${threshold >> 20}MB), evicting image caches '
         '(cache ${cache.currentSizeBytes >> 20}MB/${cache.currentSize} images, ${cache.liveImageCount} live)',

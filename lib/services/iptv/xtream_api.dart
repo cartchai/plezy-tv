@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../exceptions/media_server_exceptions.dart';
 import '../../utils/app_logger.dart';
+import '../../utils/iptv_initials.dart';
 import '../../utils/json_utils.dart';
 import 'iptv_refusal_log.dart';
 
@@ -60,6 +61,80 @@ class XtreamCatalogTooLargeException implements Exception {
   @override
   String toString() => 'Xtream catalog response too large: $chars chars';
 }
+/// Which catalog rows are visible (1.2.4, catalog memory): the hidden
+/// sets from the connection, plus the category-id -> initial map derived
+/// from the category names. Plain values only, so it crosses into a
+/// [compute] isolate like [IndexWriteParams]. The rule is the same one
+/// the read-time filter applies — a row is hidden by its own category
+/// id, or because its category's initial is turned off — so the
+/// in-isolate filter and the read-time filter can never disagree about
+/// a row. A category with no initial is absent from the map: a row in
+/// one is hidden only by its own id switch.
+class VisibleCatalogFilter {
+  const VisibleCatalogFilter({
+    required this.hiddenCategoryIds,
+    required this.hiddenInitials,
+    required this.initialByCategoryId,
+  });
+
+  /// Per-category ids turned off (usually empty — Matt hides initials).
+  final List<String> hiddenCategoryIds;
+
+  /// Category initials turned off (Matt hides 32).
+  final List<String> hiddenInitials;
+
+  /// categoryId -> initial, derived from the category names.
+  final Map<String, String> initialByCategoryId;
+
+  /// Build from the category list (sync path: the just-fetched list).
+  factory VisibleCatalogFilter.fromCategories(
+    List<XtreamCategory> categories, {
+    required Set<String> hiddenCategoryIds,
+    required Set<String> hiddenInitials,
+  }) {
+    final byId = <String, String>{};
+    for (final category in categories) {
+      final initial = categoryInitial(category.name);
+      if (initial != null) byId[category.id] = initial;
+    }
+    return VisibleCatalogFilter(
+      hiddenCategoryIds: hiddenCategoryIds.toList(),
+      hiddenInitials: hiddenInitials.toList(),
+      initialByCategoryId: byId,
+    );
+  }
+
+  /// Build from an id -> name map (disk path: the cached category names).
+  factory VisibleCatalogFilter.fromCategoryNames(
+    Map<String, String> names, {
+    required Set<String> hiddenCategoryIds,
+    required Set<String> hiddenInitials,
+  }) {
+    final byId = <String, String>{};
+    for (final entry in names.entries) {
+      final initial = categoryInitial(entry.value);
+      if (initial != null) byId[entry.key] = initial;
+    }
+    return VisibleCatalogFilter(
+      hiddenCategoryIds: hiddenCategoryIds.toList(),
+      hiddenInitials: hiddenInitials.toList(),
+      initialByCategoryId: byId,
+    );
+  }
+
+  bool isHidden(String? categoryId) {
+    if (categoryId != null && hiddenCategoryIds.contains(categoryId)) return true;
+    final initial = categoryId == null ? null : initialByCategoryId[categoryId];
+    return initial != null && hiddenInitials.contains(initial);
+  }
+
+  /// True when nothing is hidden: the visible body IS the raw body, so a
+  /// disk write must not pay the isolate round trip (sending a ~40MB
+  /// body across the port blocks the main isolate ~300ms at Trex scale
+  /// — the build #13 bench caught it). Write the raw body straight.
+  bool get isNoOp => hiddenCategoryIds.isEmpty && hiddenInitials.isEmpty;
+}
+
 
 /// One XMLTV feed fetch: the response body as a byte stream plus the
 /// conditional-fetch outcome (1.2.2 I9). [notModified] means the server
@@ -573,6 +648,39 @@ static Future<List<XtreamVodStream>> parseVodStreamsBody(String body) => compute
 
 static Future<List<XtreamSeries>> parseSeriesBody(String body) => compute(_parseSeries, body);
 
+/// Visible-only variants (1.2.4, catalog memory): the filter runs INSIDE
+/// the isolate parse, so the memo holds visible rows only — the decoded
+/// JSON is still fully materialised (unavoidable), but the typed row
+/// list never holds a hidden row, and neither the parse peak nor the
+/// steady state pays for the ~77% of rows in turned-off categories.
+/// The disk file itself is pruned separately at write time; these
+/// parsers are the defence for a stale full file (written before 1.2.4,
+/// or by a path that writes the raw body).
+static Future<List<XtreamLiveStream>> parseLiveStreamsBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_parseLiveStreamsVisible, _VisibleParseParams(body, filter));
+
+static Future<List<XtreamVodStream>> parseVodStreamsBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_parseVodStreamsVisible, _VisibleParseParams(body, filter));
+
+static Future<List<XtreamSeries>> parseSeriesBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_parseSeriesVisible, _VisibleParseParams(body, filter));
+
+/// Visible-only re-encode (1.2.4, catalog memory): decode + filter +
+/// re-encode the raw body in the isolate, so the disk write gets a
+/// visible-only payload without a main-isolate `jsonEncode` freeze
+/// (build #13: encoding 199k VOD rows on the UI isolate froze the app
+/// ~1.3s). The disk file stays a plain API payload the isolate parsers
+/// read unchanged — just pruned. Used by the sync disk write and the
+/// first-load fallback writes.
+static Future<String> encodeLiveStreamsBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_encodeLiveStreamsVisible, _VisibleParseParams(body, filter));
+
+static Future<String> encodeVodStreamsBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_encodeVodStreamsVisible, _VisibleParseParams(body, filter));
+
+static Future<String> encodeSeriesBodyVisible(String body, VisibleCatalogFilter filter) =>
+    compute(_encodeSeriesVisible, _VisibleParseParams(body, filter));
+
 static List<XtreamCategory> parseCategoriesBody(String body) =>
     _asObjectList(_decodeCatalogJson(body)).map(XtreamCategory.fromJson).toList();
   /// M3U playlist export for this account.
@@ -646,6 +754,68 @@ List<XtreamVodStream> _parseVodStreams(String body) =>
 
 List<XtreamSeries> _parseSeries(String body) =>
     parseFlexibleJsonList(_decodeCatalogJson(body), XtreamSeries.fromJson);
+
+/// Message for the visible-only parsers: the body plus the filter.
+/// Plain values only, like [IndexWriteParams].
+class _VisibleParseParams {
+  final String body;
+  final VisibleCatalogFilter filter;
+
+  const _VisibleParseParams(this.body, this.filter);
+}
+
+/// Like [parseFlexibleJsonList] but the filter runs DURING the row loop:
+/// a hidden row is parsed and dropped before it can join the list, so
+/// the isolate never builds the full typed list — that is what shrinks
+/// the parse peak, not just the steady state. Malformed rows are dropped
+/// exactly as the unfiltered parse drops them.
+List<T> _parseVisibleList<T>(
+  Object? value,
+  T Function(Map<String, dynamic> json) parse,
+  String? Function(T row) categoryIdOf,
+  VisibleCatalogFilter filter,
+) {
+  final result = <T>[];
+  for (final json in flexibleMapList(value)) {
+    try {
+      final row = parse(json);
+      if (!filter.isHidden(categoryIdOf(row))) result.add(row);
+    } catch (_) {
+      // A malformed row does not invalidate its siblings.
+    }
+  }
+  return result;
+}
+
+List<XtreamLiveStream> _parseLiveStreamsVisible(_VisibleParseParams params) => _parseVisibleList(
+      _decodeCatalogJson(params.body),
+      XtreamLiveStream.fromJson,
+      (row) => row.categoryId,
+      params.filter,
+    );
+
+List<XtreamVodStream> _parseVodStreamsVisible(_VisibleParseParams params) => _parseVisibleList(
+      _decodeCatalogJson(params.body),
+      XtreamVodStream.fromJson,
+      (row) => row.categoryId,
+      params.filter,
+    );
+
+List<XtreamSeries> _parseSeriesVisible(_VisibleParseParams params) => _parseVisibleList(
+      _decodeCatalogJson(params.body),
+      XtreamSeries.fromJson,
+      (row) => row.categoryId,
+      params.filter,
+    );
+
+String _encodeLiveStreamsVisible(_VisibleParseParams params) =>
+    jsonEncode(_parseLiveStreamsVisible(params).map((row) => row.toJson()).toList());
+
+String _encodeVodStreamsVisible(_VisibleParseParams params) =>
+    jsonEncode(_parseVodStreamsVisible(params).map((row) => row.toJson()).toList());
+
+String _encodeSeriesVisible(_VisibleParseParams params) =>
+    jsonEncode(_parseSeriesVisible(params).map((row) => row.toJson()).toList());
 
 class XtreamCategory {
   final String id;

@@ -552,13 +552,20 @@ class IptvSearchIndex {
   /// land's rows survive a later full sync and a full sync's rows
   /// survive a later partial one. Categories merge the same way.
   ///
+  /// 1.2.4 (catalog memory): [deleteCategoryIds] removes rows in hidden
+  /// categories in the same transaction — without it the merge would
+  /// keep rows cached before their category was hidden, and the prune
+  /// would never shrink the index. A refused warm partial still purges
+  /// nothing (that path never reaches here).
+  ///
   /// Meta semantics — the two numbers mean different things on purpose:
-  /// * [IptvSearchIndexState.rowCounts] for the type is the rows in the
-  ///   LATEST FETCH (the panel's catalog size — what the cache line and
-  ///   the sync dialog show), while the FTS table may hold MORE rows
-  ///   merged in from earlier partial lands. The probe's P1c pins this:
-  ///   after a partial land (5 rows) and a full sync (46,527 rows) the
-  ///   meta reads 46,527 AND the partial rows are searchable.
+  /// * [IptvSearchIndexState.rowCounts] for the type is the VISIBLE rows
+  ///   in the latest fetch (1.2.4: the index holds visible rows only —
+  ///   hidden rows are pruned at write time), while the FTS table may
+  ///   hold MORE rows merged in from earlier partial lands. The probe's
+  ///   P1c pins this: after a partial land (5 rows) and a full sync
+  ///   (46,527 rows) the meta reads 46,527 AND the partial rows are
+  ///   searchable.
   /// * [IptvSearchIndexState.lastSync] is stamped ONLY by a complete
   ///   sync ([syncStampMs] != null). A partial land leaves it untouched
   ///   (0 on a fresh row, which reads back as null — `last_sync_ms` is
@@ -566,6 +573,9 @@ class IptvSearchIndex {
   ///   than passing a null stamp) — lastSync == null (or rows == 0) is
   ///   what marks a type due for refetch, so the next bind/manual sync
   ///   retries it. A complete sync after a partial land stamps normally.
+  ///   1.2.4: a complete land with every category hidden stamps 0 rows —
+  ///   that is a deliberate empty land, not a cold type; the due checks
+  ///   must not treat a stamped 0 as cold (see [IptvClient]).
   /// The cache-line count is the meta count, so a partial land shows
   /// its real row count (e.g. 5 series rows) instead of the misleading 0.
   void upsertType({
@@ -574,11 +584,13 @@ class IptvSearchIndex {
     required List<IptvSearchIndexRow> rows,
     required Map<String, String> categories,
     required int? syncStampMs,
+    List<String> deleteCategoryIds = const [],
   }) {
     if (_closed) return;
     _db.execute('BEGIN IMMEDIATE;');
     try {
       _upsertRowsLocked(connectionId, type, rows);
+      _deleteRowsInCategoriesLocked(connectionId, type, deleteCategoryIds);
       _upsertCategoriesLocked(connectionId, type, categories);
       // A null stamp means "not synced": last_sync_ms is NOT NULL, so a
       // partial land stores 0 on a fresh row (which [lastSync] reads
@@ -624,6 +636,94 @@ class IptvSearchIndex {
       'DELETE FROM iptv_search_category WHERE connection_id = ? AND type = ?',
       [connectionId, type],
     );
+  }
+
+  /// Delete rows in [categoryIds] for one type (1.2.4 prune): the
+  /// upsert-merge keeps rows the fetch did not return, so a category
+  /// hidden after its rows landed would otherwise linger in search
+  /// forever. FTS rows go by rowid join, same pattern as the type
+  /// delete. Rows with a null category id are never matched — the
+  /// filter can only hide a row by its category id or initial, so a
+  /// null-category row is never hidden and must stay.
+  void _deleteRowsInCategoriesLocked(
+    String connectionId,
+    String type,
+    List<String> categoryIds,
+  ) {
+    if (categoryIds.isEmpty) return;
+    final placeholders = List.filled(categoryIds.length, '?').join(',');
+    _db.execute(
+      'DELETE FROM iptv_search_fts WHERE rowid IN '
+      '(SELECT rowid FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders))',
+      [connectionId, type, ...categoryIds],
+    );
+    _db.execute(
+      'DELETE FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders)',
+      [connectionId, type, ...categoryIds],
+    );
+  }
+
+  /// A single row by id (1.2.4, catalog memory): the id-resolution
+  /// fallback for a favourite/resume whose row left the visible memos.
+  /// The index still holds it until a sync prunes it; after a pruning
+  /// sync it returns null and the caller falls back to the snapshot.
+  IptvSearchIndexRow? resolveById(String connectionId, String type, int streamId) {
+    if (_closed) return null;
+    try {
+      final found = _db.select(
+        'SELECT * FROM iptv_search_item WHERE connection_id = ? AND type = ? AND stream_id = ? LIMIT 1',
+        [connectionId, type, streamId],
+      );
+      if (found.isEmpty) return null;
+      return IptvSearchIndexRow.fromDb(found.first);
+    } catch (e) {
+      appLogger.w('IPTV search index: resolve failed', error: e);
+      return null;
+    }
+  }
+
+  /// Rows in [type] that are visible under the CURRENT hidden sets
+  /// (1.2.4): the partial guard's denominator. The stored row count is
+  /// the visible land from the LAST sync — when the hidden set grew
+  /// since, it counts rows that are hidden now, so comparing the fresh
+  /// visible fetch against it would cry partial on a complete fetch
+  /// (and the type would stay due and re-sync on every bind). Counting
+  /// only currently-visible rows keeps the guard apples-to-apples: a
+  /// fetch is partial when it returns fewer than half the rows the
+  /// index holds for categories that are visible right now. A row with
+  /// a null category id is never hidden, so it always counts.
+  int visibleRowCount(
+    String connectionId,
+    String type,
+    Set<String> hiddenIds,
+    Set<String> hiddenInitials,
+  ) {
+    if (_closed) return 0;
+    try {
+      final names = categoryNames(connectionId, type);
+      final hiddenCats = <String>{
+        ...hiddenIds,
+        for (final entry in names.entries)
+          if (hiddenInitials.contains(categoryInitial(entry.value))) entry.key,
+      };
+      if (hiddenCats.isEmpty) {
+        final found = _db.select(
+          'SELECT COUNT(*) AS n FROM iptv_search_item WHERE connection_id = ? AND type = ?',
+          [connectionId, type],
+        );
+        return (found.first['n'] as int?) ?? 0;
+      }
+      final placeholders = List.filled(hiddenCats.length, '?').join(',');
+      final found = _db.select(
+        'SELECT COUNT(*) AS n FROM iptv_search_item WHERE connection_id = ? AND type = ? '
+        'AND (category_id IS NULL OR category_id NOT IN ($placeholders))',
+        [connectionId, type, ...hiddenCats],
+      );
+      return (found.first['n'] as int?) ?? 0;
+    } catch (e) {
+      appLogger.w('IPTV search index: visible row count failed', error: e);
+      return 0;
+    }
   }
 
   void _insertRowsLocked(String connectionId, String type, List<IptvSearchIndexRow> rows) {
@@ -916,13 +1016,16 @@ class IndexWriteParams {
   final String categoryBody;
   final int syncStampMs;
 
-  /// Categories turned off by the user (v1.1.0, Option B):
-  /// per-category ids and letter-group initials, exactly as stored on
-  /// the connection. Rows from these categories DO land in the index
-  /// now — the hidden sets only feed the [IndexWriteResult.hiddenSkipped]
-  /// diagnostic count; filtering happens at read time, never at write
-  /// time (the v1.0.16 write-time skip is what made un-hiding unable
-  /// to bring rows back).
+  /// Categories turned off by the user (1.2.4 prune — supersedes the
+  /// v1.1.0 Option B "disk stays full" split, FORK §45): per-category
+  /// ids and letter-group initials, exactly as stored on the
+  /// connection. Rows from these categories are PRUNED at write time —
+  /// skipped from the upsert and deleted from the index when a later
+  /// sync finds them — so the index holds visible rows only, and
+  /// [IndexWriteResult.hiddenSkipped] counts the rows pruned. Un-hiding
+  /// a category needs a re-sync to bring its rows back; the categories
+  /// screen says so with a Refresh action, so the un-hide never fails
+  /// silently the way the v1.0.16 skip did.
   final List<String> hiddenCategoryIds;
   final List<String> hiddenCategoryInitials;
 }
@@ -967,17 +1070,17 @@ class IndexWriteResult {
   final int droppedRows;
 
   /// Categories the fetched rows covered, out of the fetched category
-  /// list — the guard's numbers, for the same diagnostic. Since v1.1.0
-  /// these count ALL categories: hidden categories are included in both
-  /// numbers (the v1.0.16 visible-only denominator is gone with the
-  /// write-time skip).
+  /// list — the guard's numbers, for the same diagnostic. These count
+  /// ALL categories: hidden categories are included in both numbers —
+  /// the guard runs on the fetched rows, before the visible-only filter.
   final int coveredCategories;
   final int totalCategories;
 
-  /// Rows in hidden categories (v1.1.0): counted, NOT dropped — the
-  /// rows land in the index like any other and are filtered at read
-  /// time. Reported separately from [droppedRows] so the C1-vs-C3
-  /// diagnosis is not polluted by rows the user asked to exclude.
+  /// Rows in hidden categories (1.2.4): counted AND pruned — skipped
+  /// from the upsert and deleted from the index when a later sync finds
+  /// them, so the index holds visible rows only. Reported separately
+  /// from [droppedRows] so the C1-vs-C3 diagnosis is not polluted by
+  /// rows the user asked to exclude.
   final int hiddenSkipped;
 }
 
@@ -1021,23 +1124,38 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     };
     final hiddenIds = params.hiddenCategoryIds.toSet();
     final hiddenInitials = params.hiddenCategoryInitials.toSet();
-    // Option B (v1.1.0): the index holds the FULL catalog — no
-    // write-time skip. The v1.0.16 skip dropped hidden rows from the
-    // index and the disk file, so un-hiding a group could never bring
-    // back rows that were never written (Matt's phone: EN was hidden at
-    // the last write, so GoT/Friends were unfindable until a sync).
-    // Filtering happens at read time only now, so a toggle is instant
-    // and offline. The hidden sets below feed one diagnostic count.
-    final hiddenSkipped = rows
-        .where(
-          (row) => isHiddenIptvCategory(
-            row.categoryId,
-            row.categoryId == null ? null : categories[row.categoryId],
-            hiddenIds,
-            hiddenInitials,
-          ),
-        )
-        .length;
+    // 1.2.4 (catalog memory, Matt's prune decision — supersedes the
+    // v1.1.0 Option B "disk stays full" split, FORK §45): the index
+    // holds VISIBLE rows only. Hidden rows are skipped at write time,
+    // and rows already in the index from before their category was
+    // hidden are deleted after the upsert (the merge keeps rows the
+    // fetch did not return, so a skip alone would leave them lingering
+    // in search forever). The wire still downloads the full lists.
+    // Un-hiding a category needs a re-sync to bring its rows back; the
+    // categories screen shows a notice with a Refresh action when that
+    // is the case, so the un-hide never fails silently the way the
+    // v1.0.16 skip did. `rowCount` is the visible rows landed now.
+    var hiddenSkipped = 0;
+    final visibleRows = <IptvSearchIndexRow>[];
+    for (final row in rows) {
+      if (isHiddenIptvCategory(
+        row.categoryId,
+        row.categoryId == null ? null : categories[row.categoryId],
+        hiddenIds,
+        hiddenInitials,
+      )) {
+        hiddenSkipped++;
+      } else {
+        visibleRows.add(row);
+      }
+    }
+    // Category ids hidden by id or by initial, for the post-upsert
+    // delete of rows cached before their category was hidden.
+    final hiddenCategoryIds = <String>{
+      ...hiddenIds,
+      for (final entry in categories.entries)
+        if (hiddenInitials.contains(categoryInitial(entry.value))) entry.key,
+    };
     // Categories the fetched rows cover, out of the whole category
     // list — the guard's denominator counts ALL categories now (the
     // v1.0.16 visible-only denominator is gone with the skip): hiding
@@ -1096,12 +1214,13 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
       index.upsertType(
         connectionId: params.connectionId,
         type: params.type,
-        rows: rows,
+        rows: visibleRows,
         categories: categories,
         syncStampMs: null, // Partial land: no stamp, stays due for refetch.
+        deleteCategoryIds: hiddenCategoryIds.toList(),
       );
       return IndexWriteResult(
-        rowCount: rows.length,
+        rowCount: visibleRows.length,
         ms: ms(),
         partial: true,
         droppedRows: parsed.dropped,
@@ -1112,19 +1231,21 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     }
     // Complete list: upsert-merge (series fix, v1.0.16) — rows the fetch
     // did not return are KEPT, so a partial land's rows survive a later
-    // full sync. See [upsertType] for the meta semantics. Hiding every
-    // category no longer empties the land: the full rows land and stamp
-    // normally, and the read-time filter hides them — so the type is
-    // not re-fetched every bind, and un-hiding needs no sync at all.
+    // full sync. See [upsertType] for the meta semantics. 1.2.4: the
+    // merge keeps visible rows; rows in hidden categories are deleted
+    // by the same write (see `deleteCategoryIds`), so a category hidden
+    // after its rows landed does not linger in search. Un-hiding needs
+    // a re-sync; the categories screen says so with a Refresh action.
     index.upsertType(
       connectionId: params.connectionId,
       type: params.type,
-      rows: rows,
+      rows: visibleRows,
       categories: categories,
       syncStampMs: params.syncStampMs,
+      deleteCategoryIds: hiddenCategoryIds.toList(),
     );
     return IndexWriteResult(
-      rowCount: rows.length,
+      rowCount: visibleRows.length,
       ms: ms(),
       droppedRows: parsed.dropped,
       coveredCategories: covered.length,

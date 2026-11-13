@@ -19,6 +19,12 @@ class IptvResumeItem {
   final String? parentId;
   final String? parentTitle;
 
+  /// The item's category id (1.2.4, catalog memory): the precise signal
+  /// for whether a pruned resume entry needs a refresh — see
+  /// [IptvFavoriteItem.categoryId]. For an episode this is the SERIES
+  /// category. Null for rows saved before 1.2.4.
+  final String? categoryId;
+
   /// Playback position in milliseconds, from the player's report.
   final int positionMs;
 
@@ -39,6 +45,7 @@ class IptvResumeItem {
     this.libraryId,
     this.parentId,
     this.parentTitle,
+    this.categoryId,
     required this.positionMs,
     required this.durationMs,
     required this.updatedAtMs,
@@ -52,6 +59,7 @@ class IptvResumeItem {
     if (libraryId != null) 'libraryId': libraryId,
     if (parentId != null) 'parentId': parentId,
     if (parentTitle != null) 'parentTitle': parentTitle,
+    if (categoryId != null) 'categoryId': categoryId,
     'positionMs': positionMs,
     'durationMs': durationMs,
     'updatedAtMs': updatedAtMs,
@@ -86,6 +94,7 @@ class IptvResumeItem {
       libraryId: json['libraryId'] as String?,
       parentId: json['parentId'] as String?,
       parentTitle: json['parentTitle'] as String?,
+      categoryId: json['categoryId'] as String?,
       positionMs: positionMs,
       durationMs: durationMs,
       updatedAtMs: updatedAtMs,
