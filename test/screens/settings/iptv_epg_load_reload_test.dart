@@ -91,6 +91,20 @@ class _FakeXtreamApi extends XtreamApi {
     yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
   }
 
+  // 1.2.2 I9: the production feed path calls getXmltvFeed, not
+  // getXmltv/getXmltvStream — without this override every feed fetch is
+  // a real HTTP request to the fake host. Built on top of getXmltv so
+  // the xmltvDelay knob (W2/W3 spinner tests) still applies.
+  @override
+  Future<XmltvFeedFetch> getXmltvFeed({String? etag, String? lastModified, Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
+    return (
+      bytes: Stream<List<int>>.value(utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger))),
+      notModified: false,
+      etag: null,
+      lastModified: null,
+    );
+  }
+
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     if (xmltvDelay > Duration.zero) await Future<void>.delayed(xmltvDelay);
