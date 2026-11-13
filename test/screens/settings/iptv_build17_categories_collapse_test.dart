@@ -169,7 +169,7 @@ void main() {
 
       // EN covers all 6 Live TV categories: turning it off hides them
       // all, and the collapsed header's count follows without expanding.
-      await tester.tap(switchTileFor('EN — 11 categories'));
+      await tester.tap(switchTileFor('EN — 11 categories (all types)'));
       await tester.pumpAndSettle();
 
       expect(find.text('EN - Live 1'), findsNothing);

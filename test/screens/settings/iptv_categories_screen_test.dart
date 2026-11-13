@@ -91,8 +91,9 @@ void main() {
   Future<void> pumpScreen(
     WidgetTester tester,
     MultiServerProvider provider,
-    ConnectionRegistry registry,
-  ) async {
+    ConnectionRegistry registry, {
+    XtreamConnection? connection,
+  }) async {
     // Tall viewport: the screen's sections are slivers, and anything
     // below the fold + cache extent is never built — a SEE test must see
     // all of it at once, not scroll past the top to reach the bottom.
@@ -108,7 +109,7 @@ void main() {
         ],
         child: MaterialApp(
           theme: monoTheme(MonoPalette.dark),
-          home: IptvCategoriesScreen(connection: trexConnection()),
+          home: IptvCategoriesScreen(connection: connection ?? trexConnection()),
         ),
       ),
     );
@@ -144,8 +145,12 @@ void main() {
     // Initials: EN ×11 and NF ×9 offered, alphabetically; ES ×1 is below
     // the repeat threshold and never offered.
     expect(find.textContaining('Turn off whole groups at once'), findsOneWidget);
-    expect(find.text('EN — 11 categories'), findsOneWidget);
-    expect(find.text('NF — 9 categories'), findsOneWidget);
+    // v1.0.19: the header counts groups, and each row says its count
+    // covers all types (the counts are global across Live TV, Movies
+    // and TV Series).
+    expect(find.textContaining('2 groups, 0 hidden'), findsOneWidget);
+    expect(find.text('EN — 11 categories (all types)'), findsOneWidget);
+    expect(find.text('NF — 9 categories (all types)'), findsOneWidget);
     expect(find.textContaining('ES —'), findsNothing);
   });
 
@@ -182,12 +187,12 @@ void main() {
     final h = await harness();
     await pumpScreen(tester, h.provider, h.registry);
 
-    await tester.tap(switchTileFor('NF — 9 categories'));
+    await tester.tap(switchTileFor('NF — 9 categories (all types)'));
     await tester.pumpAndSettle();
 
     // The NF switch flips off, and every NF category row flips off with
     // it — 1 in Movies, 8 in Series — while the EN rows stay on.
-    expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF — 9 categories')).value, isFalse);
+    expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF — 9 categories (all types)')).value, isFalse);
     expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF')).value, isFalse);
     expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF - Series 8')).value, isFalse);
     expect(tester.widget<FocusableSwitchListTile>(switchTileFor('EN - Live 1')).value, isTrue);
@@ -205,7 +210,7 @@ void main() {
     final h = await harness();
     await pumpScreen(tester, h.provider, h.registry);
 
-    await tester.tap(switchTileFor('NF — 9 categories'));
+    await tester.tap(switchTileFor('NF — 9 categories (all types)'));
     await tester.pumpAndSettle();
     expect(find.text(t.iptvCategories.hiddenTotal(count: 9)), findsOneWidget);
 
@@ -214,6 +219,32 @@ void main() {
 
     expect(find.text(t.iptvCategories.hiddenTotal(count: 0)), findsOneWidget);
     expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF - Series 8')).value, isTrue);
+    final stored = await h.registry.list();
+    final storedTrex = stored.singleWhere((c) => c.id == 'trex') as XtreamConnection;
+    expect(storedTrex.hiddenCategoryInitials, isEmpty);
+  });
+
+  testWidgets('CONTROL: Show all also clears initials with no toggle on screen', (tester) async {
+    final h = await harness();
+    // ES is below the offer threshold (×1) and ZZ matches nothing — both
+    // are hidden with no switch to turn them back on. The old Show all
+    // only cleared offered initials, so these survived it.
+    final hidden = trexConnection().copyWith(hiddenCategoryInitials: ['ES', 'NF', 'ZZ']);
+    await h.registry.upsert(hidden);
+    await pumpScreen(tester, h.provider, h.registry, connection: hidden);
+
+    // 10 hidden rows (1 NF + 1 ES in Movies, 8 NF in Series); the groups
+    // header counts 3 hidden initials across 2 offered groups.
+    expect(find.text(t.iptvCategories.hiddenTotal(count: 10)), findsOneWidget);
+    expect(find.textContaining('2 groups, 3 hidden'), findsOneWidget);
+    expect(find.textContaining('ES —'), findsNothing);
+    expect(find.textContaining('ZZ —'), findsNothing);
+    expect(tester.widget<FocusableSwitchListTile>(switchTileFor('NF — 9 categories (all types)')).value, isFalse);
+
+    await tester.tap(find.text(t.iptvCategories.showAll));
+    await tester.pumpAndSettle();
+
+    expect(find.text(t.iptvCategories.hiddenTotal(count: 0)), findsOneWidget);
     final stored = await h.registry.list();
     final storedTrex = stored.singleWhere((c) => c.id == 'trex') as XtreamConnection;
     expect(storedTrex.hiddenCategoryInitials, isEmpty);

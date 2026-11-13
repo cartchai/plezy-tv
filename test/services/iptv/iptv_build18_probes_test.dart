@@ -627,6 +627,12 @@ void main() {
         await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         final results = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
+        // v1.0.19: the submit's sync is fire-and-forget, and its first
+        // fetch now waits on a prefs read (the schema version) — let it
+        // land before counting its calls, or the assertion races the
+        // sync's start. The diagnostics above are the first search's,
+        // taken before the wait, so the cold assertion still holds.
+        await client.searchIndexReady;
         // ignore: avoid_print
         print(
           'BUILD18-D4 control: titles=${results.map((i) => i.title).toList()} '

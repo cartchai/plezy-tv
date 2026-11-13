@@ -1687,6 +1687,18 @@ class Translations$search$en {
 		one: '1 matching title is in a category you turned off',
 		other: '${count} matching titles are in categories you turned off',
 	);
+
+	/// en: '(one) {1 matching title is in the ${group} group, which you turned off} (other) {${count} matching titles are in the ${group} group, which you turned off}'
+	String hiddenByCategoryFilterGroup({required num n, required Object group, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '1 matching title is in the ${group} group, which you turned off',
+		other: '${count} matching titles are in the ${group} group, which you turned off',
+	);
+
+	/// en: '(one) {1 matching title is in the ${groups} groups, which you turned off} (other) {${count} matching titles are in the ${groups} groups, which you turned off}'
+	String hiddenByCategoryFilterGroups({required num n, required Object groups, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '1 matching title is in the ${groups} groups, which you turned off',
+		other: '${count} matching titles are in the ${groups} groups, which you turned off',
+	);
 }
 
 // Path: hotkeys
@@ -3868,6 +3880,12 @@ class Translations$about$en {
 		'Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty',
 		'The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason',
 		'Old saved guide entries are now cleared out automatically instead of piling up on your phone',
+	];
+	List<String> get changelog2283 => [
+		'Turning a group back on now brings its channels and shows back right away, instead of leaving them missing until the next catalog sync',
+		'The groups screen now counts groups instead of categories, and each row says its count covers Live TV, Movies and TV Series',
+		'Show all now turns every group back on, including ones too small to have their own switch',
+		'When a search comes up empty because a group is turned off, it now names the group',
 	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
@@ -7081,6 +7099,9 @@ class Translations$iptvCategories$en {
 	/// en: '${total} categories, ${hidden} hidden'
 	String sectionCount({required Object total, required Object hidden}) => '${total} categories, ${hidden} hidden';
 
+	/// en: '${total} groups, ${hidden} hidden'
+	String groupsSectionCount({required Object total, required Object hidden}) => '${total} groups, ${hidden} hidden';
+
 	/// en: 'Turn off whole groups at once'
 	String get initialsHeading => 'Turn off whole groups at once';
 
@@ -7090,8 +7111,11 @@ class Translations$iptvCategories$en {
 	/// en: 'These letters start a lot of group names — turning one off hides every group that starts with it.'
 	String get initialsSubheadingM3u => 'These letters start a lot of group names — turning one off hides every group that starts with it.';
 
-	/// en: '${initial} — ${count} categories'
-	String initialRow({required Object initial, required Object count}) => '${initial} — ${count} categories';
+	/// en: '${initial} — ${count} categories (all types)'
+	String initialRow({required Object initial, required Object count}) => '${initial} — ${count} categories (all types)';
+
+	/// en: '${initial} — ${count} groups'
+	String initialRowM3u({required Object initial, required Object count}) => '${initial} — ${count} groups';
 
 	/// en: 'Show all'
 	String get showAll => 'Show all';
@@ -9655,6 +9679,8 @@ extension on Translations {
 			'search.allLibraries' => 'All libraries',
 			'search.noResultsInLibrary' => ({required Object library}) => 'No results in ${library}',
 			'search.hiddenByCategoryFilter' => ({required num n, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '1 matching title is in a category you turned off', other: '${count} matching titles are in categories you turned off', ), 
+			'search.hiddenByCategoryFilterGroup' => ({required num n, required Object group, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '1 matching title is in the ${group} group, which you turned off', other: '${count} matching titles are in the ${group} group, which you turned off', ), 
+			'search.hiddenByCategoryFilterGroups' => ({required num n, required Object groups, required Object count}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '1 matching title is in the ${groups} groups, which you turned off', other: '${count} matching titles are in the ${groups} groups, which you turned off', ), 
 			'hotkeys.setShortcutFor' => ({required Object actionName}) => 'Set Shortcut for ${actionName}',
 			'hotkeys.clearShortcut' => 'Clear shortcut',
 			'hotkeys.noShortcutSet' => 'No shortcut set',
@@ -10115,10 +10141,10 @@ extension on Translations {
 			'profiles.deleteProfileButton' => 'Delete profile',
 			'profiles.noConnectionsHint' => 'No connections — add one to use this profile.',
 			'profiles.noConnections' => 'No connections',
-			'profiles.plexHomeAccount' => 'Plex Home account',
-			'profiles.plexAccountChip' => ({required Object account}) => 'Plex account: ${account}',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.plexHomeAccount' => 'Plex Home account',
+			'profiles.plexAccountChip' => ({required Object account}) => 'Plex account: ${account}',
 			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
 			'profiles.connectionDefault' => 'Default',
 			'profiles.connectionAs' => ({required Object displayName}) => 'as ${displayName}',
@@ -10527,6 +10553,10 @@ extension on Translations {
 			'about.changelog2282.1' => 'Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty',
 			'about.changelog2282.2' => 'The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason',
 			'about.changelog2282.3' => 'Old saved guide entries are now cleared out automatically instead of piling up on your phone',
+			'about.changelog2283.0' => 'Turning a group back on now brings its channels and shows back right away, instead of leaving them missing until the next catalog sync',
+			'about.changelog2283.1' => 'The groups screen now counts groups instead of categories, and each row says its count covers Live TV, Movies and TV Series',
+			'about.changelog2283.2' => 'Show all now turns every group back on, including ones too small to have their own switch',
+			'about.changelog2283.3' => 'When a search comes up empty because a group is turned off, it now names the group',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10625,14 +10655,14 @@ extension on Translations {
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
 			'explore.badge.available' => 'Available',
 			'explore.badge.partiallyAvailable' => 'Partly available',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.availableIn4k' => '4K available',
 			'explore.badge.requested' => 'Requested',
 			'explore.badge.pendingApproval' => 'Pending approval',
 			'explore.badge.processing' => 'Processing',
 			'explore.badge.declined' => 'Declined',
 			'explore.badge.requestFailed' => 'Request failed',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.requested4k' => '4K requested',
 			'explore.badge.seasonsAvailable' => ({required Object available, required Object total}) => '${available}/${total} seasons',
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
@@ -11139,14 +11169,14 @@ extension on Translations {
 			'downloads.editSyncFilter' => 'Sync filter',
 			'downloads.syncAllItems' => 'Syncing all items',
 			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
 			'downloads.syncRuleAvailable' => 'Available',
 			'downloads.syncRuleOffline' => 'Offline',
 			'downloads.syncRuleSignInRequired' => 'Sign in required',
 			'downloads.syncRuleAccessDenied' => 'Access denied',
 			'downloads.syncRuleNotAvailableForProfile' => 'Not available for current profile',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.syncRuleUnknownServer' => 'Unknown server',
 			'downloads.syncRuleListCreated' => 'Sync rule created',
 			'downloads.backgroundWarning.bannerBlocked' => 'Downloads will stop when you leave the app',
@@ -11653,14 +11683,14 @@ extension on Translations {
 			'iptv.addConnection' => 'Add IPTV connection',
 			'iptv.addConnectionDescription' => 'Add an M3U playlist or Xtream Codes account',
 			'iptv.noConnections' => 'No IPTV connections yet',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.noConnectionsHint' => 'Add an M3U playlist or Xtream Codes account to watch live TV.',
 			'iptv.categoriesOff' => ({required Object count}) => '${count} categories off',
 			'iptv.categoriesAllOn' => 'All categories on',
 			'iptv.playlist' => 'Playlist',
 			'iptv.refreshPlaylists' => 'Refresh playlists',
 			'iptv.refreshPlaylistsDescription' => 'Re-fetch channels, movies and series from your providers',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.refreshDone' => 'Playlists refreshed',
 			'iptv.catalogSyncInterval' => 'Catalog sync interval',
 			'iptv.catalogSyncIntervalDescription' => 'How often the catalog (channels, movies and series) re-downloads for search',
@@ -11800,10 +11830,12 @@ extension on Translations {
 			'iptvCategories.seriesHeading' => 'TV Series categories',
 			'iptvCategories.groupsHeading' => 'Groups',
 			'iptvCategories.sectionCount' => ({required Object total, required Object hidden}) => '${total} categories, ${hidden} hidden',
+			'iptvCategories.groupsSectionCount' => ({required Object total, required Object hidden}) => '${total} groups, ${hidden} hidden',
 			'iptvCategories.initialsHeading' => 'Turn off whole groups at once',
 			'iptvCategories.initialsSubheading' => 'These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.',
 			'iptvCategories.initialsSubheadingM3u' => 'These letters start a lot of group names — turning one off hides every group that starts with it.',
-			'iptvCategories.initialRow' => ({required Object initial, required Object count}) => '${initial} — ${count} categories',
+			'iptvCategories.initialRow' => ({required Object initial, required Object count}) => '${initial} — ${count} categories (all types)',
+			'iptvCategories.initialRowM3u' => ({required Object initial, required Object count}) => '${initial} — ${count} groups',
 			'iptvCategories.showAll' => 'Show all',
 			'iptvCategories.hideAll' => 'Hide all',
 			'iptvCategories.loading' => 'Loading categories…',

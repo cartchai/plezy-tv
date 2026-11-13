@@ -978,6 +978,11 @@ void main() {
       expect(find.text('Version 1.0.18-2.25.0'), findsOneWidget);
       final newest18 = tester.getTopLeft(find.text('Version 1.0.18-2.25.0')).dy;
       expect(newest18, lessThan(newest17));
+      // Region-groups fix (v1.0.19): same guard for the new version —
+      // it must be present and sit above 1.0.18.
+      expect(find.text('Version 1.0.19-2.25.0'), findsOneWidget);
+      final newest19 = tester.getTopLeft(find.text('Version 1.0.19-2.25.0')).dy;
+      expect(newest19, lessThan(newest18));
     });
   });
 }

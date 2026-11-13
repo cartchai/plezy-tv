@@ -6,6 +6,11 @@
 // Failing-first: with EN hidden, "game of thrones" returns [] AND the
 // series section reports 1 hidden match (the show exists in "|EN| TOP
 // SERIES" — the filter hid it, the search did not miss it).
+//
+// v1.0.19 (Option B): the seed helper now writes the same full rows
+// production writes, so this test pins production behaviour, not a
+// seed-only shape — and the diagnostics now also name the hiding
+// initial (hiddenInitials == ['EN']).
 
 import 'dart:io';
 
@@ -72,6 +77,7 @@ void main() {
         expect(results, isEmpty);
         final diagnostics = client.lastSearchDiagnostics!;
         expect(diagnostics.series.hiddenMatches, 1);
+        expect(diagnostics.series.hiddenInitials, ['EN']);
         expect(diagnostics.series.returned, 0);
         expect(
           client.lastSearchHiddenMatchesForLibrary('iptv:conn-xt-1:series'),

@@ -626,49 +626,6 @@ class IptvSearchIndex {
     );
   }
 
-  /// Delete every indexed row of [type] whose category is in
-  /// [categoryIds] (v1.0.16, hidden-category purge): rows cached before
-  /// their category was hidden are removed at sync time, so the merge
-  /// in [upsertType] cannot keep them forever. Chunked at 500 ids like
-  /// the upsert delete — a single IN (...) with Trex-scale ids exceeds
-  /// SQLite's bound variable limit. Never throws.
-  void deleteRowsInCategories({
-    required String connectionId,
-    required String type,
-    required Set<String> categoryIds,
-  }) {
-    if (_closed || categoryIds.isEmpty) return;
-    try {
-      _db.execute('BEGIN IMMEDIATE;');
-      try {
-        const batchSize = 500;
-        final ids = categoryIds.toList(growable: false);
-        for (var start = 0; start < ids.length; start += batchSize) {
-          final end = (start + batchSize).clamp(0, ids.length);
-          final batch = ids.sublist(start, end);
-          final placeholders = List.filled(batch.length, '?').join(', ');
-          _db.execute(
-            'DELETE FROM iptv_search_fts WHERE rowid IN '
-            '(SELECT rowid FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders))',
-            [connectionId, type, ...batch],
-          );
-          _db.execute(
-            'DELETE FROM iptv_search_item WHERE connection_id = ? AND type = ? AND category_id IN ($placeholders)',
-            [connectionId, type, ...batch],
-          );
-        }
-        _db.execute('COMMIT;');
-      } catch (e) {
-        try {
-          _db.execute('ROLLBACK;');
-        } catch (_) {}
-        rethrow;
-      }
-    } catch (e) {
-      appLogger.w('IPTV search index: hidden-category purge failed', error: e);
-    }
-  }
-
   void _insertRowsLocked(String connectionId, String type, List<IptvSearchIndexRow> rows) {
     final itemStmt = _db.prepare(
       'INSERT INTO iptv_search_item (connection_id, type, stream_id, category_id, name, name_norm, thumb, rating, container_ext, summary, epg_channel_id, has_archive, archive_duration) '
@@ -959,10 +916,13 @@ class IndexWriteParams {
   final String categoryBody;
   final int syncStampMs;
 
-  /// Categories turned off by the user (v1.0.16, hidden-category skip):
+  /// Categories turned off by the user (v1.0.19, Option B):
   /// per-category ids and letter-group initials, exactly as stored on
-  /// the connection. Rows from these categories never land in the index
-  /// (and never reach the disk file — see [IndexWriteResult.filteredBody]).
+  /// the connection. Rows from these categories DO land in the index
+  /// now — the hidden sets only feed the [IndexWriteResult.hiddenSkipped]
+  /// diagnostic count; filtering happens at read time, never at write
+  /// time (the v1.0.16 write-time skip is what made un-hiding unable
+  /// to bring rows back).
   final List<String> hiddenCategoryIds;
   final List<String> hiddenCategoryInitials;
 }
@@ -978,7 +938,6 @@ class IndexWriteResult {
     this.coveredCategories = 0,
     this.totalCategories = 0,
     this.hiddenSkipped = 0,
-    this.filteredBody,
   });
 
   final int rowCount;
@@ -987,11 +946,11 @@ class IndexWriteResult {
   /// Non-null when nothing was written: 'no-categories' (the category
   /// list was empty, so the hidden filter and prefix strip would have
   /// nothing to work from) or 'partial-kept' (the rows cover fewer than
-  /// half the VISIBLE categories — a crawl-shaped / partial source,
-  /// never a complete list — and the index already has rows for the
-  /// type, so the old rows are kept). The caller keeps the old index
-  /// rows in both cases. 'empty-response' when the catalog body parsed
-  /// to zero rows.
+  /// half the categories — a crawl-shaped / partial source, never a
+  /// complete list — and the index already has rows for the type, so
+  /// the old rows are kept). The caller keeps the old index rows in
+  /// both cases. 'empty-response' when the catalog body parsed to zero
+  /// rows.
   final String? skippedReason;
 
   /// True when rows WERE written but the fetched list was partial (it
@@ -1008,22 +967,18 @@ class IndexWriteResult {
   final int droppedRows;
 
   /// Categories the fetched rows covered, out of the fetched category
-  /// list — the guard's numbers, for the same diagnostic. Since v1.0.16
-  /// these count VISIBLE categories only (see the hidden-category skip):
-  /// hidden categories are excluded from both numbers.
+  /// list — the guard's numbers, for the same diagnostic. Since v1.0.19
+  /// these count ALL categories: hidden categories are included in both
+  /// numbers (the v1.0.16 visible-only denominator is gone with the
+  /// write-time skip).
   final int coveredCategories;
   final int totalCategories;
 
-  /// Rows dropped by the hidden-category skip (v1.0.16) — reported
-  /// separately from [droppedRows] so the C1-vs-C3 diagnosis is not
-  /// polluted by rows the user asked to exclude.
+  /// Rows in hidden categories (v1.0.19): counted, NOT dropped — the
+  /// rows land in the index like any other and are filtered at read
+  /// time. Reported separately from [droppedRows] so the C1-vs-C3
+  /// diagnosis is not polluted by rows the user asked to exclude.
   final int hiddenSkipped;
-
-  /// The catalog body with hidden-category rows removed (v1.0.16), for
-  /// the caller to write to the disk catalog instead of the raw body —
-  /// so the disk file holds visible rows only. Null when the body did
-  /// not decode to a list (the caller then falls back to the raw body).
-  final String? filteredBody;
 }
 
 /// True when the category with [categoryId] and display [categoryName]
@@ -1036,75 +991,6 @@ bool isHiddenIptvCategory(String? categoryId, String? categoryName, Set<String> 
   if (categoryId != null && hiddenIds.contains(categoryId)) return true;
   final initial = categoryInitial(categoryName);
   return initial != null && hiddenInitials.contains(initial);
-}
-
-/// Drop hidden-category entries from a decoded catalog list (v1.0.16).
-/// An entry is hidden when its `category_id` names a category that is
-/// hidden by id or by initial (resolved against [categories], the
-/// id → name map from the category body). Entries with no category id,
-/// or whose category is not in the map, are KEPT — the filter must
-/// never hide what it cannot prove hidden. Malformed (non-map) entries
-/// are kept too; the typed parse counts them as dropped, not hidden.
-({List<dynamic> visible, int hiddenSkipped}) filterHiddenCatalogEntries(
-  List<dynamic> decoded,
-  Map<String, String> categories,
-  Set<String> hiddenIds,
-  Set<String> hiddenInitials,
-) {
-  if (hiddenIds.isEmpty && hiddenInitials.isEmpty) return (visible: decoded, hiddenSkipped: 0);
-  final visible = <dynamic>[];
-  var hiddenSkipped = 0;
-  for (final entry in decoded) {
-    if (entry is Map<String, dynamic>) {
-      final categoryId = entry['category_id']?.toString();
-      if (categoryId != null &&
-          categoryId.isNotEmpty &&
-          isHiddenIptvCategory(categoryId, categories[categoryId], hiddenIds, hiddenInitials)) {
-        hiddenSkipped++;
-        continue;
-      }
-    }
-    visible.add(entry);
-  }
-  return (visible: visible, hiddenSkipped: hiddenSkipped);
-}
-
-/// Params for [filterHiddenCatalogBody]: plain values only, so [compute]
-/// can carry them into a background isolate.
-class FilterHiddenCatalogBodyParams {
-  const FilterHiddenCatalogBodyParams({
-    required this.catalogBody,
-    required this.categoryBody,
-    required this.hiddenCategoryIds,
-    required this.hiddenCategoryInitials,
-  });
-
-  final String catalogBody;
-  final String categoryBody;
-  final List<String> hiddenCategoryIds;
-  final List<String> hiddenCategoryInitials;
-}
-
-/// The catalog body with hidden-category rows removed (v1.0.16), for
-/// the first-load disk write: the browse warm-up writes the raw body
-/// verbatim (build #13 — a main-isolate re-encode of a 200k-row catalog
-/// froze the app), so the filter runs in a background isolate instead.
-/// Returns the filtered JSON; a body that does not decode to a list is
-/// returned unchanged.
-String filterHiddenCatalogBody(FilterHiddenCatalogBodyParams params) {
-  final decoded = _decodeJson(params.catalogBody);
-  if (decoded is! List) return params.catalogBody;
-  final categories = <String, String>{
-    for (final c in parseFlexibleJsonList(_decodeJson(params.categoryBody), XtreamCategory.fromJson))
-      c.id: c.name,
-  };
-  final filtered = filterHiddenCatalogEntries(
-    decoded,
-    categories,
-    params.hiddenCategoryIds.toSet(),
-    params.hiddenCategoryInitials.toSet(),
-  );
-  return jsonEncode(filtered.visible);
 }
 
 /// Background-isolate index write (build #23): parse one type's catalog
@@ -1135,34 +1021,28 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     };
     final hiddenIds = params.hiddenCategoryIds.toSet();
     final hiddenInitials = params.hiddenCategoryInitials.toSet();
-    // Hidden-category skip (v1.0.16): rows from turned-off categories
-    // never land — not in the index, and not in the disk file (the
-    // caller writes [IndexWriteResult.filteredBody] instead of the raw
-    // body). The typed rows and the filtered body are cut from the same
-    // decoded list, so the two stores agree exactly.
-    final filtered = decoded is List
-        ? filterHiddenCatalogEntries(decoded, categories, hiddenIds, hiddenInitials)
-        : (visible: const <dynamic>[], hiddenSkipped: 0);
-    final filteredBody = decoded is List ? jsonEncode(filtered.visible) : null;
-    final visibleRows = rows
+    // Option B (v1.0.19): the index holds the FULL catalog — no
+    // write-time skip. The v1.0.16 skip dropped hidden rows from the
+    // index and the disk file, so un-hiding a group could never bring
+    // back rows that were never written (Matt's phone: EN was hidden at
+    // the last write, so GoT/Friends were unfindable until a sync).
+    // Filtering happens at read time only now, so a toggle is instant
+    // and offline. The hidden sets below feed one diagnostic count.
+    final hiddenSkipped = rows
         .where(
-          (row) => !isHiddenIptvCategory(
+          (row) => isHiddenIptvCategory(
             row.categoryId,
             row.categoryId == null ? null : categories[row.categoryId],
             hiddenIds,
             hiddenInitials,
           ),
         )
-        .toList(growable: false);
-    // Categories the visible rows cover, out of the VISIBLE category
-    // list — the guard's denominator counts visible categories only
-    // (v1.0.16): hidden categories must not make every fetch look
-    // partial, or hiding most categories would break the series fix.
-    final visibleCategories = {
-      for (final entry in categories.entries)
-        if (!isHiddenIptvCategory(entry.key, entry.value, hiddenIds, hiddenInitials)) entry.key,
-    };
-    final covered = {for (final row in visibleRows) row.categoryId}.intersection(visibleCategories);
+        .length;
+    // Categories the fetched rows cover, out of the whole category
+    // list — the guard's denominator counts ALL categories now (the
+    // v1.0.16 visible-only denominator is gone with the skip): hiding
+    // most categories no longer changes what counts as complete.
+    final covered = {for (final row in rows) row.categoryId}.intersection(categories.keys.toSet());
     int ms() => DateTime.now().difference(started).inMilliseconds;
     if (rows.isEmpty) {
       return IndexWriteResult(
@@ -1186,28 +1066,8 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         droppedRows: parsed.dropped,
       );
     }
-    final isPartial = visibleCategories.isNotEmpty && covered.length / visibleCategories.length < 0.5;
+    final isPartial = categories.isNotEmpty && covered.length / categories.length < 0.5;
     final index = IptvSearchIndex._(db, isMemory: false);
-    // Hidden ids to purge: explicitly hidden ids, plus every category
-    // in the list whose initial is hidden. The merge keeps rows the
-    // fetch did not return, so without the purge a show cached before
-    // its category was hidden would linger in search indefinitely —
-    // the purge runs at sync time, on every successful write.
-    final hiddenCategoryIds = {
-      ...hiddenIds,
-      for (final entry in categories.entries)
-        if (isHiddenIptvCategory(entry.key, entry.value, hiddenIds, hiddenInitials)) entry.key,
-    };
-    void purgeHidden() {
-      if (hiddenCategoryIds.isNotEmpty) {
-        index.deleteRowsInCategories(
-          connectionId: params.connectionId,
-          type: params.type,
-          categoryIds: hiddenCategoryIds,
-        );
-      }
-    }
-
     if (isPartial) {
       // COLD-TYPE EXCEPTION (series fix, v1.0.16): when the index has 0
       // rows for the type, refusing the whole write makes the gap
@@ -1229,51 +1089,47 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
           skippedReason: 'partial-kept',
           droppedRows: parsed.dropped,
           coveredCategories: covered.length,
-          totalCategories: visibleCategories.length,
-          hiddenSkipped: filtered.hiddenSkipped,
+          totalCategories: categories.length,
+          hiddenSkipped: hiddenSkipped,
         );
       }
       index.upsertType(
         connectionId: params.connectionId,
         type: params.type,
-        rows: visibleRows,
+        rows: rows,
         categories: categories,
         syncStampMs: null, // Partial land: no stamp, stays due for refetch.
       );
-      purgeHidden();
       return IndexWriteResult(
-        rowCount: visibleRows.length,
+        rowCount: rows.length,
         ms: ms(),
         partial: true,
         droppedRows: parsed.dropped,
         coveredCategories: covered.length,
-        totalCategories: visibleCategories.length,
-        hiddenSkipped: filtered.hiddenSkipped,
-        filteredBody: filteredBody,
+        totalCategories: categories.length,
+        hiddenSkipped: hiddenSkipped,
       );
     }
     // Complete list: upsert-merge (series fix, v1.0.16) — rows the fetch
     // did not return are KEPT, so a partial land's rows survive a later
-    // full sync. See [upsertType] for the meta semantics. When every
-    // category is hidden the visible list is empty and the guard above
-    // does not treat it as partial: the empty land stamps normally, so
-    // the type is not re-fetched every bind.
+    // full sync. See [upsertType] for the meta semantics. Hiding every
+    // category no longer empties the land: the full rows land and stamp
+    // normally, and the read-time filter hides them — so the type is
+    // not re-fetched every bind, and un-hiding needs no sync at all.
     index.upsertType(
       connectionId: params.connectionId,
       type: params.type,
-      rows: visibleRows,
+      rows: rows,
       categories: categories,
       syncStampMs: params.syncStampMs,
     );
-    purgeHidden();
     return IndexWriteResult(
-      rowCount: visibleRows.length,
+      rowCount: rows.length,
       ms: ms(),
       droppedRows: parsed.dropped,
       coveredCategories: covered.length,
-      totalCategories: visibleCategories.length,
-      hiddenSkipped: filtered.hiddenSkipped,
-      filteredBody: filteredBody,
+      totalCategories: categories.length,
+      hiddenSkipped: hiddenSkipped,
     );
   } finally {
     db.close();

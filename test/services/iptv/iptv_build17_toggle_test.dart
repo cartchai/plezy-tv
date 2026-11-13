@@ -26,6 +26,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/ids.dart';
 import 'package:plezy/media/iptv_client.dart';
+import 'package:plezy/services/base_shared_preferences_service.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
@@ -56,7 +57,14 @@ void main() {
   /// Seed the disk catalog with the fake panel's rows (build #23: the
   /// warm-ups read the disk, and the seed warms the index from it — so
   /// the catalogs are warm with zero panel requests).
+  ///
+  /// v1.0.19: the seeded disk holds the FULL catalog, as a v1.0.19+
+  /// build would have written it — stamp schema version 2, or the
+  /// first sync would re-fetch everything as a repair and the
+  /// zero-panel-requests warm-up assertion below would be vacuous.
   Future<void> seedDisk() async {
+    final prefs = await BaseSharedPreferencesService.sharedCache();
+    await prefs.setInt('iptv_catalog_schema_v:conn-xt-1', 2);
     const cache = IptvCatalogDiskCache();
     const connectionId = 'conn-xt-1';
     await cache.write(

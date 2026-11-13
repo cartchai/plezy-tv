@@ -330,15 +330,20 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
   }
 
   void _setAllInitials(bool shown) {
+    if (shown) {
+      // Show all means show ALL (v1.0.19): clear every hidden initial,
+      // including ones below the offer threshold or in the content-word
+      // denylist that have no toggle on screen — the old code only
+      // cleared the offered ones, so a group hidden that way could
+      // never come back from this screen.
+      unawaited(_persist(_withHiddenInitials(const <String>{})));
+      return;
+    }
     final initials = _initials;
     if (initials == null) return;
     final next = Set<String>.of(_hiddenInitials);
     for (final initial in initials) {
-      if (shown) {
-        next.remove(initial.initial);
-      } else {
-        next.add(initial.initial);
-      }
+      next.add(initial.initial);
     }
     unawaited(_persist(_withHiddenInitials(next)));
   }
@@ -540,8 +545,10 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       );
     }
     final hidden = _hiddenInitials.length;
+    // v1.0.19: the header counts GROUPS, not categories — the old
+    // sectionCount label said "37 categories" for 37 groups.
     final title =
-        '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.sectionCount(total: initials.length, hidden: hidden)}';
+        '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.groupsSectionCount(total: initials.length, hidden: hidden)}';
     // Build #16: virtualized like the category sections — the subheading
     // and the Show/Hide buttons are card items 0–1, the initials follow.
     // A toggle rebuilds only the rows in view (see [_groupCard]).
@@ -592,7 +599,9 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
             total: initials.length + 2,
             child: FocusableSwitchListTile(
               title: Text(
-                t.iptvCategories.initialRow(initial: initial.initial, count: initial.count),
+                _isXtream
+                    ? t.iptvCategories.initialRow(initial: initial.initial, count: initial.count)
+                    : t.iptvCategories.initialRowM3u(initial: initial.initial, count: initial.count),
               ),
               value: !_hiddenInitials.contains(initial.initial),
               onChanged: (shown) => _toggleInitial(initial.initial, shown),

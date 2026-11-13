@@ -312,7 +312,22 @@ class IptvClient implements MediaServerClient {
     if (diagnostics == null) return 0;
     if (libraryId == _seriesLibraryId) return diagnostics.series.hiddenMatches;
     if (libraryId == _moviesLibraryId) return diagnostics.movies.hiddenMatches;
+    if (libraryId == _liveLibraryId) return diagnostics.live.hiddenMatches;
     return 0;
+  }
+
+  /// The letter-group initials that hid the last search's matches, for
+  /// one library (v1.0.19): the search screen's empty state names the
+  /// hiding group instead of only counting. Empty when there was no
+  /// search yet, when nothing was hidden, or when the library is not
+  /// one of this connection's libraries.
+  List<String> lastSearchHiddenGroupsForLibrary(String libraryId) {
+    final diagnostics = _lastSearchDiagnostics;
+    if (diagnostics == null) return const [];
+    if (libraryId == _seriesLibraryId) return diagnostics.series.hiddenInitials;
+    if (libraryId == _moviesLibraryId) return diagnostics.movies.hiddenInitials;
+    if (libraryId == _liveLibraryId) return diagnostics.live.hiddenInitials;
+    return const [];
   }
 
   // -- Local search index (build #23) -------------------------------------
@@ -468,8 +483,9 @@ class IptvClient implements MediaServerClient {
               // stamping now told the sync this type was just synced, so
               // a days-old disk was never refreshed for a week.
               syncStampMs: catalog.fetchedAt.millisecondsSinceEpoch,
-              // v1.0.16 (hidden-category skip): the seed lands visible
-              // rows only, from whatever the disk file holds.
+              // v1.0.19 (Option B): the seed lands the FULL rows from
+              // whatever the disk file holds — the hidden sets only
+              // feed the isolate's hiddenSkipped diagnostic count.
               hiddenCategoryIds: _hiddenCategories.toList(),
               hiddenCategoryInitials: _hiddenCategoryInitials.toList(),
             ),
@@ -553,44 +569,48 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// SharedPreferences key for the hidden-category fingerprint (v1.0.16,
-  /// hidden-category skip): the hidden id + initial sets as of the last
-  /// completed sync, per connection.
-  String get _hiddenFingerprintPrefsKey => 'iptv_hidden_fingerprint:${connection.id}';
+  /// The current catalog schema (v1.0.19): index + disk files hold the
+  /// FULL catalog, filtered only at read time. A stored version below
+  /// this means the files were written by the v1.0.16 lossy schema and
+  /// the next sync re-fetches every type once to repair them.
+  static const _currentCatalogSchemaVersion = 2;
 
-  /// The hidden sets as one comparable string (sorted, so set order
-  /// never matters). A change means a category was hidden or re-enabled
-  /// since the last sync, so its rows are missing from the index (hidden)
-  /// or stale (re-enabled) and the type is due even when the interval
-  /// says it is fresh — otherwise a re-enabled category's rows would
-  /// never be fetched.
-  String _hiddenCategoriesFingerprint() {
-    final ids = _hiddenCategories.toList()..sort();
-    final initials = _hiddenCategoryInitials.toList()..sort();
-    return 'ids:${ids.join(',')};initials:${initials.join(',')}';
-  }
+  /// SharedPreferences key for the catalog schema version (v1.0.19,
+  /// Option B): which schema the stored index + disk files were written
+  /// under, per connection. Version 2 is the first schema whose index +
+  /// disk hold the FULL catalog; version 1 (or absent) is the v1.0.16
+  /// lossy schema, whose files were written visible-only and must be
+  /// re-fetched once (the schema repair).
+  String get _catalogSchemaPrefsKey => 'iptv_catalog_schema_v:${connection.id}';
 
-  /// The fingerprint stored by the last completed sync, or null before
-  /// the first sync (no baseline to compare against). Never throws.
-  Future<String?> _readHiddenFingerprint() async {
+  /// The catalog schema version the last completed sync stamped, or 0
+  /// before any sync (no baseline — the repair runs on the first sync),
+  /// or -1 when the version cannot be read at all. The -1 is not "old":
+  /// in a raw background isolate the prefs channel is unavailable, so
+  /// the read throws and the version is UNKNOWN — forcing a repair on
+  /// inconclusive evidence would re-fetch the whole catalog on every
+  /// background run and break the R4 due check (the probe pin). The
+  /// repair fires only on positive evidence (a readable version < 2).
+  /// Never throws.
+  Future<int> _readCatalogSchemaVersion() async {
     try {
       final prefs = await BaseSharedPreferencesService.sharedCache();
-      return prefs.getString(_hiddenFingerprintPrefsKey);
+      return prefs.getInt(_catalogSchemaPrefsKey) ?? 0;
     } catch (e) {
-      appLogger.w('IPTV: hidden fingerprint unreadable', error: e);
-      return null;
+      appLogger.w('IPTV: catalog schema version unreadable', error: e);
+      return -1;
     }
   }
 
-  /// Record the hidden sets as synced (v1.0.16): called only after a
-  /// sync loop completes, never on abort — an aborted run must not claim
-  /// the new hidden state is synced. Never throws.
-  Future<void> _writeHiddenFingerprint(String fingerprint) async {
+  /// Record the catalog schema version as synced (v1.0.19): called only
+  /// after a sync loop completes cleanly, never on abort — an aborted
+  /// run must not claim the repair is done. Never throws.
+  Future<void> _writeCatalogSchemaVersion(int version) async {
     try {
       final prefs = await BaseSharedPreferencesService.sharedCache();
-      await prefs.setString(_hiddenFingerprintPrefsKey, fingerprint);
+      await prefs.setInt(_catalogSchemaPrefsKey, version);
     } catch (e) {
-      appLogger.w('IPTV: hidden fingerprint unwritable', error: e);
+      appLogger.w('IPTV: catalog schema version unwritable', error: e);
     }
   }
 
@@ -742,18 +762,23 @@ class IptvClient implements MediaServerClient {
     final intervalHours = intervalHoursOverride ?? _catalogSyncIntervalHours();
     final dbPath = await IptvSearchIndex.dbFilePath();
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    // v1.0.16 (hidden-category skip): the hidden sets as of the last
-    // completed sync. A change since then means a category's rows are
-    // missing from the index (newly hidden — purged) or stale (newly
-    // re-enabled — never fetched), so every type is due even when the
-    // interval says it is fresh. A first sync has no baseline, so it
-    // fetches everything anyway. A filter change is the user asking for
-    // those rows back (or gone), so it also overrides a manual-only
-    // interval — the next bind completes their toggle instead of leaving
-    // the app looking unchanged.
-    final hiddenFingerprint = _hiddenCategoriesFingerprint();
-    final storedFingerprint = await _readHiddenFingerprint();
-    final hiddenChanged = storedFingerprint != null && storedFingerprint != hiddenFingerprint;
+    // v1.0.19 (Option B): the stored catalog schema. Version 2 is the
+    // first schema whose index + disk files hold the FULL catalog (the
+    // v1.0.16 write-time skip wrote visible rows only, so a pre-1.0.19
+    // index/disk is lossy: un-hiding a group could not bring back rows
+    // that were never written). When the stored version is below 2 the
+    // next sync re-fetches every type once — the repair — and the
+    // version is stamped only on a clean run (same D1 rule as the old
+    // hidden fingerprint: a failed/empty/oversize/partial-kept leg, or
+    // a transport failure, leaves the version unstamped so the next
+    // sync retries the repair). A hidden-set change no longer forces a
+    // sync: filtering happens at read time now, so a toggle is instant
+    // and offline and the stored catalog is unaffected.
+    final storedSchemaVersion = await _readCatalogSchemaVersion();
+    // -1 means unreadable (raw isolate): no repair without evidence.
+    final schemaRepair =
+        storedSchemaVersion >= 0 &&
+        storedSchemaVersion < _currentCatalogSchemaVersion;
     // Build #28: every sync owns an AbortController, registered so
     // [cancelBackgroundWork] can stop it when the app backgrounds. A
     // caller-passed controller (the manual refresh popup's Cancel) is
@@ -770,7 +795,7 @@ class IptvClient implements MediaServerClient {
         abort.throwIfAborted();
         final lastSync = index.lastSync(connection.id)[type];
         final indexedCount = index.rowCounts(connection.id)[type] ?? 0;
-        if (!force && !hiddenChanged && intervalHours > 0 && lastSync != null && indexedCount > 0) {
+        if (!force && !schemaRepair && intervalHours > 0 && lastSync != null && indexedCount > 0) {
           final ageHours = DateTime.now().difference(lastSync).inHours;
           if (ageHours < intervalHours) {
             skipped[type] = 'up-to-date';
@@ -778,7 +803,7 @@ class IptvClient implements MediaServerClient {
             continue;
           }
         }
-        if (!force && !hiddenChanged && intervalHours == 0 && indexedCount > 0) {
+        if (!force && !schemaRepair && intervalHours == 0 && indexedCount > 0) {
           // Manual-only interval and the index already has rows: only
           // an explicit manual refresh (force) syncs.
           skipped[type] = 'up-to-date';
@@ -891,8 +916,8 @@ class IptvClient implements MediaServerClient {
               catalogBody: body,
               categoryBody: jsonEncode(categories.map((c) => c.toJson()).toList()),
               syncStampMs: nowMs,
-              // v1.0.16 (hidden-category skip): the isolate lands
-              // visible rows only and returns the filtered body for disk.
+              // v1.0.19 (Option B): the isolate lands the FULL rows;
+              // the hidden sets only feed its hiddenSkipped count.
               hiddenCategoryIds: _hiddenCategories.toList(),
               hiddenCategoryInitials: _hiddenCategoryInitials.toList(),
             ),
@@ -907,7 +932,7 @@ class IptvClient implements MediaServerClient {
             // one (C3: dropped > 0) on the next failure.
             if (result.skippedReason == 'partial-kept') {
               appLogger.i(
-                'IPTV: catalog sync skipped $type as partial-kept (covered ${result.coveredCategories}/${result.totalCategories} visible categories, ${result.droppedRows} rows dropped in parse, ${result.hiddenSkipped} hidden)',
+                'IPTV: catalog sync skipped $type as partial-kept (covered ${result.coveredCategories}/${result.totalCategories} categories, ${result.droppedRows} rows dropped in parse, ${result.hiddenSkipped} in hidden categories)',
               );
             }
             continue;
@@ -920,7 +945,7 @@ class IptvClient implements MediaServerClient {
             );
           } else if (result.hiddenSkipped > 0) {
             appLogger.i(
-              'IPTV: catalog sync landed $type (${result.rowCount} visible rows, ${result.hiddenSkipped} hidden-category rows skipped)',
+              'IPTV: catalog sync landed $type (${result.rowCount} rows, ${result.hiddenSkipped} in hidden categories — filtered at read time)',
             );
           }
           // Build #23 (startup rule): the sync is the ONLY catalog
@@ -940,23 +965,15 @@ class IptvClient implements MediaServerClient {
           // due) refreshes it when the panel answers in full.
           if (!result.partial) {
             try {
-              // v1.0.16 (hidden-category skip): the disk file holds the
-              // filtered body (visible rows only), so the cache size and
-              // the seed both reflect what the user can see. The raw
-              // body is the fallback when the isolate could not build
-              // one (a body that did not decode to a list) — and when
-              // the filtered body is EMPTY: an empty disk file is a
-              // miss, not a catalog (`_readDiskCatalog` deletes it and
-              // refetches), so an all-hidden type keeps the raw body on
-              // disk instead of a file the next load would delete. The
-              // rows are still hidden at read time and absent from the
-              // index; the file only exists so the load does not
-              // re-fetch on every browse while everything is hidden.
-              final diskBody = result.filteredBody;
+              // v1.0.19 (Option B): the disk file holds the FULL catalog
+              // (the raw body, verbatim) — the v1.0.16 filtered body is
+              // gone. The cache size and the seed now reflect the whole
+              // catalog; the read-time filter hides rows, never the
+              // store.
               await _catalogCache.write(
                 connection.id,
                 _diskDatasetFor(type),
-                diskBody != null && diskBody != '[]' ? diskBody : body,
+                body,
               );
               await _catalogCache.write(
                 connection.id,
@@ -965,10 +982,12 @@ class IptvClient implements MediaServerClient {
               );
               // fetchedRows is set by the fetch try above; every failure
               // path (throw, empty, partial, oversize) continues past here.
-              // The memoized publish carries visible rows only, so a
-              // hidden row never sits in memory waiting for the read
-              // filter to catch it.
-              _publishSyncedCatalog(type, _visibleRows(fetchedRows, categories), categories);
+              // The memoized publish carries ALL fetched rows now — every
+              // listing consumer filters hidden categories at read time
+              // (browse, categories, guide, search), so a hidden row
+              // never surfaces; a direct id resolve (favourite/resume)
+              // still opens it, as before v1.0.16.
+              _publishSyncedCatalog(type, fetchedRows, categories);
             } catch (e) {
               appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
             }
@@ -980,33 +999,33 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
         }
       }
-      // v1.0.16 (D1 fix): record the hidden sets as synced ONLY when
-      // the run actually applied them. A type skipped 'failed',
-      // 'empty-response', 'oversize' or 'partial-kept' kept its old
-      // rows with a recent lastSync, so writing the fingerprint would
-      // make the next bind skip it as up-to-date and the re-enabled
-      // rows would not come back for up to a week (the 168 h default)
-      // with no indication why. The partial-kept trigger is the one
-      // Matt's panel hits every day (it persistently returns partial
-      // series lists); the transport trigger is the one his flaky
-      // panel hits right now. Deliberately NOT the hasFailure mirror:
-      // 'cold' does not block (a cold type has no rows and no lastSync,
-      // so it stays due and its first fetch filters with the
-      // then-current hidden state), and 'partial-kept' DOES block (see
-      // above). An aborted run never reaches here, so it cannot claim
-      // the new hidden state is synced either.
-      final hiddenStateApplied = !skipped.values.any(
+      // v1.0.19 (Option B, D1 rule carried over): stamp the catalog
+      // schema version ONLY when the run actually completed. A type
+      // skipped 'failed', 'empty-response', 'oversize' or
+      // 'partial-kept' kept its old rows with a recent lastSync, so
+      // stamping would make the next bind skip it as up-to-date and
+      // the repair would never happen — the lossy rows would stay
+      // until the weekly interval lapsed, with no indication why. The
+      // partial-kept trigger is the one Matt's panel hits every day
+      // (it persistently returns partial series lists); the transport
+      // trigger is the one his flaky panel hits right now.
+      // Deliberately NOT the hasFailure mirror: 'cold' does not block
+      // (a cold type has no rows and no lastSync, so it stays due and
+      // its first fetch lands the full rows), and 'partial-kept' DOES
+      // block (see above). An aborted run never reaches here, so it
+      // cannot claim the repair is done either.
+      final repairApplied = !skipped.values.any(
         (reason) =>
             reason == 'failed' ||
             reason == 'empty-response' ||
             reason == 'oversize' ||
             reason == 'partial-kept',
       ) && transportFailed.isEmpty;
-      if (hiddenStateApplied) {
-        await _writeHiddenFingerprint(hiddenFingerprint);
+      if (repairApplied) {
+        await _writeCatalogSchemaVersion(_currentCatalogSchemaVersion);
       } else {
         appLogger.w(
-          'IPTV: catalog sync did not apply the hidden state (skipped=$skipped transportFailed=$transportFailed) - the hidden fingerprint is not updated, so the next sync retries',
+          'IPTV: catalog sync did not complete cleanly (skipped=$skipped transportFailed=$transportFailed) - the catalog schema version is not updated, so the next sync retries the repair',
         );
       }
       return IptvSearchSyncResult(rows: rows, skipped: skipped, transportFailedTypes: transportFailed, requests: attempts, partialTypes: partialTypes);
@@ -1126,25 +1145,6 @@ class IptvClient implements MediaServerClient {
   /// filter and the title-prefix strip used stale names. The library
   /// views are told the catalog changed (the old background refresh did
   /// this after its swap; the sync is the refresh now).
-  /// Fetched rows minus hidden categories (v1.0.16): the memoized
-  /// publish carries visible rows only. The category NAME comes from
-  /// the fetched category list (for the initial check); a row whose
-  /// category is not in the list is kept — same fail-open as the
-  /// isolate filter.
-  List<Object> _visibleRows(List<Object> rows, List<XtreamCategory> categories) {
-    if (_hiddenCategories.isEmpty && _hiddenCategoryInitials.isEmpty) return rows;
-    final names = {for (final c in categories) c.id: c.name};
-    return rows.where((row) {
-      final categoryId = switch (row) {
-        XtreamLiveStream(:final categoryId) => categoryId,
-        XtreamVodStream(:final categoryId) => categoryId,
-        XtreamSeries(:final categoryId) => categoryId,
-        _ => null,
-      };
-      return !_isHiddenCategory(categoryId, categoryId == null ? null : names[categoryId]);
-    }).toList(growable: false);
-  }
-
   void _publishSyncedCatalog(String type, List<Object> rows, List<XtreamCategory> categories) {
     switch (type) {
       case IptvSearchIndex.typeLive:
@@ -1948,67 +1948,6 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// Write a freshly fetched catalog with hidden-category rows removed
-  /// (v1.0.16): the disk file holds visible rows only, so the cache size
-  /// and the seed both reflect what the user can see. When nothing is
-  /// hidden this is exactly [_writeCatalogRows] (raw body, no extra
-  /// work, no extra request). When categories are hidden the body is
-  /// filtered in a background isolate — a main-isolate re-encode of a
-  /// 200k-row catalog froze the app for ~1.3s (build #13) — and the
-  /// write stays fire-and-forget, so a slow filter never gates the
-  /// browse on file I/O. [categoriesFuture] is a CLOSURE, not a future:
-  /// it is only CALLED when something is hidden (the category lists are
-  /// memoized, so the guarded first-load paths have already warmed
-  /// them). Passing the future itself would start the categories fetch
-  /// eagerly — on a path that never needs it — and an un-awaited
-  /// errored categories future surfaces as an unhandled async error
-  /// (it broke the EPG cache tests, whose fake panel answers streams
-  /// but not categories). A filter failure falls back to the raw body:
-  /// the index is still filtered, and the next sync rewrites the file
-  /// filtered.
-  Future<void> _writeFilteredCatalogRows<T>(
-    String dataset,
-    List<T> rows,
-    Map<String, dynamic> Function(T row) toJson,
-    String? rawBody,
-    Future<List<XtreamCategory>> Function() categoriesFuture,
-  ) async {
-    if (rows.isEmpty || rawBody == null || rawBody.isEmpty) {
-      _writeCatalogRows(dataset, rows, toJson, rawBody);
-      return;
-    }
-    if (_hiddenCategories.isEmpty && _hiddenCategoryInitials.isEmpty) {
-      _writeCatalogRows(dataset, rows, toJson, rawBody);
-      return;
-    }
-    final categories = await categoriesFuture().catchError((Object e) {
-      appLogger.w('IPTV: category list unavailable for filtered disk write: $e');
-      return const <XtreamCategory>[];
-    });
-    unawaited(
-      compute(
-        filterHiddenCatalogBody,
-        FilterHiddenCatalogBodyParams(
-          catalogBody: rawBody,
-          categoryBody: jsonEncode(categories.map((c) => c.toJson()).toList()),
-          hiddenCategoryIds: _hiddenCategories.toList(),
-          hiddenCategoryInitials: _hiddenCategoryInitials.toList(),
-        ),
-      ).then((filtered) {
-        // An empty filtered body ('[]') must NOT be written: an empty
-        // disk file is a miss, not a catalog (`_readDiskCatalog`
-        // deletes it and refetches), so an all-hidden type keeps the
-        // raw body on disk instead of a file the next load would
-        // delete. The rows are still hidden at read time and absent
-        // from the index.
-        _writeDiskText(dataset, filtered == '[]' ? rawBody : filtered);
-      }).catchError((Object e) {
-        appLogger.w('IPTV: hidden-filtered disk write failed, keeping raw body', error: e);
-        _writeDiskText(dataset, rawBody);
-      }),
-    );
-  }
-
   /// Same generation-guarded fire-and-forget write, for a raw text
   /// payload (the M3U playlist). See [_writeDiskCatalog].
   void _writeDiskText(String dataset, String body) {
@@ -2100,17 +2039,14 @@ class IptvClient implements MediaServerClient {
     }
     final rows = await _xtreamApi.getLiveStreams();
     _liveLoadSource = 'network';
-    // v1.0.16 (hidden-category skip): the disk file holds visible rows
-    // only. Live first-load has no coverage guard (series fix left it
-    // as-is), so the filter is the only change here.
-    unawaited(
-      _writeFilteredCatalogRows(
-        IptvCatalogDiskCache.liveDataset,
-        rows,
-        (r) => r.toJson(),
-        _xtreamApi.lastLiveStreamsBody,
-        () => _liveCategories(),
-      ),
+    // v1.0.19 (Option B): the disk file holds the FULL catalog — the
+    // v1.0.16 write-time filter is gone. Live first-load has no
+    // coverage guard (series fix left it as-is).
+    _writeCatalogRows(
+      IptvCatalogDiskCache.liveDataset,
+      rows,
+      (r) => r.toJson(),
+      _xtreamApi.lastLiveStreamsBody,
     );
     return rows;
   }
@@ -2163,23 +2099,16 @@ class IptvClient implements MediaServerClient {
       return false;
     }
     if (categories.isEmpty) return false;
-    // v1.0.16 (hidden-category skip): the denominator counts VISIBLE
-    // categories only — a fetch covering the visible catalog is
-    // complete even when most categories are hidden, and hidden rows
-    // never inflate the covered count. No visible categories means the
-    // filtered disk file is legitimately empty ('[]') — the load still
-    // writes it, so the file exists and the next load does not
-    // re-fetch; the rows are served in memory this time.
-    final visibleIds = {
-      for (final c in categories)
-        if (!_isHiddenCategory(c.id, c.name)) c.id,
-    };
-    if (visibleIds.isEmpty) return true;
-    final covered = rowCategoryIds.toSet().intersection(visibleIds);
-    final ok = covered.length / visibleIds.length >= 0.5;
+    // v1.0.19 (Option B): the denominator counts ALL categories — a
+    // fetch covering the whole catalog is complete even when most
+    // categories are hidden, and hidden rows count toward the covered
+    // set (they are in the disk file now, filtered at read time).
+    final allIds = {for (final c in categories) c.id};
+    final covered = rowCategoryIds.toSet().intersection(allIds);
+    final ok = covered.length / allIds.length >= 0.5;
     if (!ok) {
       appLogger.i(
-        'IPTV: partial unfiltered $type load not persisted (covered ${covered.length}/${visibleIds.length} visible categories)',
+        'IPTV: partial unfiltered $type load not persisted (covered ${covered.length}/${allIds.length} categories)',
       );
     }
     return ok;
@@ -2191,8 +2120,8 @@ class IptvClient implements MediaServerClient {
   /// cached catalog from the fallback per-category crawl.
   ///
   /// Build #18: the disk write happens ONLY when the load came from the
-  /// unfiltered call. A crawl's rows are missing every hidden category,
-  /// so persisting them bakes the filter into storage — the exact poison
+  /// unfiltered call. A crawl has no single raw body, and persisting a
+  /// merged partial could clobber a full disk file — the exact poison
   /// that made Trex series search return [] on the phone (the VOD loader
   /// has the same shape). Crawl rows are served in memory, never written.
   Future<List<XtreamVodStream>> _loadVodStreamsCached() async {
@@ -2212,16 +2141,13 @@ class IptvClient implements MediaServerClient {
           IptvSearchIndex.typeMovie,
           loaded.rows.map((r) => r.categoryId).whereType<String>(),
         )) {
-      // v1.0.16 (hidden-category skip): the disk file holds visible rows
-      // only (the guard above already counts visible categories).
-      unawaited(
-        _writeFilteredCatalogRows(
-          IptvCatalogDiskCache.vodDataset,
-          loaded.rows,
-          (r) => r.toJson(),
-          _xtreamApi.lastVodStreamsBody,
-          () => _vodCategories(),
-        ),
+      // v1.0.19 (Option B): the disk file holds the FULL catalog (the
+      // guard above already counts all categories).
+      _writeCatalogRows(
+        IptvCatalogDiskCache.vodDataset,
+        loaded.rows,
+        (r) => r.toJson(),
+        _xtreamApi.lastVodStreamsBody,
       );
     }
     return loaded.rows;
@@ -2232,9 +2158,8 @@ class IptvClient implements MediaServerClient {
   /// per-category calls even when the unfiltered call is empty.
   ///
   /// Returns whether the rows came from the unfiltered call ([complete])
-  /// or the per-category crawl: crawl rows are missing every hidden
-  /// category, so they must never be persisted as the catalog (build
-  /// #18) — see [_loadVodStreamsCached].
+  /// or the per-category crawl: crawl rows must never be persisted as
+  /// the catalog (build #18) — see [_loadVodStreamsCached].
   Future<({List<XtreamVodStream> rows, bool complete})> _loadVodStreams() async {
     final all = await _xtreamApi.getVodStreams();
     if (all.isNotEmpty) return (rows: all, complete: true);
@@ -2242,7 +2167,10 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: VOD category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
+    // v1.0.19 (Option B): the crawl fetches ALL categories — hidden ones
+    // too. Rows are still never persisted (build #18); the read-time
+    // filter hides them, and the next full sync re-fetches in one call.
+    final wanted = categories.toList(growable: false);
     if (wanted.isEmpty) return (rows: const <XtreamVodStream>[], complete: false);
     final out = <XtreamVodStream>[];
     final seen = <int>{};
@@ -2328,16 +2256,13 @@ class IptvClient implements MediaServerClient {
           IptvSearchIndex.typeSeries,
           loaded.rows.map((r) => r.categoryId).whereType<String>(),
         )) {
-      // v1.0.16 (hidden-category skip): the disk file holds visible rows
-      // only (the guard above already counts visible categories).
-      unawaited(
-        _writeFilteredCatalogRows(
-          IptvCatalogDiskCache.seriesDataset,
-          loaded.rows,
-          (r) => r.toJson(),
-          _xtreamApi.lastSeriesBody,
-          () => _seriesCategories(),
-        ),
+      // v1.0.19 (Option B): the disk file holds the FULL catalog (the
+      // guard above already counts all categories).
+      _writeCatalogRows(
+        IptvCatalogDiskCache.seriesDataset,
+        loaded.rows,
+        (r) => r.toJson(),
+        _xtreamApi.lastSeriesBody,
       );
     }
     return loaded.rows;
@@ -2346,9 +2271,8 @@ class IptvClient implements MediaServerClient {
   /// Same empty-unfiltered fallback as [_loadVodStreams], for series.
   ///
   /// Returns whether the rows came from the unfiltered call ([complete])
-  /// or the per-category crawl: crawl rows are missing every hidden
-  /// category, so they must never be persisted as the catalog (build
-  /// #18) — see [_loadSeriesCached].
+  /// or the per-category crawl: crawl rows must never be persisted as
+  /// the catalog (build #18) — see [_loadSeriesCached].
   Future<({List<XtreamSeries> rows, bool complete})> _loadSeries() async {
     final all = await _xtreamApi.getSeries();
     if (all.isNotEmpty) return (rows: all, complete: true);
@@ -2356,7 +2280,10 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: series category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    final wanted = categories.where((c) => !_isHiddenCategory(c.id, c.name)).toList(growable: false);
+    // v1.0.19 (Option B): the crawl fetches ALL categories — hidden ones
+    // too. Rows are still never persisted (build #18); the read-time
+    // filter hides them, and the next full sync re-fetches in one call.
+    final wanted = categories.toList(growable: false);
     if (wanted.isEmpty) return (rows: const <XtreamSeries>[], complete: false);
     final out = <XtreamSeries>[];
     final seen = <int>{};
@@ -3817,7 +3744,7 @@ class IptvClient implements MediaServerClient {
     // M3U: the playlist is the catalog; channels surface as playable items.
     final m3uLiveTrace = _SectionTrace();
     final m3uStarted = DateTime.now();
-    final m3uResults = await _searchM3uEntries(needle, limit, excludedLibraryIds);
+    final m3uResults = await _searchM3uEntries(needle, limit, excludedLibraryIds, m3uLiveTrace);
     m3uLiveTrace.loadRows = m3uResults.length;
     m3uLiveTrace.loadMatches = m3uResults.length;
     m3uLiveTrace.ms = DateTime.now().difference(m3uStarted).inMilliseconds;
@@ -3863,6 +3790,8 @@ class IptvClient implements MediaServerClient {
       if (!match.hasMatch(stream.name)) continue;
       if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) {
         trace.hiddenMatches++;
+        final initial = categoryInitial(categoryNames[stream.categoryId]);
+        if (initial != null) trace.hiddenInitials.add(initial);
         continue;
       }
       out.add(
@@ -3896,6 +3825,8 @@ class IptvClient implements MediaServerClient {
       if (!match.hasMatch(s.name)) continue;
       if (_isHiddenCategory(s.categoryId, categoryNames[s.categoryId])) {
         trace.hiddenMatches++;
+        final initial = categoryInitial(categoryNames[s.categoryId]);
+        if (initial != null) trace.hiddenInitials.add(initial);
         continue;
       }
       out.add(
@@ -4181,6 +4112,8 @@ class IptvClient implements MediaServerClient {
       if (!match.hasMatch(stream.name)) continue;
       if (_isHiddenCategory(stream.categoryId, categoryNames[stream.categoryId])) {
         trace.hiddenMatches++;
+        final initial = categoryInitial(categoryNames[stream.categoryId]);
+        if (initial != null) trace.hiddenInitials.add(initial);
         continue;
       }
       // A hidden channel (build #17, §9) never matches in Live TV search.
@@ -4214,6 +4147,7 @@ class IptvClient implements MediaServerClient {
     String needle,
     int limit,
     Set<String> excludedLibraryIds,
+    _SectionTrace trace,
   ) async {
     if (excludedLibraryIds.contains(_liveLibraryId)) return const [];
     try {
@@ -4226,11 +4160,19 @@ class IptvClient implements MediaServerClient {
       final match = RegExp(RegExp.escape(needle), caseSensitive: false);
       for (final entry in entries) {
         if (out.length >= limit) break;
+        if (!match.hasMatch(entry.name)) continue;
         // A hidden group (its own switch, or its category initial) hides
         // its entries from search too. Item names are never filtered.
-        if (_isHiddenGroup(entry.groupTitle)) continue;
+        // A match in a hidden group is counted on the trace (v1.0.19),
+        // like the Xtream append builders, so the search screen can
+        // name the hiding group instead of showing a bare "No results".
+        if (_isHiddenGroup(entry.groupTitle)) {
+          trace.hiddenMatches++;
+          final initial = categoryInitial(entry.groupTitle);
+          if (initial != null) trace.hiddenInitials.add(initial);
+          continue;
+        }
         if (_liveTv.isHiddenChannelKey(entry.tvgId ?? entry.url)) continue;
-        if (!match.hasMatch(entry.name)) continue;
         out.add(
           MediaItem.m3u(
             id: 'm3u:${entry.tvgId ?? entry.name}',
@@ -5178,6 +5120,10 @@ class _SectionTrace {
   /// #17): counted, not returned, so the search screen can tell the user
   /// the filter hid them instead of showing a bare "No results".
   int hiddenMatches = 0;
+
+  /// The letter-group initials that hid those matches (v1.0.19): the
+  /// search screen names the hiding group instead of only counting.
+  final hiddenInitials = <String>{};
   int ms = 0;
   bool skipped = false;
 
@@ -5206,6 +5152,7 @@ class _SectionTrace {
     sweepMatches: sweepMatches,
     partialMatches: partialMatches,
     hiddenMatches: hiddenMatches,
+    hiddenInitials: hiddenInitials.toList()..sort(),
     ms: ms,
     skipped: skipped,
     cold: cold,
@@ -5223,6 +5170,7 @@ class IptvSearchSectionDiagnostics {
     required this.sweepMatches,
     required this.partialMatches,
     required this.hiddenMatches,
+    this.hiddenInitials = const [],
     required this.ms,
     required this.skipped,
     this.cold = false,
@@ -5252,6 +5200,12 @@ class IptvSearchSectionDiagnostics {
   /// filter (build #17) — the search screen's "matches are in categories
   /// you turned off" message reads this.
   final int hiddenMatches;
+
+  /// The letter-group initials that hid those matches (v1.0.19) — the
+  /// search screen's "matches are in the EN group, which you turned
+  /// off" message reads this. Empty when nothing was hidden by a group
+  /// (hidden by per-category id only).
+  final List<String> hiddenInitials;
 
   /// Wall time of the whole section, in milliseconds.
   final int ms;

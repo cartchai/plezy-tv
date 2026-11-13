@@ -31,6 +31,7 @@ import 'package:plezy/connection/connection.dart';
 import 'package:plezy/media/iptv_client.dart';
 import 'package:plezy/media/library_change_event.dart';
 import 'package:plezy/media/library_query.dart';
+import 'package:plezy/services/base_shared_preferences_service.dart';
 import 'package:plezy/services/iptv/iptv_catalog_cache.dart';
 import 'package:plezy/services/iptv/iptv_search_index.dart';
 import 'package:plezy/services/iptv/xtream_api.dart';
@@ -668,8 +669,14 @@ https://example.com/cnn.ts
 
   group('background refresh events carry the live flag (build #14, SA-4)', () {
     // Build v1.0.10 (M3): same index note as the TTL group above.
-    setUp(() {
+    setUp(() async {
       IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
+      // v1.0.19: the seeded state models a steady-state v1.0.19 disk
+      // (fresh types + one stale type), so stamp schema version 2 —
+      // otherwise the first sync repairs (re-fetches all three types)
+      // and the "exactly one event" premise fails.
+      final prefs = await BaseSharedPreferencesService.sharedCache();
+      await prefs.setInt('iptv_catalog_schema_v:conn-xt-1', 2);
     });
     tearDown(() {
       IptvSearchIndex.debugDirectoryProvider = null;

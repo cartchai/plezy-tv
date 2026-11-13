@@ -838,6 +838,9 @@ class _SearchScreenState extends State<SearchScreen>
     // the show does not exist. The diagnostics are set by searchItems
     // before the results arrive, so they are consistent here.
     int hiddenMatches = 0;
+    // v1.0.19: the letter-group initials that hid those matches, so the
+    // empty state can name the hiding group.
+    List<String> hiddenGroups = const [];
     Connection? scopedIptvConnection;
     if (effectiveScopeKey != null) {
       final scopedLibrary = visibleLibraries.firstWhere((library) => library.globalKey == effectiveScopeKey);
@@ -845,6 +848,7 @@ class _SearchScreenState extends State<SearchScreen>
       final client = serverId == null ? null : context.tryGetMediaClientForServer(serverId);
       if (client is IptvClient) {
         hiddenMatches = client.lastSearchHiddenMatchesForLibrary(scopedLibrary.id);
+        hiddenGroups = client.lastSearchHiddenGroupsForLibrary(scopedLibrary.id);
         if (hiddenMatches > 0) scopedIptvConnection = client.connection;
       }
     }
@@ -901,6 +905,7 @@ class _SearchScreenState extends State<SearchScreen>
             else if (searchResults.isEmpty)
               _SearchEmptyState(
                 hiddenMatches: hiddenMatches,
+                hiddenGroups: hiddenGroups,
                 scopeTitle: scopeTitle,
                 scopedIptvConnection: scopedIptvConnection,
               )
@@ -1007,11 +1012,13 @@ String _iptvTypeLabel(String type) => switch (type) {
 class _SearchEmptyState extends StatelessWidget {
   const _SearchEmptyState({
     required this.hiddenMatches,
+    required this.hiddenGroups,
     required this.scopeTitle,
     required this.scopedIptvConnection,
   });
 
   final int hiddenMatches;
+  final List<String> hiddenGroups;
   final String? scopeTitle;
   final Connection? scopedIptvConnection;
 
@@ -1067,6 +1074,17 @@ class _SearchEmptyState extends StatelessWidget {
 
   String _subtitle(IptvSearchIndexState? state) {
     if (hiddenMatches > 0) {
+      // v1.0.19: name the hiding group when the diagnostics know it.
+      if (hiddenGroups.length == 1) {
+        return t.search.hiddenByCategoryFilterGroup(n: hiddenMatches, count: hiddenMatches, group: hiddenGroups.first);
+      }
+      if (hiddenGroups.length > 1) {
+        return t.search.hiddenByCategoryFilterGroups(
+          n: hiddenMatches,
+          count: hiddenMatches,
+          groups: hiddenGroups.join(', '),
+        );
+      }
       return t.search.hiddenByCategoryFilter(n: hiddenMatches, count: hiddenMatches);
     }
     if (state == null) return t.search.tryDifferentTerm;

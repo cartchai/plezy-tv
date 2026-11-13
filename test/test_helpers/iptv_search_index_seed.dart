@@ -9,6 +9,11 @@
 // lists and writes them into the index with a fresh stamp, so the
 // client's search finds them with zero panel requests.
 //
+// v1.0.19 (Option B): the seed writes the FULL rows, exactly as
+// production does now — the v1.0.16 write-time skip is gone, so the
+// seed no longer differs from production (before, it wrote all rows
+// while production wrote visible-only).
+//
 // Each type is seeded independently and fail-open: a type whose fetch
 // throws stays cold (exactly like a failed sync leg), so fail-open tests
 // (one leg failing, the others answering) keep working.

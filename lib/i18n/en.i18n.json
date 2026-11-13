@@ -594,6 +594,14 @@
     "hiddenByCategoryFilter": {
       "one": "1 matching title is in a category you turned off",
       "other": "${count} matching titles are in categories you turned off"
+    },
+    "hiddenByCategoryFilterGroup": {
+      "one": "1 matching title is in the ${group} group, which you turned off",
+      "other": "${count} matching titles are in the ${group} group, which you turned off"
+    },
+    "hiddenByCategoryFilterGroups": {
+      "one": "1 matching title is in the ${groups} groups, which you turned off",
+      "other": "${count} matching titles are in the ${groups} groups, which you turned off"
     }
   },
   "hotkeys": {
@@ -1611,6 +1619,12 @@
       "Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty",
       "The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason",
       "Old saved guide entries are now cleared out automatically instead of piling up on your phone"
+    ],
+    "changelog2283": [
+      "Turning a group back on now brings its channels and shows back right away, instead of leaving them missing until the next catalog sync",
+      "The groups screen now counts groups instead of categories, and each row says its count covers Live TV, Movies and TV Series",
+      "Show all now turns every group back on, including ones too small to have their own switch",
+      "When a search comes up empty because a group is turned off, it now names the group"
     ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
@@ -3026,10 +3040,12 @@
     "seriesHeading": "TV Series categories",
     "groupsHeading": "Groups",
     "sectionCount": "${total} categories, ${hidden} hidden",
+    "groupsSectionCount": "${total} groups, ${hidden} hidden",
     "initialsHeading": "Turn off whole groups at once",
     "initialsSubheading": "These letters start a lot of category names — turning one off hides every category that starts with it, in Live TV, Movies and TV Series.",
     "initialsSubheadingM3u": "These letters start a lot of group names — turning one off hides every group that starts with it.",
-    "initialRow": "${initial} — ${count} categories",
+    "initialRow": "${initial} — ${count} categories (all types)",
+    "initialRowM3u": "${initial} — ${count} groups",
     "showAll": "Show all",
     "hideAll": "Hide all",
     "loading": "Loading categories…",
