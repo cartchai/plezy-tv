@@ -991,7 +991,7 @@ void main() {
               'X-Plex-Token': 'secret',
               'X-Plex-Device': 'Mac17,9',
               'X-Plex-Platform': 'macOS',
-              'User-Agent': 'Plezy',
+              'User-Agent': 'PlezTV',
             };
             await player.open(Media('https://example.test/movie.mkv', headers: headers));
 

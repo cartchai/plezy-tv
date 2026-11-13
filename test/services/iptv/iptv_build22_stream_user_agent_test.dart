@@ -72,7 +72,7 @@ M3uConnection _m3uConnection() => M3uConnection(
 );
 
 /// A non-IPTV client: artwork fetches for any other backend keep the app's
-/// name ('Plezy'), exactly as before.
+/// name ('PlezTV'), exactly as before.
 class _OtherBackendClient implements MediaServerClient {
   @override
   ServerId get serverId => ServerId('plex');
@@ -474,14 +474,14 @@ void main() {
   });
 
   group('Build #22 — panel image fetches carry the UA', () {
-    test('artworkHeadersFor gives VLC for an IPTV client, Plezy otherwise', () {
+    test('artworkHeadersFor gives VLC for an IPTV client, PlezTV otherwise', () {
       final iptv = IptvClient.xtream(xtreamConnection: _trexConnection());
       expect(MediaImageHelper.artworkHeadersFor(iptv), {'User-Agent': 'VLC'});
-      expect(MediaImageHelper.artworkHeadersFor(_OtherBackendClient()), {'User-Agent': 'Plezy'});
-      expect(MediaImageHelper.artworkHeadersFor(null), {'User-Agent': 'Plezy'});
+      expect(MediaImageHelper.artworkHeadersFor(_OtherBackendClient()), {'User-Agent': 'PlezTV'});
+      expect(MediaImageHelper.artworkHeadersFor(null), {'User-Agent': 'PlezTV'});
     });
 
-    test('serverArtworkProvider defaults to Plezy and honours passed headers', () {
+    test('serverArtworkProvider defaults to PlezTV and honours passed headers', () {
       const imageUrl = 'https://panel.example.com:8080/cover.jpg';
 
       // memWidth/memHeight 0 returns the provider unwrapped (no ResizeImage).
@@ -493,7 +493,7 @@ void main() {
       expect(defaultProvider, isA<CachedNetworkImageProvider>());
       expect(
         (defaultProvider as CachedNetworkImageProvider).headers,
-        {'User-Agent': 'Plezy'},
+        {'User-Agent': 'PlezTV'},
       );
 
       final iptvProvider = MediaImageHelper.serverArtworkProvider(

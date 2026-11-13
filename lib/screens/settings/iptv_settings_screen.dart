@@ -44,7 +44,7 @@ import 'settings_utils.dart';
 /// past days, update on start, time offset, manual update/clear), and a
 /// link to the player settings IPTV uses. Every row here is wired to real
 /// behaviour — nothing is a dead toggle.
-/// Things TiviMate has that Plezy TV cannot do yet (recording, multi-view,
+/// Things TiviMate has that PlezTV cannot do yet (recording, multi-view,
 /// a parental PIN) are deliberately left out; see IPTV_FIXES_NOTES.md.
 class IptvSettingsScreen extends StatelessWidget {
   const IptvSettingsScreen({super.key, this.backgroundWorkDiagnosticsService});

@@ -16,7 +16,7 @@ void main() {
 
   setUp(resetSharedPreferencesForTest);
   PackageInfo.setMockInitialValues(
-    appName: 'Plezy',
+    appName: 'PlezTV',
     packageName: 'com.plezy.test',
     version: '1.0.0',
     buildNumber: '1',
@@ -219,7 +219,7 @@ void main() {
   // mock, and fromPlatform returns it.
   void mockCurrentVersion(String version) {
     PackageInfo.setMockInitialValues(
-      appName: 'Plezy',
+      appName: 'PlezTV',
       packageName: 'com.plezy.test',
       version: version,
       buildNumber: '1',

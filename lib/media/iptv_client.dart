@@ -1740,7 +1740,7 @@ class IptvClient implements MediaServerClient {
 
   /// Headers for artwork fetches from this panel (build #22): posters and
   /// channel logos carry the same configured Xtream User-Agent instead of
-  /// 'Plezy'. Read by [MediaImageHelper.artworkHeadersFor].
+  /// 'PlezTV'. Read by [MediaImageHelper.artworkHeadersFor].
   Map<String, String> get artworkHeaders => {'User-Agent': _xtreamUserAgent()};
 
   @override

@@ -1,6 +1,6 @@
 import '../../utils/json_utils.dart';
 
-/// The MediaBrowser `DisplayPreferences` row Plezy owns.
+/// The MediaBrowser `DisplayPreferences` row PlezTV owns.
 ///
 /// `/Shows/NextUp` takes `EnableRewatching` per request and `UserConfiguration`
 /// has no field for it, so this arbitrary per-user key/value store is the only
@@ -14,13 +14,13 @@ class JellyfinDisplayPreferences {
   /// Same id jellyfin-web and jellyfin-androidtv use for user-level settings.
   static const displayPreferencesId = 'usersettings';
 
-  /// Plezy's own client namespace. Deliberately **not** `emby`, the row
+  /// PlezTV's own client namespace. Deliberately **not** `emby`, the row
   /// jellyfin-web writes and jellyfin-androidtv reads: `POST` replaces that
   /// row's whole custom set and resets any known scalar the body omits
   /// (measured — `skipForwardLength` 15000 reverted to 30000), so writing
   /// there would trash the first-party clients' skip lengths and home-section
   /// order on every save.
-  static const client = 'Plezy';
+  static const client = 'PlezTV';
 
   /// jellyfin-web's own key name for the same switch, so the value is
   /// recognisable to any client that goes looking — including jellyfin-web
@@ -41,7 +41,7 @@ class JellyfinDisplayPreferences {
   /// Copy [dto] with the switch set, ready to be posted back verbatim.
   ///
   /// The whole DTO round-trips because the write replaces the row: dropping
-  /// any other key Plezy stores there, or any scalar the server round-trips,
+  /// any other key PlezTV stores there, or any scalar the server round-trips,
   /// would silently reset it.
   static Map<String, dynamic> mergeRewatchingInNextUp(Object? dto, bool value) {
     if (dto is! Map<String, dynamic>) {

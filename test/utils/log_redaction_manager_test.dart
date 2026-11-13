@@ -83,12 +83,12 @@ void main() {
 
     test('redacts MediaBrowser Authorization Token segment', () {
       final input =
-          'Authorization: MediaBrowser Client="Plezy", Device="Plezy", DeviceId="dev-1", Version="1.0", Token="opaque-jellyfin-token"';
+          'Authorization: MediaBrowser Client="PlezTV", Device="PlezTV", DeviceId="dev-1", Version="1.0", Token="opaque-jellyfin-token"';
       final result = LogRedactionManager.redact(input);
       expect(result.contains('opaque-jellyfin-token'), isFalse);
       expect(result.contains('Token="[REDACTED]"'), isTrue);
       // Surrounding metadata stays intact for debugging.
-      expect(result.contains('Client="Plezy"'), isTrue);
+      expect(result.contains('Client="PlezTV"'), isTrue);
     });
 
     test('masks IPv4 addresses with dots', () {

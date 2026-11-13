@@ -1,5 +1,5 @@
 name: plezy
-description: "A beautiful Plex and Jellyfin client for Flutter"
+description: "PlezTV — a Plex, Jellyfin and Emby client for Flutter with IPTV: M3U and Xtream Codes, live TV, movies and series."
 publish_to: "none"
 version: 1.1.0-2.25.0+191
 

@@ -58,7 +58,7 @@ import '../../test_helpers/library_tab_scaffold.dart';
 import '../../test_helpers/multi_server_fixtures.dart';
 import '../../test_helpers/prefs.dart';
 
-/// Pre-ship screen tests for the Plezy TV IPTV flows (the build #4 lesson:
+/// Pre-ship screen tests for the PlezTV IPTV flows (the build #4 lesson:
 /// unit tests + analyze passed while the real flows were broken on Matt's
 /// phone). Every test pumps the ACTUAL screen with a fake Plex client and a
 /// REAL [IptvClient] backed by a fake Xtream catalog — no network — and

@@ -5,7 +5,7 @@ project(runner LANGUAGES CXX)
 # registered by the runner subdirectory.
 include(CTest)
 
-set(BINARY_NAME "plezy")
+set(BINARY_NAME "plezytv")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.edde746.plezy")

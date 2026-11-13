@@ -1,4 +1,4 @@
-# Plezy TV — Codemagic cloud build (codemagic.yaml)
+# PlezTV — Codemagic cloud build (codemagic.yaml)
 #
 # Why this file exists (2026-11-05): the local Gradle build is blocked
 # (the daemon dies after ~10 min with "The first result from the daemon
