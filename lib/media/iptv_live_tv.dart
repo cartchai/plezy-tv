@@ -273,6 +273,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// own 60s call. Four in flight is enough for the first visible rows
   /// while the rest wait their turn instead of stacking timeouts.
   static const int _maxShortEpgConcurrency = 4;
+
+  /// `get_short_epg` page size: the panel returns at most this many
+  /// listings per call, with no total/count — so exactly this many
+  /// means the answer may be truncated (1.2.1 D4) and the feed tail
+  /// must fill the days the limit cut off.
+  static const int _shortEpgLimit = 500;
+
   int _shortEpgInFlight = 0;
   final List<Completer<void>> _shortEpgWaiters = [];
 
@@ -405,6 +412,10 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// a plain re-fetch after a failure still respects the negative cache
   /// (see iptv_epg_cache_test: a failed feed must not be re-downloaded
   /// per channel).
+  /// (1.2.1 D7) A cached entry stamped from a feed generation that has
+  /// since refreshed is stale even though its own clock is fresh — it
+  /// refetches from the new feed, and a failed refetch still serves the
+  /// old entry (stale-while-revalidate).
   Future<List<LiveTvProgram>> fetchEpgForChannel(
     String channelKey, {
     required DateTime from,
@@ -442,7 +453,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // not cover the window, falls through to a refetch below.
     final cached = _epgCache[channelKey] ?? await _readPersistedEpg(channelKey);
     if (cached != null) _epgCache[channelKey] = cached;
-    if (cached != null && cached.covers(from, to) && cached.isFresh(ttl) && !forceRefresh) {
+    // D7: an entry stamped from a feed generation that has since been
+    // superseded is stale even though its own clock is fresh — fall
+    // through to a refetch, which re-maps from the new feed. The old
+    // entry is kept so a failed refetch can still serve it (below).
+    final servable = cached != null && cached.covers(from, to) && cached.isFresh(ttl) && !forceRefresh;
+    final generationStale = servable && _isFeedGenerationStale(cached);
+    if (servable && !generationStale) {
       return _slice(cached.programs, from, to);
     }
 
@@ -456,6 +473,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     String? fetchedSourceId;
     String? fetchedMatchedXmltvId;
     String? fetchedMatchMethod;
+    Map<String, DateTime> fetchedFeedGenerations;
     try {
       final fetched = _isXtream
           ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl, force: force)
@@ -465,6 +483,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       fetchedSourceId = fetched.sourceId;
       fetchedMatchedXmltvId = fetched.matchedXmltvId;
       fetchedMatchMethod = fetched.matchMethod;
+      fetchedFeedGenerations = fetched.feedGenerations;
       if (fetched.feedDeferred) {
         // D1b: the feed was deferred by the playback gate — not a
         // failure and not a genuine empty. Return [] WITHOUT caching,
@@ -477,6 +496,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // no longer a deferred one.
       _deferredEpgChannels.remove(channelKey);
     } catch (e) {
+      if (generationStale) {
+        // D7: the refetch after a feed refresh failed — serve the old
+        // entry instead of a retry row (stale-while-revalidate: the
+        // previous guide data beats nothing, and the refresh failure
+        // does not invalidate it). The next fetch retries the refresh.
+        appLogger.w('IPTV EPG refetch failed for channel $channelKey after a feed refresh; serving the previous entry', error: e);
+        return _slice(cached.programs, from, to);
+      }
       // Build #8 Task 3: a failed fetch must surface (see the doc comment
       // above) — swallowing it as [] recorded failures as loaded-empty.
       // A failed fetch writes no cache entry, so a retry refetches.
@@ -484,7 +511,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       rethrow;
     }
 
-    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo, source: source, sourceId: fetchedSourceId, matchedXmltvId: fetchedMatchedXmltvId, matchMethod: fetchedMatchMethod);
+    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo, source: source, sourceId: fetchedSourceId, matchedXmltvId: fetchedMatchedXmltvId, matchMethod: fetchedMatchMethod, feedGenerations: fetchedFeedGenerations);
     _epgCache[channelKey] = entry;
     // Best-effort and fire-and-forget: a failed write never breaks the
     // guide — the in-memory entry above still serves this launch — and
@@ -667,6 +694,23 @@ class IptvLiveTvSupport implements LiveTvSupport {
     return programs.where((p) => (p.endsAt ?? 0) > fromEpoch && (p.beginsAt ?? 0) < toEpoch).toList(growable: false);
   }
 
+  /// D7: true when [entry] was mapped from a feed generation that has
+  /// since been superseded — either the in-memory guide for one of its
+  /// feeds is newer than the stamped generation, or a refresh is in
+  /// flight for one of its feeds right now (the refetch awaits it, so
+  /// the new data is not missed while the download runs). Entries from
+  /// short-EPG alone (empty generations) are never stale this way, and
+  /// an entry whose feed is not loaded in memory cannot be judged — it
+  /// serves (a cold guide has no newer generation to compare).
+  bool _isFeedGenerationStale(_CachedChannelEpg entry) {
+    for (final stamp in entry.feedGenerations.entries) {
+      final current = _xmltvCache[stamp.key];
+      if (current != null && current.fetchedAt.isAfter(stamp.value)) return true;
+      if (_xmltvGuideFutures.containsKey(stamp.key)) return true;
+    }
+    return false;
+  }
+
   /// Xtream EPG, TiviMate-style (build #8 Task 3): per-channel
   /// `get_short_epg` answers FIRST for the visible channel. If it has
   /// nothing for the channel, the login's big `xmltv.php` feed is fetched
@@ -683,7 +727,10 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// as "answering" — only a feed that LOADS but has nothing for the
   /// channel answers empty. A playback-gate deferral is neither a
   /// failure nor an answer (see [_fetchXtreamEpgWithAbort]).
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchXtreamEpg(
+  /// (1.2.1 D4) A non-empty short-EPG answer at exactly the limit is
+  /// treated as possibly truncated: the feed tail fills the days the
+  /// limit cut off (see [_mergeFeedTail]).
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod, Map<String, DateTime> feedGenerations})> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -709,7 +756,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchXtreamEpgWithAbort(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod, Map<String, DateTime> feedGenerations})> _fetchXtreamEpgWithAbort(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -726,8 +773,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // stale channel visit. Concurrent misses still share ONE download:
     // [_xmltvGuideForKey] dedups in-flight fetches per key.
     List<LiveTvProgram>? shortEpg;
+    bool shortEpgAtLimit = false;
     try {
-      shortEpg = await _fetchXtreamShortEpg(channelKey, settings, from, to, abort.trigger);
+      final fetched = await _fetchXtreamShortEpg(channelKey, settings, from, to, abort.trigger);
+      shortEpg = fetched.programs;
+      shortEpgAtLimit = fetched.atLimit;
     } catch (e) {
       // A cancellation is not a failure — the row scrolled away or the
       // app backgrounded. Do not fall through to the feed: the fetch is
@@ -737,7 +787,17 @@ class IptvLiveTvSupport implements LiveTvSupport {
       appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
     if (shortEpg != null && shortEpg.isNotEmpty) {
-      return (programs: shortEpg, source: IptvEpgSource.shortEpg, feedDeferred: false, sourceId: null, matchedXmltvId: null, matchMethod: null);
+      if (shortEpgAtLimit) {
+        // D4: the panel answered exactly the limit, so the tail days
+        // may be cut off — merge the feed's programmes for the part of
+        // the window past the last short-EPG programme. A cancel that
+        // landed while short-EPG answered is honoured before the merge
+        // (same as the feed fallback below).
+        abort.throwIfAborted();
+        final merged = await _mergeFeedTail(channelKey, settings, shortEpg, from, to, ttl, force: force);
+        return (programs: merged.programs, source: IptvEpgSource.shortEpg, feedDeferred: false, sourceId: null, matchedXmltvId: null, matchMethod: null, feedGenerations: merged.feedGenerations);
+      }
+      return (programs: shortEpg, source: IptvEpgSource.shortEpg, feedDeferred: false, sourceId: null, matchedXmltvId: null, matchMethod: null, feedGenerations: const <String, DateTime>{});
     }
     // get_short_epg had nothing (or failed): use the feed, starting it
     // now. A feed that loads but has nothing for the channel returns
@@ -764,6 +824,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
           sourceId: null,
           matchedXmltvId: null,
           matchMethod: null,
+          feedGenerations: const <String, DateTime>{},
         );
       }
       return (
@@ -773,6 +834,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceId: feed.sourceId,
         matchedXmltvId: feed.matchedXmltvId,
         matchMethod: feed.matchMethod,
+        feedGenerations: feed.feedGenerations,
       );
     } catch (e) {
       // A cancellation is not a failure (build #28): the app
@@ -788,6 +850,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
           sourceId: null,
           matchedXmltvId: null,
           matchMethod: null,
+          feedGenerations: const <String, DateTime>{},
         );
       }
       if (shortEpg != null) {
@@ -811,6 +874,43 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
+  /// D4: short-EPG answered exactly the limit, so the tail days may be
+  /// cut off — merge the feed's programmes for the window past the last
+  /// short-EPG programme. The feed is consulted only for the uncovered
+  /// part ([lastShortEnd, to]); a feed programme starting before the
+  /// frontier is dropped, so the same show never renders twice (short
+  /// and feed keys differ). A feed that fails or defers loses only the
+  /// tail — the short-EPG programmes are real and still served. A
+  /// cancellation is not a failure: it rethrows, like the feed fallback.
+  Future<({List<LiveTvProgram> programs, Map<String, DateTime> feedGenerations})> _mergeFeedTail(
+    String channelKey,
+    _EpgSettings settings,
+    List<LiveTvProgram> shortEpg,
+    DateTime from,
+    DateTime to,
+    Duration? ttl, {
+    bool force = false,
+  }) async {
+    final lastShortEnd = shortEpg.map((p) => p.endsAt ?? 0).reduce((a, b) => a > b ? a : b);
+    final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
+    if (lastShortEnd >= toEpoch) return (programs: shortEpg, feedGenerations: const <String, DateTime>{});
+    final tailFrom = DateTime.fromMillisecondsSinceEpoch(lastShortEnd * 1000);
+    try {
+      final feed = await _fetchFeedPrograms(channelKey, settings, tailFrom, to, ttl, force: force);
+      if (feed.feedDeferred || feed.programs.isEmpty) {
+        return (programs: shortEpg, feedGenerations: feed.feedGenerations);
+      }
+      final tail = feed.programs.where((p) => (p.beginsAt ?? 0) >= lastShortEnd).toList(growable: false);
+      if (tail.isEmpty) return (programs: shortEpg, feedGenerations: feed.feedGenerations);
+      final merged = [...shortEpg, ...tail];
+      merged.sort((a, b) => (a.beginsAt ?? 0).compareTo(b.beginsAt ?? 0));
+      return (programs: merged, feedGenerations: feed.feedGenerations);
+    } catch (e) {
+      if (MediaServerHttpException.from(e).isCancellation) rethrow;
+      return (programs: shortEpg, feedGenerations: const <String, DateTime>{});
+    }
+  }
+
   /// Programmes for one channel out of the connection's XMLTV feeds —
   /// the provider feed plus any enabled third-party sources, in priority
   /// order (PlezTV 1.2.0, §3.1). Per source: a manual assignment is
@@ -823,7 +923,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// (and no source loaded) throws, like the single-feed path did
   /// (1.1.2 D1a). A playback-gate deferral on every source is neither:
   /// it returns [feedDeferred] and nothing is cached (D1b).
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchFeedPrograms(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod, Map<String, DateTime> feedGenerations})> _fetchFeedPrograms(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -840,6 +940,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceId: null,
         matchedXmltvId: null,
         matchMethod: null,
+        feedGenerations: const <String, DateTime>{},
       );
     }
     final mappings = await _epgStore.loadMappings();
@@ -851,6 +952,10 @@ class IptvLiveTvSupport implements LiveTvSupport {
     var anyLoaded = false;
     Object? lastError;
     StackTrace? lastStackTrace;
+    // D7: the feed generations consulted for this channel (cache key ->
+    // that guide's fetch time), so the per-channel entry can be stamped
+    // with the generation it was mapped from.
+    final generations = <String, DateTime>{};
     for (final attempt in attempts) {
       _CachedXmltvGuide guide;
       try {
@@ -874,6 +979,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         await _recordSourceFailure(attempt.config, e);
         continue;
       }
+      generations[attempt.cacheKey] = guide.fetchedAt;
       if (guide.byChannel.length > _lastXmltvFeedChannelIds) {
         _lastXmltvFeedChannelIds = guide.byChannel.length;
       }
@@ -899,6 +1005,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceId: attempt.config.id,
         matchedXmltvId: match.matchedXmltvId,
         matchMethod: match.matchMethod,
+        feedGenerations: generations,
       );
     }
     if (!anyLoaded) {
@@ -914,6 +1021,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
           sourceId: null,
           matchedXmltvId: null,
           matchMethod: null,
+          feedGenerations: const <String, DateTime>{},
         );
       }
       if (lastError != null) Error.throwWithStackTrace(lastError, lastStackTrace ?? StackTrace.empty);
@@ -925,6 +1033,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       sourceId: null,
       matchedXmltvId: null,
       matchMethod: null,
+      feedGenerations: generations,
     );
   }
 
@@ -1128,7 +1237,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// once, and a call that doesn't answer within
   /// [shortEpgFirstPaintTimeout] gives up fast — the caller falls back to
   /// the cached feed slice instead of holding the row for the full 60s.
-  Future<List<LiveTvProgram>> _fetchXtreamShortEpg(
+  /// Returns the mapped programmes plus whether the panel answered
+  /// exactly [_shortEpgLimit] listings — with no total/count, that is
+  /// the only truncation signal (1.2.1 D4): the answer may be cut off
+  /// and the feed tail must fill the missing days.
+  Future<({List<LiveTvProgram> programs, bool atLimit})> _fetchXtreamShortEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -1147,7 +1260,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         : Future.any([abortTrigger, firstPaintAbort.trigger]);
     try {
       final listings = await _client.xtreamApi
-          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60), abortTrigger: effectiveTrigger)
+          .getShortEpg(channelKey, limit: _shortEpgLimit, timeout: const Duration(seconds: 60), abortTrigger: effectiveTrigger)
           .timeout(
             shortEpgFirstPaintTimeout,
             onTimeout: () {
@@ -1155,6 +1268,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
               throw TimeoutException('get_short_epg first-paint timeout for $channelKey');
             },
           );
+      final atLimit = listings.length == _shortEpgLimit;
       final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
       final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
       final offsetSeconds = settings.timeOffsetMinutes * 60;
@@ -1183,7 +1297,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         }
       }
       programs.sort((a, b) => (a.beginsAt ?? 0).compareTo(b.beginsAt ?? 0));
-      return programs;
+      return (programs: programs, atLimit: atLimit);
     } finally {
       _releaseShortEpgSlot();
     }
@@ -1209,11 +1323,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   /// Programmes for one channel out of the playlist's XMLTV guide —
   /// the provider feed plus any enabled third-party sources, in
-  /// priority order (PlezTV 1.2.0, §3.1). A manual assignment fixes an
-  /// id-less channel; without one, an M3U channel with no tvg-id never
-  /// tried the name fallback (1.1.3 defect D2) and still doesn't — the
-  /// assignment is the answer for those.
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchM3uEpg(
+  /// priority order (PlezTV 1.2.0, §3.1). A channel with no tvg-id
+  /// still tries the name fallback (1.2.1 D2): the Xtream path tries
+  /// byId then byName, and the M3U path does the same — an id-less
+  /// playlist entry matches the feed by its name.
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod, Map<String, DateTime> feedGenerations})> _fetchM3uEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -1230,6 +1344,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceId: null,
         matchedXmltvId: null,
         matchMethod: null,
+        feedGenerations: const <String, DateTime>{},
       );
     }
     final attempts = await _epgSourceAttempts();
@@ -1241,24 +1356,8 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceId: null,
         matchedXmltvId: null,
         matchMethod: null,
+        feedGenerations: const <String, DateTime>{},
       );
-    }
-    final mappings = await _epgStore.loadMappings();
-    if (mappings[channelKey] == null) {
-      // No manual assignment: an M3U channel with no tvg-id never tried
-      // the name fallback (defect D2, queued for 1.1.3) — the
-      // assignment is the answer for those.
-      final tvgId = _client.tvgIdForChannelKey(channelKey);
-      if (tvgId == null) {
-        return (
-          programs: const <LiveTvProgram>[],
-          source: IptvEpgSource.none,
-          feedDeferred: false,
-          sourceId: null,
-          matchedXmltvId: null,
-          matchMethod: null,
-        );
-      }
     }
     return _fetchFeedPrograms(channelKey, settings, from, to, ttl, force: force);
   }
@@ -2469,6 +2568,14 @@ class _CachedChannelEpg {
   final String? matchedXmltvId;
   final String? matchMethod;
 
+  /// Feed generations this entry was mapped from (1.2.1 D7): the XMLTV
+  /// cache key -> that guide's fetch time, for every feed consulted
+  /// while fetching the channel. Empty when the entry came from
+  /// short-EPG alone (or was written before this build). When a feed
+  /// refreshes, entries stamped from the older generation are stale
+  /// and must refetch instead of serving for the whole interval.
+  final Map<String, DateTime> feedGenerations;
+
   const _CachedChannelEpg({
     required this.programs,
     required this.fetchedAt,
@@ -2478,6 +2585,7 @@ class _CachedChannelEpg {
     this.sourceId,
     this.matchedXmltvId,
     this.matchMethod,
+    this.feedGenerations = const {},
   });
 
   Map<String, dynamic> toJson() => {
@@ -2488,6 +2596,7 @@ class _CachedChannelEpg {
     if (sourceId != null) 'sourceId': sourceId,
     if (matchedXmltvId != null) 'matchedXmltvId': matchedXmltvId,
     if (matchMethod != null) 'matchMethod': matchMethod,
+    if (feedGenerations.isNotEmpty) 'feedGenerations': feedGenerations.map((k, v) => MapEntry(k, v.toIso8601String())),
     'programs': programs.map((p) => p.toJson()).toList(),
   };
 
@@ -2523,7 +2632,19 @@ class _CachedChannelEpg {
       sourceId: json['sourceId'] as String?,
       matchedXmltvId: json['matchedXmltvId'] as String?,
       matchMethod: json['matchMethod'] as String?,
+      feedGenerations: _feedGenerationsFromJson(json['feedGenerations']),
     );
+  }
+
+  static Map<String, DateTime> _feedGenerationsFromJson(Object? raw) {
+    final out = <String, DateTime>{};
+    if (raw is Map<String, dynamic>) {
+      for (final entry in raw.entries) {
+        final at = DateTime.tryParse(entry.value as String? ?? '');
+        if (at != null) out[entry.key] = at;
+      }
+    }
+    return out;
   }
 
   bool covers(DateTime from, DateTime to) => !windowFrom.isAfter(from) && !windowTo.isBefore(to);
@@ -2557,7 +2678,24 @@ class _CachedXmltvGuide {
   final List<XmltvProgram> programs;
   final DateTime fetchedAt;
 
-  _CachedXmltvGuide({required this.programs, required this.fetchedAt});
+  /// Dedupe by (channel, start) at import (1.2.1 D3, tvheadend model):
+  /// a provider that re-publishes a programme must not render it
+  /// twice. First-wins — the guide indexes programmes by the same key
+  /// the mapper builds (`epg:<source>:<channel>:<beginsAt>`), so an
+  /// exact duplicate would collide in the guide.
+  _CachedXmltvGuide({required List<XmltvProgram> programs, required this.fetchedAt})
+      : programs = _dedupePrograms(programs);
+
+  static List<XmltvProgram> _dedupePrograms(List<XmltvProgram> programs) {
+    final seen = <String>{};
+    final kept = <XmltvProgram>[];
+    for (final program in programs) {
+      if (seen.add('${program.channelId}\n${program.startEpoch}')) {
+        kept.add(program);
+      }
+    }
+    return kept;
+  }
 
   late final Map<String, List<XmltvProgram>> byChannel = _index(programs);
 

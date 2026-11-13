@@ -1002,6 +1002,11 @@ void main() {
       expect(find.text('Version 1.2.0-2.25.0'), findsOneWidget);
       final newest120 = tester.getTopLeft(find.text('Version 1.2.0-2.25.0')).dy;
       expect(newest120, lessThan(newest112));
+      // EPG accuracy tail (v1.2.1): same guard for the new version — it
+      // must be present and sit above 1.2.0.
+      expect(find.text('Version 1.2.1-2.25.0'), findsOneWidget);
+      final newest121 = tester.getTopLeft(find.text('Version 1.2.1-2.25.0')).dy;
+      expect(newest121, lessThan(newest120));
     });
   });
 }

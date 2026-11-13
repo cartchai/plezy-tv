@@ -3904,6 +3904,12 @@ class Translations$about$en {
 		'Reload TV details re-fetches the channel list and the guide and reports what loaded',
 		'The guide can refresh itself at a time you pick (04:00 by default) and when the channel list changes',
 	];
+	List<String> get changelog2287 => [
+		'The guide now fills in the later days when a channel\'s short guide list runs out — programmes from the full guide show up instead of empty blocks',
+		'Channels you\'ve already looked at now pick up a refreshed guide instead of showing yesterday\'s listings until tomorrow',
+		'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
+		'The same programme no longer shows twice in the guide when the guide lists it twice',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10765,6 +10771,10 @@ extension on Translations {
 			'about.changelog2286.2' => 'Channels with no guide are listed in one place, grouped by why — no source, no match, source failed, or not loaded yet — with an Assign button on each',
 			'about.changelog2286.3' => 'Reload TV details re-fetches the channel list and the guide and reports what loaded',
 			'about.changelog2286.4' => 'The guide can refresh itself at a time you pick (04:00 by default) and when the channel list changes',
+			'about.changelog2287.0' => 'The guide now fills in the later days when a channel\'s short guide list runs out — programmes from the full guide show up instead of empty blocks',
+			'about.changelog2287.1' => 'Channels you\'ve already looked at now pick up a refreshed guide instead of showing yesterday\'s listings until tomorrow',
+			'about.changelog2287.2' => 'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
+			'about.changelog2287.3' => 'The same programme no longer shows twice in the guide when the guide lists it twice',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10848,12 +10858,12 @@ extension on Translations {
 			'explore.notInLibrary' => 'Not in your library',
 			'explore.inTheseLibraries' => 'In these libraries',
 			'explore.checkingLibrary' => 'Checking your library...',
+			_ => null,
+		} ?? switch (path) {
 			'explore.libraryCheckFailed' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Couldn\'t check ${n} server', other: 'Couldn\'t check ${n} servers', ), 
 			'explore.emptyTitle' => 'Nothing here yet',
 			'explore.emptyMessage' => ({required Object source}) => 'Rows from ${source} will appear here once they have content.',
 			'explore.searchHint' => ({required Object source}) => 'Search ${source}',
-			_ => null,
-		} ?? switch (path) {
 			'explore.searchEmpty' => ({required Object query}) => 'No results for "${query}"',
 			'explore.searchPrompt' => ({required Object source}) => 'Search for movies and shows on ${source}.',
 			'explore.searchFailed' => 'Search failed. Check your connection and try again.',
@@ -11362,12 +11372,12 @@ extension on Translations {
 			'downloads.removeListSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"?',
 			'downloads.deleteSyncRuleDownloads' => 'Also delete associated downloads',
 			'downloads.deleteSyncRuleDownloadsDescription' => 'Downloads used by another sync rule or profile will be kept.',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleCreated' => ({required Object count}) => 'Sync rule created — keeping ${count} unwatched episodes',
 			'downloads.syncRuleUpdated' => 'Sync rule updated',
 			'downloads.syncRuleRemoved' => 'Sync rule removed',
 			'downloads.syncRuleAndDownloadsRemoved' => 'Sync rule and associated downloads removed',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.syncRuleCleanupBusy' => 'Sync rules are currently updating. Try again in a moment.',
 			'downloads.syncRuleCleanupUnavailable' => 'Associated downloads could not be identified safely. Reconnect the server and try again, or remove the rule without deleting downloads.',
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
@@ -11876,12 +11886,12 @@ extension on Translations {
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.title' => 'IPTV',
 			'iptv.favorites.title' => 'IPTV favourites',
 			'iptv.favorites.liveTv' => 'Live TV',
 			'iptv.favorites.movies' => 'Movies',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.favorites.tvSeries' => 'TV / Series',
 			'iptv.favorites.empty' => 'Nothing favourited yet',
 			'iptv.favorites.emptyHint' => 'Tap the heart on a channel, movie or show to keep it here.',
