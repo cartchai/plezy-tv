@@ -441,11 +441,70 @@ class XtreamApi {
     return decoded is Map<String, dynamic> ? decoded : null;
   }
 
+  /// Full XMLTV guide as a byte stream (large — callers stream-parse it
+  /// instead of materialising the whole body; build #26). [timeout] bounds
+  /// reaching the server and each quiet gap between chunks, so a slow
+  /// connection that keeps delivering still completes. The stream carries
+  /// the same User-Agent and abort rules as [_getText]: [abortTrigger]
+  /// hard-cancels the request at the socket. The bytes are the response
+  /// body as the transport delivers it — gzip is already decoded by the
+  /// underlying HttpClient (autoUncompress), verified by the loopback gzip
+  /// test in iptv_build26_epg_streaming_test.dart.
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    final uri = Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password');
+    http.StreamedResponse streamed;
+    try {
+      // Build #28: AbortableRequest, same shape as [_getText] — see its
+      // comment. The send is awaited (headers) under the timeout; the
+      // body then streams with a per-chunk-gap timeout instead of one
+      // total budget, so a 150 MB feed on a slow connection is not cut
+      // off for merely being slow.
+      final request = http.AbortableRequest('GET', uri, abortTrigger: abortTrigger);
+      request.headers['User-Agent'] = _effectiveUserAgent;
+      streamed = await _http.send(request).timeout(timeout);
+    } catch (e) {
+      final mapped = MediaServerHttpException.from(e, uri: uri);
+      if (!mapped.isCancellation) {
+        await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
+      }
+      throw mapped;
+    }
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      // Buffer only the (small) error body for the refusal record, as
+      // [_getText] does — the success path never materialises the body.
+      final response = await http.Response.fromStream(streamed);
+      await _recordRefusal(uri: uri, statusCode: response.statusCode, failureKind: 'http', response: response);
+      if (response.statusCode == 401) {
+        throw MediaServerAuthException('Xtream authentication failed', statusCode: 401);
+      }
+      if (response.statusCode == 403) {
+        throw MediaServerHttpException(
+          type: MediaServerHttpErrorType.unknown,
+          message: 'Xtream access denied',
+          statusCode: 403,
+          requestUri: uri,
+        );
+      }
+      throw MediaServerHttpException(
+        type: MediaServerHttpErrorType.unknown,
+        message: 'Xtream request failed with HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+        requestUri: uri,
+      );
+    }
+    yield* streamed.stream.timeout(timeout);
+  }
+
   /// Full XMLTV guide (large — callers fetch it only when the guide is
   /// actually being browsed). 120s: the file runs to megabytes and a slow
-  /// connection legitimately takes a while to deliver it.
-  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) =>
-      _getText(Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password'), timeout: timeout, abortTrigger: abortTrigger);
+  /// connection legitimately takes a while to deliver it. Implemented on
+  /// top of [getXmltvStream] so there is one network path; streaming
+  /// callers use the stream directly and never materialise the body.
+  Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
+    final bytes = await getXmltvStream(timeout: timeout, abortTrigger: abortTrigger)
+        .fold<List<int>>(<int>[], (list, chunk) => list..addAll(chunk));
+    return utf8.decode(bytes);
+  }
 
 /// Parse helpers for the disk cache (build #11): a cached payload is the
 /// same JSON the API returns, so it parses through the same isolate

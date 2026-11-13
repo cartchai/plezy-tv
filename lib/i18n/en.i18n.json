@@ -1606,6 +1606,12 @@
       "Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away",
       "Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search"
     ],
+    "changelog2282": [
+      "The TV guide no longer loads the whole channel list in one big chunk - it reads it as it arrives, so opening the guide uses far less memory",
+      "Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty",
+      "The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason",
+      "Old saved guide entries are now cleared out automatically instead of piling up on your phone"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"

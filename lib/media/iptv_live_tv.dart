@@ -357,8 +357,16 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (_epgCleared && !forceRefresh) return const <LiveTvProgram>[];
     if (forceRefresh) _epgCleared = false;
 
-    final fetchFrom = now.subtract(Duration(days: settings.pastDays));
-    final fetchTo = now.add(Duration(days: settings.daysToLoad));
+    // Build #26 (26.7): the fetch window is widened to cover the
+    // REQUESTED window, not just [now - pastDays, now + daysToLoad] —
+    // the day picker offers today + 7 days, but a picked day past the
+    // 4-day settings window could never show data: the feed slice was
+    // filtered to the settings window before the requested slice was
+    // taken. The feed already holds the data; no extra download.
+    var fetchFrom = now.subtract(Duration(days: settings.pastDays));
+    var fetchTo = now.add(Duration(days: settings.daysToLoad));
+    if (from.isBefore(fetchFrom)) fetchFrom = from;
+    if (to.isAfter(fetchTo)) fetchTo = to;
     final ttl = settings.updateIntervalHours <= 0
         ? null // Manual only: the cache never expires on its own.
         : Duration(hours: settings.updateIntervalHours);
@@ -396,6 +404,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // awaiting the disk write here would gate the guide on file I/O.
     // (The write still happens; it just doesn't hold the fetch open.)
     unawaited(_writePersistedEpg(channelKey, entry));
+    unawaited(_pruneStalePersistedEpg(ttl));
     _lastEpgUpdatedAt = now;
     _noteEpgUpdated(now);
     return _slice(programs, from, to);
@@ -530,6 +539,35 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
+  /// Delete per-channel EPG files older than [ttl] (build #26, 26.6):
+  /// the per-channel files were never pruned, so browsed channels
+  /// accumulated forever. Best-effort and fire-and-forget — a failure
+  /// never breaks the guide. Manual-only (null ttl) never prunes: the
+  /// cache never expires, so neither do its files. The feed file
+  /// (`feed_*.xml`) is governed by its own TTL logic and is never
+  /// touched here.
+  Future<void> _pruneStalePersistedEpg(Duration? ttl) async {
+    if (ttl == null || debugDisablePersistedEpg) return;
+    try {
+      final dir = await _epgCacheDir();
+      if (!await dir.exists()) return;
+      final cutoff = DateTime.now().subtract(ttl);
+      // Recursive: per-channel files live in a per-connection
+      // subdirectory (iptv_epg/<conn>/<safe>.json) — a non-recursive
+      // listing only sees the subdirectory itself, never the files.
+      await for (final entity in dir.list(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.json')) continue;
+        try {
+          if ((await entity.lastModified()).isBefore(cutoff)) await entity.delete();
+        } catch (_) {
+          // One unreadable file does not stop the prune.
+        }
+      }
+    } catch (_) {
+      // Best-effort: the guide never depends on the prune.
+    }
+  }
+
   /// Programs overlapping [from, to] (the guide's 6-hour window).
   static List<LiveTvProgram> _slice(List<LiveTvProgram> programs, DateTime from, DateTime to) {
     final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
@@ -538,16 +576,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
   }
 
   /// Xtream EPG, TiviMate-style (build #8 Task 3): per-channel
-  /// `get_short_epg` answers FIRST for the visible channel, while the
-  /// login's big `xmltv.php` feed loads in the background (one shared fetch
-  /// for the whole catalog, deduped by [_xtreamXmltvGuide]). The old order
-  /// — xmltv first — made every visible row wait on a 55k-channel file
-  /// (tens of MB, up to 120s) before showing anything. If get_short_epg has
-  /// nothing for the channel, the feed (already in flight) is awaited and
-  /// matched by tvg-id. A channel is never left blank by a missing or
-  /// partial feed — and a fetch only THROWS when both sources fail: if
-  /// either source answers (even empty), that answer stands, so a genuine
-  /// empty is never misread as a failure.
+  /// `get_short_epg` answers FIRST for the visible channel. If it has
+  /// nothing for the channel, the login's big `xmltv.php` feed is fetched
+  /// (one shared fetch for the whole catalog, deduped by
+  /// [_xtreamXmltvGuide]) and matched by tvg-id — build #26 (R3): the
+  /// feed used to start loading in the background on EVERY channel fetch,
+  /// even when short-EPG answered, which downloaded + parsed ~150 MB for
+  /// nobody. The old order — xmltv first — made every visible row wait on
+  /// a 55k-channel file (tens of MB, up to 120s) before showing anything.
+  /// A channel is never left blank by a missing or partial feed — and a
+  /// fetch only THROWS when both sources fail: if either source answers
+  /// (even empty), that answer stands, so a genuine empty is never
+  /// misread as a failure.
   Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
@@ -581,15 +621,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     Duration? ttl,
     AbortController abort,
   ) async {
-    // Start the big feed loading in the background now, so the fallback
-    // below awaits the shared in-flight future instead of starting it.
-    // Attach a no-op error listener NOW: the future is only awaited after
-    // get_short_epg answers, and a rejection with no listener in the
-    // meantime would surface as an unhandled async error — even though the
-    // fetch handles it below. Awaiting the original future still sees the
-    // rejection; this listener only marks it observed.
-    final xmltvFuture = _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl);
-    unawaited(xmltvFuture.then<void>((_) {}).catchError((_) {}));
+    // Build #26 (R3): the feed is fetched LAZILY — only when
+    // get_short_epg misses or fails for this channel. The old code
+    // started the big feed download unconditionally, in the background,
+    // on every channel fetch, even when short-EPG answered the row — a
+    // ~150 MB download + a whole-document parse for nobody, on every
+    // stale channel visit. Concurrent misses still share ONE download:
+    // [_xmltvGuideForKey] dedups in-flight fetches per key.
     List<LiveTvProgram>? shortEpg;
     try {
       shortEpg = await _fetchXtreamShortEpg(channelKey, settings, from, to, abort.trigger);
@@ -602,12 +640,10 @@ class IptvLiveTvSupport implements LiveTvSupport {
       appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
     if (shortEpg != null && shortEpg.isNotEmpty) {
-      // The background feed still lands in the shared cache for later
-      // fetches (its error is already observed above).
       return (programs: shortEpg, source: IptvEpgSource.shortEpg);
     }
-    // get_short_epg had nothing (or failed): use the feed (already
-    // loading). A feed that loads but has nothing for the channel returns
+    // get_short_epg had nothing (or failed): use the feed, starting it
+    // now. A feed that loads but has nothing for the channel returns
     // [] (genuine empty); a feed that fails only throws when get_short_epg
     // never answered — both sources failed.
     //
@@ -616,7 +652,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // or the app backgrounded, and the feed is a download nobody watches.
     abort.throwIfAborted();
     try {
-      return await xmltvFuture;
+      return await _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl);
     } catch (e) {
       if (shortEpg != null) {
         // Build #28: a feed deferred while a stream is playing is not
@@ -691,12 +727,24 @@ class IptvLiveTvSupport implements LiveTvSupport {
     Future<void>? abortTrigger,
   ) async {
     await _acquireShortEpgSlot();
+    // Build #26 (26.8): the first-paint timeout abandons the future but
+    // must ALSO abort the underlying 60 s request — otherwise the socket
+    // runs to its timeout unobserved. The abort is local to this call:
+    // firing the channel's own controller here would trip the
+    // throwIfAborted() in the caller and break the feed fallback.
+    final firstPaintAbort = AbortController();
+    final effectiveTrigger = abortTrigger == null
+        ? firstPaintAbort.trigger
+        : Future.any([abortTrigger, firstPaintAbort.trigger]);
     try {
       final listings = await _client.xtreamApi
-          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60), abortTrigger: abortTrigger)
+          .getShortEpg(channelKey, limit: 500, timeout: const Duration(seconds: 60), abortTrigger: effectiveTrigger)
           .timeout(
             shortEpgFirstPaintTimeout,
-            onTimeout: () => throw TimeoutException('get_short_epg first-paint timeout for $channelKey'),
+            onTimeout: () {
+              firstPaintAbort.abort();
+              throw TimeoutException('get_short_epg first-paint timeout for $channelKey');
+            },
           );
       final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
       final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
@@ -828,17 +876,17 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// Start a shared feed download (build #28): the download owns an
   /// AbortController, registered in [_activeEpgAborts] so
   /// [cancelBackgroundWork] can stop it when the app backgrounds. The
-  /// controller is removed when the download settles. The [fetchBody]
+  /// controller is removed when the download settles. The [fetchStream]
   /// receives the controller's trigger — the Xtream feed aborts at the
-  /// socket (see [XtreamApi.getXmltv]); the M3U feed races it
-  /// (best-effort, see [_xmltvGuide]).
+  /// socket (see [XtreamApi.getXmltvStream]); the M3U feed aborts at the
+  /// socket too (see [_xmltvGuide]).
   Future<_CachedXmltvGuide> _startXmltvDownload(
     String cacheKey,
-    Future<String> Function(Future<void>? abortTrigger) fetchBody,
+    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
   ) {
     final abort = AbortController();
     _activeEpgAborts.add(abort);
-    final future = _loadXmltvGuide(cacheKey, () => fetchBody(abort.trigger));
+    final future = _loadXmltvGuide(cacheKey, () => fetchStream(abort.trigger));
     unawaited(
       future.then<void>((_) {}).catchError((_) {}).whenComplete(() => _activeEpgAborts.remove(abort)),
     );
@@ -847,7 +895,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   Future<_CachedXmltvGuide> _xmltvGuideForKey(
     String cacheKey,
-    Future<String> Function(Future<void>? abortTrigger) fetchBody,
+    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
     Duration? ttl,
   ) async {
     bool fresh(_CachedXmltvGuide guide) => ttl == null || DateTime.now().difference(guide.fetchedAt) < ttl;
@@ -881,7 +929,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // exactly the background work that gets a one-connection line
       // blocked.
       if (IptvPlaybackActivity.instance.isPlaying) return cached;
-      final future = _startXmltvDownload(cacheKey, fetchBody);
+      final future = _startXmltvDownload(cacheKey, fetchStream);
       _xmltvGuideFutures[cacheKey] = future;
       unawaited(
         future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -901,7 +949,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
         // answers and the refresh download waits — see the stale-cache
         // branch above.
         if (IptvPlaybackActivity.instance.isPlaying) return persisted;
-        final future = _startXmltvDownload(cacheKey, fetchBody);
+        // Build #26: a concurrent caller may have started the refresh
+        // while this one read the persisted file — share it instead of
+        // starting a second download for the same key.
+        if (_xmltvGuideFutures[cacheKey] != null) return persisted;
+        final future = _startXmltvDownload(cacheKey, fetchStream);
         _xmltvGuideFutures[cacheKey] = future;
         unawaited(
           future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -919,7 +971,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (IptvPlaybackActivity.instance.isPlaying) {
       throw StateError('XMLTV feed for $cacheKey deferred while a stream is playing');
     }
-    final future = _startXmltvDownload(cacheKey, fetchBody);
+    // Build #26: a concurrent caller may have started the download while
+    // this one read the persisted file — share it instead of starting a
+    // second one. Without this, N cold rows each download the feed and
+    // tee to the same temp file (the old code had the same gap, hidden
+    // because concurrent writeAsString calls to one path never errored).
+    final inFlightAfterRead = _xmltvGuideFutures[cacheKey];
+    if (inFlightAfterRead != null) return inFlightAfterRead;
+    final future = _startXmltvDownload(cacheKey, fetchStream);
     _xmltvGuideFutures[cacheKey] = future;
     try {
       return await future;
@@ -931,48 +990,117 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  Future<_CachedXmltvGuide> _loadXmltvGuide(String cacheKey, Future<String> Function() fetchBody) async {
-    String body;
+  /// Download + stream-parse the XMLTV feed for [cacheKey] (build #26).
+  ///
+  /// The response bytes are tee'd to a temp file while [parseXmltvStream]
+  /// yields programmes — the whole feed is never held as a String, DOM,
+  /// or isolate copy. The temp file is promoted to the persisted feed
+  /// only when the parse completes successfully, preserving the old
+  /// "only a parseable feed is persisted" invariant: a failed or
+  /// cancelled download deletes the temp file and keeps the previously
+  /// persisted feed (if any). A partial in-memory guide is never served
+  /// as whole — on failure the partial list is discarded and the error
+  /// is recorded exactly as a failed download was.
+  Future<_CachedXmltvGuide> _loadXmltvGuide(String cacheKey, Stream<List<int>> Function() fetchStream) async {
+    final programs = <XmltvProgram>[];
+    // Tee the raw bytes to a temp file in the same directory, so the
+    // promote is a same-filesystem rename. Skipped entirely when the
+    // persisted side is disabled for tests. If the temp file cannot even
+    // be located (the cache directory is unavailable), the download still
+    // parses in memory and serves — persistence is best-effort, never a
+    // reason to lose the guide (the pre-#26 path parsed in memory and
+    // only the write could fail).
+    File? tempFile;
+    if (!debugDisablePersistedEpg) {
+      try {
+        tempFile = await _xmltvTempFeedFile(cacheKey);
+      } catch (e) {
+        appLogger.w('IPTV EPG feed cache unavailable for $cacheKey; parsing in memory', error: e);
+      }
+    }
+    // Synchronous file I/O throughout (build #26): async dart:io never
+    // completes inside testWidgets fake async (proven by probe: an
+    // awaited File.exists() hangs, existsSync() works), and the fetch
+    // path is awaited by widget tests — so an awaited create/write/
+    // rename here would hang the guide in the harness. The parse loop
+    // itself stays async (it awaits the byte stream, not the disk).
+    // A tee that cannot be set up degrades to in-memory parsing, same as
+    // the location fallback above — persistence never loses the guide.
+    RandomAccessFile? raf;
+    if (tempFile != null) {
+      try {
+        tempFile.parent.createSync(recursive: true);
+        raf = tempFile.openSync(mode: FileMode.write);
+      } catch (e) {
+        appLogger.w('IPTV EPG feed cache unavailable for $cacheKey; parsing in memory', error: e);
+        raf = null;
+      }
+    }
     try {
-      body = await fetchBody();
+      final stream = fetchStream();
+      await for (final program in parseXmltvStream(stream.map((chunk) {
+        raf?.writeFromSync(chunk);
+        return chunk;
+      }))) {
+        programs.add(program);
+      }
+      raf?.closeSync();
+      raf = null;
     } catch (e) {
       // Build #28: a cancellation is not a failure — the app backgrounded
       // or the feed was stopped, not refused. It must not poison the
       // negative cache, or the next guide fetch would refuse to download
       // the feed for 120 s.
+      try {
+        raf?.closeSync();
+      } catch (_) {
+        // Best-effort: the file is gone or already closed.
+      }
+      try {
+        if (tempFile != null && tempFile.existsSync()) tempFile.deleteSync();
+      } catch (_) {
+        // Best-effort: the temp file is gone or already deleted.
+      }
       if (!MediaServerHttpException.from(e).isCancellation) {
         _xmltvFailedAt[cacheKey] = DateTime.now();
       }
       rethrow;
     }
-    final programs = await compute(parseXmltv, body);
-    // Only a parseable feed is persisted — a corrupt body is never written
-    // to disk, so a bad download can't poison every later cold start.
-    unawaited(_writePersistedXmltv(cacheKey, body));
+    // Parse completed: the temp file holds exactly the bytes parsed, so
+    // promote it to the persisted feed. A rename failure must not lose
+    // the parsed guide — the in-memory guide still serves this launch,
+    // and the next cold start re-downloads.
+    if (tempFile != null) {
+      try {
+        final feedFile = await _xmltvFeedFile(cacheKey);
+        if (feedFile.existsSync()) feedFile.deleteSync();
+        tempFile.renameSync(feedFile.path);
+      } catch (e) {
+        appLogger.w('IPTV EPG feed cache write failed for $cacheKey', error: e);
+      }
+    }
     final guide = _CachedXmltvGuide(programs: programs, fetchedAt: DateTime.now());
     _xmltvCache[cacheKey] = guide;
     _xmltvFailedAt.remove(cacheKey);
     return guide;
   }
 
+  /// Temp file the feed download is tee'd to while parsing (build #26):
+  /// promoted to the persisted feed only on a successful parse. The
+  /// `.tmp` suffix (not `.xml`) keeps it invisible to the feed-file
+  /// helpers, which look for `*.xml`.
+  Future<File> _xmltvTempFeedFile(String cacheKey) async {
+    final dir = await _epgCacheDir();
+    return File('${dir.path}/feed_${_fileSafe(cacheKey)}.tmp');
+  }
+
   /// The persisted XMLTV feed file for [cacheKey]
   /// (`feed_<base64url(key)>.xml` next to the per-channel files). The raw
-  /// body is stored, not the parsed guide — parsing runs in an isolate on
-  /// read, same as on download.
+  /// bytes are stored, not the parsed guide — parsing streams from the
+  /// file on read (build #26), same as on download.
   Future<File> _xmltvFeedFile(String cacheKey) async {
     final dir = await _epgCacheDir();
     return File('${dir.path}/feed_${_fileSafe(cacheKey)}.xml');
-  }
-
-  Future<void> _writePersistedXmltv(String cacheKey, String body) async {
-    if (debugDisablePersistedEpg) return;
-    try {
-      final file = await _xmltvFeedFile(cacheKey);
-      await file.parent.create(recursive: true);
-      await file.writeAsString(body);
-    } catch (e) {
-      appLogger.w('IPTV EPG feed cache write failed for $cacheKey', error: e);
-    }
   }
 
   /// Read + parse the persisted feed file, or null when there is none (or
@@ -984,13 +1112,24 @@ class IptvLiveTvSupport implements LiveTvSupport {
     File? file;
     try {
       file = await _xmltvFeedFile(cacheKey);
-      if (!await file.exists()) return null;
-      final body = await file.readAsString();
-      final programs = await compute(parseXmltv, body);
-      return _CachedXmltvGuide(programs: programs, fetchedAt: await file.lastModified());
+      if (!file.existsSync()) return null;
+      // Build #26: stream-parse the file instead of reading the whole
+      // body into a String and parsing it in an isolate — the cold-start
+      // path held the whole feed ~4x at once (~1.45 GB peak RSS at Trex
+      // scale). A corrupt file (including a truncated one) throws here
+      // and is deleted below, exactly as before. Synchronous reads (see
+      // _loadXmltvGuide): async dart:io never completes inside
+      // testWidgets fake async, and this read is awaited on the fetch
+      // path — the 64 KB sync chunks keep the streaming property (no
+      // whole-file String) without touching the event loop.
+      final programs = <XmltvProgram>[];
+      await for (final program in parseXmltvStream(_readFileInChunks(file))) {
+        programs.add(program);
+      }
+      return _CachedXmltvGuide(programs: programs, fetchedAt: file.lastModifiedSync());
     } catch (_) {
       try {
-        await file?.delete();
+        if (file != null && file.existsSync()) file.deleteSync();
       } catch (_) {
         // Best-effort: the file is gone or unreadable anyway.
       }
@@ -998,31 +1137,47 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
+  /// A file as a byte stream read in 64 KB synchronous chunks (build
+  /// #26): the streaming parser needs a [Stream], but async file reads
+  /// never complete inside testWidgets fake async — sync reads do, and
+  /// the generator only yields between chunks, so the whole file is
+  /// never held in memory at once.
+  static Stream<List<int>> _readFileInChunks(File file) async* {
+    final raf = file.openSync();
+    try {
+      while (true) {
+        final chunk = raf.readSync(65536);
+        if (chunk.isEmpty) break;
+        yield chunk;
+      }
+    } finally {
+      raf.closeSync();
+    }
+  }
+
   /// The M3U connection's user-supplied EPG URL, as a parsed guide.
   Future<_CachedXmltvGuide> _xmltvGuide(String epgUrl, {Duration? ttl}) {
-    return _xmltvGuideForKey(epgUrl, (abortTrigger) async {
-      final get = http.get(Uri.parse(epgUrl)).timeout(const Duration(seconds: 120));
-      // Build #28: a bare http.get cannot be aborted at the socket, so
-      // the abort races it — the caller stops waiting and the download's
-      // result is discarded (best-effort: the socket may finish in the
-      // background). The Xtream feed aborts at the socket (see
-      // [XtreamApi.getXmltv]).
-      final response = abortTrigger == null
-          ? await get
-          : await Future.any([
-              get,
-              abortTrigger.then(
-                (_) => throw MediaServerHttpException(
-                  type: MediaServerHttpErrorType.cancelled,
-                  message: 'XMLTV fetch cancelled',
-                ),
-              ),
-            ]);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw StateError('XMLTV fetch failed with HTTP ${response.statusCode}');
+    return _xmltvGuideForKey(epgUrl, (abortTrigger) => _m3uFeedStream(epgUrl, abortTrigger), ttl);
+  }
+
+  /// The M3U feed as a byte stream (build #26): the old bare `http.get`
+  /// buffered the whole body, and its abort only raced the get — the
+  /// socket could finish in the background. An [AbortableRequest] aborts
+  /// at the socket (as the Xtream feed does), and the short-lived client
+  /// is closed when the stream ends, errors, or is cancelled, so an
+  /// abandoned download never holds a socket open.
+  Stream<List<int>> _m3uFeedStream(String epgUrl, Future<void>? abortTrigger) async* {
+    final client = http.Client();
+    try {
+      final request = http.AbortableRequest('GET', Uri.parse(epgUrl), abortTrigger: abortTrigger);
+      final streamed = await client.send(request).timeout(const Duration(seconds: 120));
+      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+        throw StateError('XMLTV fetch failed with HTTP ${streamed.statusCode}');
       }
-      return response.body;
-    }, ttl);
+      yield* streamed.stream.timeout(const Duration(seconds: 120));
+    } finally {
+      client.close();
+    }
   }
 
   /// The Xtream login's `xmltv.php` feed, as a parsed guide. One guide per
@@ -1031,7 +1186,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   Future<_CachedXmltvGuide> _xtreamXmltvGuide({Duration? ttl}) {
     return _xmltvGuideForKey(
       'xtream:${_client.connection.id}',
-      (abortTrigger) => _client.xtreamApi.getXmltv(abortTrigger: abortTrigger),
+      (abortTrigger) => _client.xtreamApi.getXmltvStream(abortTrigger: abortTrigger),
       ttl,
     );
   }

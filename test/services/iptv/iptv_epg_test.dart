@@ -146,7 +146,7 @@ void main() {
     expect(api.calls['100'], 1);
   });
 
-  test('days window bounds the fetch: listings outside it never appear', () async {
+  test('a requested window past the settings window still shows its programmes (build #26, 26.7)', () async {
     await setPrefs(daysToLoad: 1, pastDays: 1);
     final now = nowFn();
     api.scripted['100'] = [
@@ -155,15 +155,21 @@ void main() {
       _epg(id: 'far', title: 'Two days out', start: now.add(const Duration(days: 2)), end: now.add(const Duration(days: 2)).add(const Duration(hours: 1))),
     ];
 
-    // Ask for a WIDER window than the settings allow — the settings
-    // window, not the request, must bound the result.
+    // Build #26 (26.7) REPLACES the old rule: the settings window used
+    // to bound the result, so a day picked past the 4-day settings
+    // window could never show data — the day picker offers today + 7
+    // days. The fetch window is now widened to the REQUESTED window
+    // (the day the guide is showing), and the request bounds the result;
+    // the settings window remains the default fetch window for the
+    // current day. Asking for a wider window than the settings allow
+    // now returns everything inside the requested window.
     final programs = await support.fetchEpgForChannel(
       '100',
       from: now.subtract(const Duration(days: 2)),
       to: now.add(const Duration(days: 3)),
     );
 
-    expect(programs.map((p) => p.title), ['Now']);
+    expect(programs.map((p) => p.title), ['Two days ago', 'Now', 'Two days out']);
   });
 
   test('interval gates refreshes and Update now busts the cache', () async {

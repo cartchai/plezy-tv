@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart';
 
 /// One programme from an XMLTV file, before mapping to [LiveTvProgram].
 ///
@@ -25,6 +29,113 @@ class XmltvProgram {
     required this.title,
     required this.description,
   });
+}
+
+/// Stream-parse an XMLTV document from a byte stream, yielding one
+/// [XmltvProgram] per `<programme>` element as it closes.
+///
+/// Build #26: the provider feed runs to ~150 MB at Trex scale, and the old
+/// [parseXmltv] path held it ~4x at once (whole UTF-16 String, isolate
+/// copy, DOM tree, result list — ~1.45 GB peak RSS on the production cold
+/// start). This consumes chunked bytes through the `xml` package's chunked
+/// event API (`Stream<String>.toXmlEvents`), so only the programme
+/// currently being assembled is ever in memory. Callers must NOT `toList()`
+/// the stream — accumulate only the retained list + indexes.
+///
+/// Same tolerance as [parseXmltv]: a malformed programme is skipped, never
+/// fatal. Only a structurally unparseable document fails the whole parse
+/// (unclosed element at EOF, mismatched tags, invalid XML, or a document
+/// with no elements at all — an empty feed file reads as corrupt, exactly
+/// like [parseXmltv] throwing on an empty body).
+Stream<XmltvProgram> parseXmltvStream(Stream<List<int>> bytes) async* {
+  // State for the programme currently being assembled.
+  var inProgramme = false;
+  var channelId = '';
+  int? startEpoch;
+  int? stopEpoch;
+  final title = StringBuffer();
+  final desc = StringBuffer();
+  // The child element whose text is being accumulated ('title' / 'desc').
+  String? currentChild;
+  var sawElement = false;
+
+  XmltvProgram? tryBuild() {
+    if (channelId.isEmpty || startEpoch == null || stopEpoch == null || stopEpoch! <= startEpoch!) return null;
+    return XmltvProgram(
+      channelId: channelId,
+      startEpoch: startEpoch!,
+      stopEpoch: stopEpoch!,
+      title: title.toString().trim(),
+      description: desc.toString().trim(),
+    );
+  }
+
+  void resetProgramme() {
+    inProgramme = false;
+    channelId = '';
+    startEpoch = null;
+    stopEpoch = null;
+    title.clear();
+    desc.clear();
+    currentChild = null;
+  }
+
+  final events = bytes.transform(utf8.decoder).toXmlEvents(validateNesting: true);
+  await for (final batch in events) {
+    for (final event in batch) {
+      if (event is XmlStartElementEvent) {
+        sawElement = true;
+        if (event.name == 'programme') {
+          // A nested <programme> resets the outer one (malformed input);
+          // the outer end event then finds empty state and yields nothing.
+          resetProgramme();
+          inProgramme = true;
+          for (final attribute in event.attributes) {
+            switch (attribute.name) {
+              case 'channel':
+                channelId = attribute.value.trim();
+              case 'start':
+                startEpoch = _parseXmltvTime(attribute.value);
+              case 'stop':
+                stopEpoch = _parseXmltvTime(attribute.value);
+            }
+          }
+          // A self-closing <programme/> emits no end event (the event
+          // parser yields a start event with isSelfClosing only).
+          if (event.isSelfClosing) {
+            final program = tryBuild();
+            resetProgramme();
+            if (program != null) yield program;
+          }
+        } else if (inProgramme && currentChild == null && (event.name == 'title' || event.name == 'desc')) {
+          if (!event.isSelfClosing) currentChild = event.name;
+        }
+      } else if (event is XmlTextEvent) {
+        if (currentChild == 'title') {
+          title.write(event.value);
+        } else if (currentChild == 'desc') {
+          desc.write(event.value);
+        }
+      } else if (event is XmlCDATAEvent) {
+        if (currentChild == 'title') {
+          title.write(event.value);
+        } else if (currentChild == 'desc') {
+          desc.write(event.value);
+        }
+      } else if (event is XmlEndElementEvent) {
+        if (event.name == 'programme' && inProgramme) {
+          final program = tryBuild();
+          resetProgramme();
+          if (program != null) yield program;
+        } else if (event.name == currentChild) {
+          currentChild = null;
+        }
+      }
+    }
+  }
+  if (!sawElement) {
+    throw const FormatException('Empty XMLTV document');
+  }
 }
 
 /// Parse an XMLTV document into programmes. Malformed entries are skipped,

@@ -15,6 +15,7 @@
 // No live panel: fakes only.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:cached_network_image_ce/cached_network_image.dart';
@@ -114,6 +115,13 @@ class _MiniPlayerApi extends XtreamApi {
     return completer.future;
   }
 
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     throw Exception('xmltv feed unavailable in stream-UA tests');

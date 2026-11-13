@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -176,6 +177,13 @@ class _FakeXtreamApi extends XtreamApi {
   // they must be stubbed here — a real HTTP call never completes inside
   // `testWidgets`' fake async zone and the guide's loading indicator
   // would spin `pumpAndSettle` into its timeout.
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async =>
       '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
@@ -956,9 +964,7 @@ void main() {
       final newest14 = tester.getTopLeft(find.text('Version 1.0.14-2.25.0')).dy;
       expect(newest14, lessThan(newest13));
       // Series fix (v1.0.16): same guard for the new version — it must
-      // be present and sit above 1.0.14. (1.0.15 is build #26's slot,
-      // building in parallel; the guard covers the entry this build
-      // owns.)
+      // be present and sit above 1.0.14.
       expect(find.text('Version 1.0.16-2.25.0'), findsOneWidget);
       final newest16 = tester.getTopLeft(find.text('Version 1.0.16-2.25.0')).dy;
       expect(newest16, lessThan(newest14));
@@ -967,6 +973,11 @@ void main() {
       expect(find.text('Version 1.0.17-2.25.0'), findsOneWidget);
       final newest17 = tester.getTopLeft(find.text('Version 1.0.17-2.25.0')).dy;
       expect(newest17, lessThan(newest16));
+      // #26 (v1.0.18): same guard for the new version — it must be
+      // present and sit above 1.0.17.
+      expect(find.text('Version 1.0.18-2.25.0'), findsOneWidget);
+      final newest18 = tester.getTopLeft(find.text('Version 1.0.18-2.25.0')).dy;
+      expect(newest18, lessThan(newest17));
     });
   });
 }

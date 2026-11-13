@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -82,6 +83,13 @@ class _EpgControllableApi extends XtreamApi {
   // persisted feed FILE is still read (build #15 caches the feed on
   // disk); the harness gives that real I/O a runAsync window in
   // waitForEpgCalls so it can settle in the fake async zone.
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     throw Exception('xmltv feed unavailable in guide tests');

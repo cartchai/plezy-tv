@@ -12,6 +12,8 @@
 //     (cancelEpgFetchForChannel) instead of running to completion.
 //   * a background cancel stops an in-flight feed download
 //     (cancelBackgroundWork) without poisoning the feed's negative cache.
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -68,6 +70,13 @@ class _AbortableEpgApi extends XtreamApi {
     return Future.any([answer, abortTrigger.then((_) => throw _cancelled())]);
   }
 
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     xmltvCalls++;

@@ -3863,6 +3863,12 @@ class Translations$about$en {
 		'Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away',
 		'Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search',
 	];
+	List<String> get changelog2282 => [
+		'The TV guide no longer loads the whole channel list in one big chunk - it reads it as it arrives, so opening the guide uses far less memory',
+		'Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty',
+		'The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason',
+		'Old saved guide entries are now cleared out automatically instead of piling up on your phone',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10517,6 +10523,10 @@ extension on Translations {
 			'about.changelog2280.4' => 'Refreshing the catalog no longer says it failed when it kept the shows it already had',
 			'about.changelog2281.0' => 'Series search now finds shows that were missing: their details sometimes arrive as a list instead of a single value, and the app used to throw those shows away',
 			'about.changelog2281.1' => 'Movies and live channels get the same protection, so a mistyped detail can no longer drop a title from search',
+			'about.changelog2282.0' => 'The TV guide no longer loads the whole channel list in one big chunk - it reads it as it arrives, so opening the guide uses far less memory',
+			'about.changelog2282.1' => 'Picking a day up to a week ahead in the guide now shows its programmes instead of coming up empty',
+			'about.changelog2282.2' => 'The guide only downloads its big channel list when the quick per-channel lookup has nothing for the channel - it no longer re-downloads in the background for no reason',
+			'about.changelog2282.3' => 'Old saved guide entries are now cleared out automatically instead of piling up on your phone',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10621,12 +10631,12 @@ extension on Translations {
 			'explore.badge.processing' => 'Processing',
 			'explore.badge.declined' => 'Declined',
 			'explore.badge.requestFailed' => 'Request failed',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.requested4k' => '4K requested',
 			'explore.badge.seasonsAvailable' => ({required Object available, required Object total}) => '${available}/${total} seasons',
 			'explore.badge.nextEpisodeIn' => ({required Object episode, required Object duration}) => 'Ep ${episode} in ${duration}',
 			'explore.badge.nextAiringIn' => ({required Object duration}) => 'Next in ${duration}',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.episodesShort' => ({required Object n}) => '${n} eps',
 			'explore.badge.minutesPerEpisode' => ({required Object n}) => '${n} min/ep',
 			'explore.badge.adult' => '18+',
@@ -11135,12 +11145,12 @@ extension on Translations {
 			'downloads.syncRuleSignInRequired' => 'Sign in required',
 			'downloads.syncRuleAccessDenied' => 'Access denied',
 			'downloads.syncRuleNotAvailableForProfile' => 'Not available for current profile',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleUnknownServer' => 'Unknown server',
 			'downloads.syncRuleListCreated' => 'Sync rule created',
 			'downloads.backgroundWarning.bannerBlocked' => 'Downloads will stop when you leave the app',
 			'downloads.backgroundWarning.bannerDegraded' => 'Background downloads may be limited',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.backgroundWarning.bannerAction' => 'Details',
 			'downloads.backgroundWarning.sheetTitle' => 'Background downloads are blocked',
 			'downloads.backgroundWarning.sheetTitleDegraded' => 'Background downloads may be limited',
@@ -11649,12 +11659,12 @@ extension on Translations {
 			'iptv.playlist' => 'Playlist',
 			'iptv.refreshPlaylists' => 'Refresh playlists',
 			'iptv.refreshPlaylistsDescription' => 'Re-fetch channels, movies and series from your providers',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.refreshDone' => 'Playlists refreshed',
 			'iptv.catalogSyncInterval' => 'Catalog sync interval',
 			'iptv.catalogSyncIntervalDescription' => 'How often the catalog (channels, movies and series) re-downloads for search',
 			'iptv.catalogSyncWeekly' => 'Once a week',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.backgroundSync' => 'Background sync',
 			'iptv.backgroundSyncNever' => 'Never run',
 			'iptv.backgroundSyncLastRun' => ({required Object date}) => 'Last run ${date}',

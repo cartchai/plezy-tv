@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/connection/connection.dart';
@@ -69,6 +71,13 @@ class _EmptyXtreamApi extends XtreamApi {
   @override
   Future<List<XtreamEpgProgram>> getShortEpg(String streamId, {int limit = 4, Duration? timeout, Future<void>? abortTrigger}) async => const [];
 
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     throw Exception('xmltv feed unavailable in header tests');

@@ -91,6 +91,13 @@ class _EpgFakeApi extends XtreamApi {
     return scripted[streamId] ?? const [];
   }
 
+  /// Build #26: the fake's feed is a small canned String, so the stream
+  /// is built on top of [getXmltv] — the production path streams, the fake
+  /// does not need to.
+  @override
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    yield utf8.encode(await getXmltv(timeout: timeout, abortTrigger: abortTrigger));
+  }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
     xmltvCalls++;
@@ -186,18 +193,6 @@ void main() {
     fail('persisted XMLTV feed file was not written');
   }
 
-  /// Wait until the fake's `xmltv.php` download count reaches [n]. The
-  /// feed loads in the background behind short-EPG, and build #15 checks
-  /// the persisted file first, so the download starts a tick later than
-  /// the fetch returns — poll instead of asserting immediately.
-  Future<void> waitForXmltvCalls(int n) async {
-    for (var i = 0; i < 200; i++) {
-      if (api.xmltvCalls >= n) return;
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    }
-    fail('xmltv.php was not fetched $n times (got ${api.xmltvCalls})');
-  }
-
   /// Delete the persisted per-channel file for [channelKey] so the next
   /// fetch must come from the feed, not the per-channel cache.
   Future<void> deleteChannelFile(String channelKey) async {
@@ -224,6 +219,41 @@ void main() {
     from: now.subtract(const Duration(hours: 1)),
     to: now.add(const Duration(hours: 6)),
   );
+
+  /// Canned XMLTV feed: programmes for ch100 (stream 100) and ch200
+  /// (stream 200), timed around [now].
+  String xmltvDoc(DateTime now, {bool includeCh100 = true}) {
+    String stamp(DateTime t) {
+      final u = t.toUtc();
+      String two(int n) => n.toString().padLeft(2, '0');
+      return '${u.year}${two(u.month)}${two(u.day)}${two(u.hour)}${two(u.minute)}${two(u.second)} +0000';
+    }
+
+    final start = stamp(now.subtract(const Duration(hours: 1)));
+    final mid = stamp(now.add(const Duration(hours: 1)));
+    final end = stamp(now.add(const Duration(hours: 2)));
+    final ch100 = includeCh100
+        ? '''
+  <programme start="$start" stop="$mid" channel="ch100"><title>XMLTV Morning</title><desc>From the feed</desc></programme>
+  <programme start="$mid" stop="$end" channel="ch100"><title>XMLTV Midday</title></programme>'''
+        : '';
+    return '''<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="ch100"><display-name>Channel 100</display-name></channel>
+  <channel id="ch200"><display-name>Channel 200</display-name></channel>$ch100
+  <programme start="$start" stop="$mid" channel="ch200"><title>Other Channel</title></programme>
+</tv>''';
+  }
+
+  /// A client with its channels listed first (the guide always lists
+  /// channels before fetching EPG, which populates the stream-id →
+  /// epg_channel_id lookup the XMLTV match needs).
+  Future<IptvClient> listedClient() async {
+    final client = IptvClient.xtream(xtreamConnection: _trexConnection());
+    client.testXtreamApi = api;
+    await client.iptvChannels();
+    return client;
+  }
 
   test('LiveTvProgram toJson/fromJson round-trips the EPG fields', () {
     final program = LiveTvProgram(
@@ -317,14 +347,20 @@ void main() {
 
   test('Clear guide deletes the persisted files and stays empty until refresh', () async {
     final now = DateTime.now();
-    scriptEpg(now);
-    final support = supportFor();
+    // The feed serves the channel here (short-EPG empty), so both a
+    // per-channel file and a feed file exist to be cleared. Build #26
+    // (R3): when short-EPG answers, the feed is never fetched, so no
+    // feed file would exist to wait for.
+    api.xmltvBody = xmltvDoc(now);
+    // Listed channels: the feed matches by tvg-id (ch100), which needs
+    // the stream-id -> epg_channel_id lookup the listing populates.
+    final support = (await listedClient()).liveTv as IptvLiveTvSupport;
     await fetchEpg(support, now);
     expect(api.calls['100'], 1);
     await waitForEpgFile();
     expect(epgFile().existsSync(), isTrue);
-    // The feed file is written fire-and-forget too — wait for it to land
-    // before clearing, or it can land after the delete.
+    // The feed file is promoted when the parse completes — wait for it to
+    // land before clearing, or it can land after the delete.
     await waitForFeedFile();
 
     await support.clearEpgCache();
@@ -343,9 +379,10 @@ void main() {
     // A relaunch after a clear refetches: the cleared flag is in-memory
     // only — Clear means "empty until a refresh", and a restart IS a
     // refresh (the guide must not stay permanently empty with no obvious
-    // fix). So the relaunched guide loads the programmes again.
-    final relaunched = supportFor();
-    expect((await fetchEpg(relaunched, now)).map((p) => p.title), ['Morning News', 'Midday']);
+    // fix). So the relaunched guide loads the programmes again (from the
+    // feed, since short-EPG is empty here).
+    final relaunched = (await listedClient()).liveTv as IptvLiveTvSupport;
+    expect((await fetchEpg(relaunched, now)).map((p) => p.title), ['XMLTV Morning', 'XMLTV Midday']);
     expect(api.calls['100'], 2);
   });
 
@@ -419,41 +456,6 @@ void main() {
   // fetch fails). The parsed feed is shared across channels, and the
   // programmes it serves are persisted per channel like any other fetch.
 
-  /// Canned XMLTV feed: programmes for ch100 (stream 100) and ch200
-  /// (stream 200), timed around [now].
-  String xmltvDoc(DateTime now, {bool includeCh100 = true}) {
-    String stamp(DateTime t) {
-      final u = t.toUtc();
-      String two(int n) => n.toString().padLeft(2, '0');
-      return '${u.year}${two(u.month)}${two(u.day)}${two(u.hour)}${two(u.minute)}${two(u.second)} +0000';
-    }
-
-    final start = stamp(now.subtract(const Duration(hours: 1)));
-    final mid = stamp(now.add(const Duration(hours: 1)));
-    final end = stamp(now.add(const Duration(hours: 2)));
-    final ch100 = includeCh100
-        ? '''
-  <programme start="$start" stop="$mid" channel="ch100"><title>XMLTV Morning</title><desc>From the feed</desc></programme>
-  <programme start="$mid" stop="$end" channel="ch100"><title>XMLTV Midday</title></programme>'''
-        : '';
-    return '''<?xml version="1.0" encoding="UTF-8"?>
-<tv>
-  <channel id="ch100"><display-name>Channel 100</display-name></channel>
-  <channel id="ch200"><display-name>Channel 200</display-name></channel>$ch100
-  <programme start="$start" stop="$mid" channel="ch200"><title>Other Channel</title></programme>
-</tv>''';
-  }
-
-  /// A client with its channels listed first (the guide always lists
-  /// channels before fetching EPG, which populates the stream-id →
-  /// epg_channel_id lookup the XMLTV match needs).
-  Future<IptvClient> listedClient() async {
-    final client = IptvClient.xtream(xtreamConnection: _trexConnection());
-    client.testXtreamApi = api;
-    await client.iptvChannels();
-    return client;
-  }
-
   test('get_short_epg answers first; the xmltv.php feed covers a channel it has nothing for', () async {
     // Build #8 Task 3: get_short_epg runs first per channel (fast, so the
     // guide populates in seconds) while the big xmltv.php feed loads in
@@ -479,7 +481,12 @@ void main() {
     expect(api.xmltvCalls, 1, reason: 'the persisted entry must be served, not the feed re-fetched');
   });
 
-  test('get_short_epg serves the channel; the xmltv.php feed still loads in the background', () async {
+  test('get_short_epg serves the channel; the xmltv.php feed is NOT fetched (build #26, R3)', () async {
+    // Build #26 (R3): the feed is fetched lazily, only when get_short_epg
+    // misses. This test used to PIN the wasteful behaviour (the feed
+    // loading in the background behind an answering short-EPG); the fix
+    // REPLACES that expectation, not the coverage — short-EPG serves the
+    // row and the feed is never downloaded.
     final now = DateTime.now();
     api.xmltvBody = xmltvDoc(now, includeCh100: false);
     scriptEpg(now);
@@ -488,11 +495,18 @@ void main() {
 
     final programs = await fetchEpg(support, now);
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
-    await waitForXmltvCalls(1);
+    // The feed (if any) would start in the background behind the fetch —
+    // give it time to start, then assert it never did.
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(api.xmltvCalls, 0, reason: 'short-EPG answered the row; the feed must not be downloaded');
     expect(api.calls['100'], 1);
   });
 
   test('a failing xmltv.php fetch still serves get_short_epg programmes', () async {
+    // Build #26 (R3): the feed is only fetched when short-EPG misses, so
+    // a failing feed is never even attempted while short-EPG answers —
+    // the row is served with zero feed calls. (The both-sources-fail case
+    // is covered by 'both sources failing throws'.)
     final now = DateTime.now();
     api.failXmltv = true;
     scriptEpg(now);
@@ -501,7 +515,8 @@ void main() {
 
     final programs = await fetchEpg(support, now);
     expect(programs.map((p) => p.title), ['Morning News', 'Midday']);
-    await waitForXmltvCalls(1);
+    await Future<void>.delayed(const Duration(seconds: 2));
+    expect(api.xmltvCalls, 0, reason: 'short-EPG answered; the failing feed must not be attempted');
     expect(api.calls['100'], 1);
   });
 
