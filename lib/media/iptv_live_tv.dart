@@ -21,6 +21,7 @@ import '../services/favorite_channels_repository.dart';
 import '../services/iptv/iptv_epg_sources.dart';
 import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/xmltv_parser.dart';
+import '../services/iptv/xtream_api.dart';
 import '../services/settings_service.dart';
 import '../utils/app_logger.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
@@ -960,7 +961,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       _CachedXmltvGuide guide;
       try {
         final started = DateTime.now();
-        final (loaded, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchStream, ttl, force: force);
+        final (loaded, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchFeed, ttl, force: force);
         guide = loaded;
         anyLoaded = true;
         if (loadedFresh) {
@@ -1115,17 +1116,27 @@ class IptvLiveTvSupport implements LiveTvSupport {
   Future<List<_EpgSourceAttempt>> _epgSourceAttempts() async {
     final userSources = await _epgStore.loadUserSources();
     final enabled = userSources.where((s) => s.enabled).toList(growable: false);
-    final provider = _providerSourceAttempt();
-    final added = enabled
-        .map(
-          (s) => _EpgSourceAttempt(
-            config: s,
-            cacheKey: 'user:${s.id}',
-            keyPrefix: 'user',
-            fetchStream: (abortTrigger) => _m3uFeedStream(s.url!, abortTrigger),
+    final provider = await _providerSourceAttempt();
+    // I9: the validators for each feed are loaded when the attempts are
+    // built and captured in the fetcher closure — a refresh sends the
+    // ETag / Last-Modified the server sent last time.
+    final added = <_EpgSourceAttempt>[];
+    for (final s in enabled) {
+      final validators = await _epgStore.loadValidators('user:${s.id}');
+      added.add(
+        _EpgSourceAttempt(
+          config: s,
+          cacheKey: 'user:${s.id}',
+          keyPrefix: 'user',
+          fetchFeed: (abortTrigger, {bool useValidators = true}) => _m3uFeedFetch(
+            s.url!,
+            abortTrigger,
+            etag: useValidators ? validators.etag : null,
+            lastModified: useValidators ? validators.lastModified : null,
           ),
-        )
-        .toList(growable: false);
+        ),
+      );
+    }
     final addedFirst = await _epgStore.loadAddedSourcesFirst();
     if (addedFirst) return [...added, ?provider];
     return [?provider, ...added];
@@ -1134,23 +1145,36 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// The provider feed's fetch (Xtream: the login's `xmltv.php`; M3U:
   /// the playlist's declared EPG URL). Null when the connection has no
   /// provider feed (an M3U playlist without a declared URL).
-  _EpgSourceAttempt? _providerSourceAttempt() {
+  Future<_EpgSourceAttempt?> _providerSourceAttempt() async {
     if (_isXtream) {
+      final cacheKey = 'xtream:${_client.connection.id}';
+      final validators = await _epgStore.loadValidators(cacheKey);
       return _EpgSourceAttempt(
         config: _providerConfig(),
-        cacheKey: 'xtream:${_client.connection.id}',
+        cacheKey: cacheKey,
         keyPrefix: 'xtream',
-        fetchStream: (abortTrigger) => _client.xtreamApi.getXmltvStream(abortTrigger: abortTrigger),
+        fetchFeed: (abortTrigger, {bool useValidators = true}) =>
+            _client.xtreamApi.getXmltvFeed(
+              etag: useValidators ? validators.etag : null,
+              lastModified: useValidators ? validators.lastModified : null,
+              abortTrigger: abortTrigger,
+            ),
       );
     }
     final connection = _client.connection;
     if (connection is M3uConnection && connection.epgUrl != null && connection.epgUrl!.isNotEmpty) {
       final url = connection.epgUrl!;
+      final validators = await _epgStore.loadValidators(url);
       return _EpgSourceAttempt(
         config: _providerConfig(),
         cacheKey: url,
         keyPrefix: 'm3u',
-        fetchStream: (abortTrigger) => _m3uFeedStream(url, abortTrigger),
+        fetchFeed: (abortTrigger, {bool useValidators = true}) => _m3uFeedFetch(
+          url,
+          abortTrigger,
+          etag: useValidators ? validators.etag : null,
+          lastModified: useValidators ? validators.lastModified : null,
+        ),
       );
     }
     return null;
@@ -1169,12 +1193,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// so a serve is not a fresh load.
   Future<(_CachedXmltvGuide guide, bool loadedFresh)> _loadSourceGuide(
     String cacheKey,
-    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
+    XmltvFeedFetcher fetchFeed,
     Duration? ttl, {
     bool force = false,
   }) async {
     final before = _xmltvCache[cacheKey]?.fetchedAt;
-    final guide = await _xmltvGuideForKey(cacheKey, fetchStream, ttl, force: force);
+    final guide = await _xmltvGuideForKey(cacheKey, fetchFeed, ttl, force: force);
     return (guide, before == null || guide.fetchedAt != before);
   }
 
@@ -1411,17 +1435,20 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// Start a shared feed download (build #28): the download owns an
   /// AbortController, registered in [_activeEpgAborts] so
   /// [cancelBackgroundWork] can stop it when the app backgrounds. The
-  /// controller is removed when the download settles. The [fetchStream]
+  /// controller is removed when the download settles. The [fetchFeed]
   /// receives the controller's trigger — the Xtream feed aborts at the
-  /// socket (see [XtreamApi.getXmltvStream]); the M3U feed aborts at the
-  /// socket too (see [_xmltvGuide]).
+  /// socket (see [XtreamApi.getXmltvFeed]); the M3U feed aborts at the
+  /// socket too (see [_m3uFeedFetch]).
   Future<_CachedXmltvGuide> _startXmltvDownload(
     String cacheKey,
-    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
+    XmltvFeedFetcher fetchFeed,
   ) {
     final abort = AbortController();
     _activeEpgAborts.add(abort);
-    final future = _loadXmltvGuide(cacheKey, () => fetchStream(abort.trigger));
+    final future = _loadXmltvGuide(
+      cacheKey,
+      ({bool useValidators = true}) => fetchFeed(abort.trigger, useValidators: useValidators),
+    );
     unawaited(
       future.then<void>((_) {}).catchError((_) {}).whenComplete(() => _activeEpgAborts.remove(abort)),
     );
@@ -1430,7 +1457,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   Future<_CachedXmltvGuide> _xmltvGuideForKey(
     String cacheKey,
-    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
+    XmltvFeedFetcher fetchFeed,
     Duration? ttl, {
     bool force = false,
   }) async {
@@ -1473,7 +1500,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // exactly the background work that gets a one-connection line
       // blocked.
       if (IptvPlaybackActivity.instance.isPlaying) return cached;
-      final future = _startXmltvDownload(cacheKey, fetchStream);
+      final future = _startXmltvDownload(cacheKey, fetchFeed);
       _xmltvGuideFutures[cacheKey] = future;
       unawaited(
         future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -1497,7 +1524,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         // while this one read the persisted file — share it instead of
         // starting a second download for the same key.
         if (_xmltvGuideFutures[cacheKey] != null) return persisted;
-        final future = _startXmltvDownload(cacheKey, fetchStream);
+        final future = _startXmltvDownload(cacheKey, fetchFeed);
         _xmltvGuideFutures[cacheKey] = future;
         unawaited(
           future.then<void>((_) {}).catchError((_) {}).whenComplete(() {
@@ -1524,7 +1551,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // because concurrent writeAsString calls to one path never errored).
     final inFlightAfterRead = _xmltvGuideFutures[cacheKey];
     if (inFlightAfterRead != null) return inFlightAfterRead;
-    final future = _startXmltvDownload(cacheKey, fetchStream);
+    final future = _startXmltvDownload(cacheKey, fetchFeed);
     _xmltvGuideFutures[cacheKey] = future;
     try {
       return await future;
@@ -1533,6 +1560,65 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // lets the next stale-cache call start a fresh fetch. (removeWhere
       // returns void, so the discarded Future value trips no lint.)
       _xmltvGuideFutures.removeWhere((key, value) => key == cacheKey && identical(value, future));
+    }
+  }
+
+  /// The parse-time window for XMLTV feeds (1.2.2 I8, Kodi "Hours to
+  /// import" model): programmes outside this window are dropped during
+  /// the streaming parse instead of being retained and filtered per
+  /// channel at read time — the retained list is what the ~180-203 MB
+  /// floor at Trex scale is made of.
+  ///
+  /// The window is the widest any guide request can reach, so dropping
+  /// outside it can never hide a visible show:
+  /// - 7 days back / 7 days forward: the widest the day picker +
+  ///   past-days settings can request (daysToLoad and pastDaysToKeep
+  ///   both max out at 7).
+  /// - +24h on the far side: a feed stays live for up to the 24h update
+  ///   interval, and a request near the end of its life reaches 7 days
+  ///   past *that* moment — the retained window must cover the TTL slop.
+  /// - +/-2h: the time offset (global or per-source) shifts programme
+  ///   times at map time by up to +/-120 min, so the stored window must
+  ///   be wider than the displayed window by that much on both sides.
+  /// Overlap semantics (same as [_mapXmltvPrograms]): a programme that
+  /// straddles an edge is kept. Fixed maxima — no settings are read at
+  /// parse time, so a settings change never strands the retained feed.
+  /// "Now" is the parse moment: for a download parse the feed's live
+  /// period starts then; for a warm-start parse it keeps exactly what
+  /// the current guide window needs.
+  ({int fromEpoch, int toEpoch}) _epgParseWindow(DateTime now) {
+    final from = now.subtract(const Duration(days: 7, hours: 2));
+    final to = now.add(const Duration(days: 8, hours: 2));
+    return (
+      fromEpoch: from.millisecondsSinceEpoch ~/ 1000,
+      toEpoch: to.millisecondsSinceEpoch ~/ 1000,
+    );
+  }
+
+  /// Store the validators from the latest feed response (1.2.2 I9).
+  /// Best-effort: a lost validator only costs one full download next
+  /// time — it must never lose the guide.
+  Future<void> _saveFeedValidators(String cacheKey, String? etag, String? lastModified) async {
+    try {
+      await _epgStore.saveValidators(cacheKey, etag, lastModified);
+    } catch (_) {
+      // Best-effort: the guide is already in memory; the next refresh
+      // just downloads in full.
+    }
+  }
+
+  /// Mark the persisted feed file as fresh (1.2.2 I9): after a 304 the
+  /// file's bytes are current, so its last-modified time is the
+  /// revalidation time — the next warm start reads it as fresh instead
+  /// of revalidating a launch early. Best-effort: the in-memory guide
+  /// is already bumped.
+  Future<void> _touchFeedFile(String cacheKey) async {
+    if (debugDisablePersistedEpg) return;
+    try {
+      final file = await _xmltvFeedFile(cacheKey);
+      if (file.existsSync()) file.setLastModifiedSync(DateTime.now());
+    } catch (_) {
+      // Best-effort: the file is gone or read-only.
     }
   }
 
@@ -1547,7 +1633,56 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// persisted feed (if any). A partial in-memory guide is never served
   /// as whole — on failure the partial list is discarded and the error
   /// is recorded exactly as a failed download was.
-  Future<_CachedXmltvGuide> _loadXmltvGuide(String cacheKey, Stream<List<int>> Function() fetchStream) async {
+  ///
+  /// 1.2.2 I9: the fetch happens first and a 304 means the server
+  /// already has our feed — the stored guide is reused (its fetch time
+  /// bumped to now so the TTL restarts and per-channel entries re-map
+  /// from it) with no download and no re-parse. A 304 with no stored
+  /// guide anywhere (feed file deleted, persistence disabled) retries
+  /// once without validators; a server cannot 304 a request that sent
+  /// none, so a second 304 is a broken server and throws exactly like
+  /// a failed download.
+  Future<_CachedXmltvGuide> _loadXmltvGuide(
+    String cacheKey,
+    Future<XmltvFeedFetch> Function({bool useValidators}) fetchFeed,
+  ) async {
+    // I9: fetch first — a 304 answers before any download or parse.
+    XmltvFeedFetch fetch;
+    try {
+      fetch = await fetchFeed();
+    } catch (e) {
+      if (!MediaServerHttpException.from(e).isCancellation) {
+        _xmltvFailedAt[cacheKey] = DateTime.now();
+      }
+      rethrow;
+    }
+    if (fetch.notModified) {
+      final existing = _xmltvCache[cacheKey];
+      if (existing != null) {
+        await _saveFeedValidators(cacheKey, fetch.etag, fetch.lastModified);
+        await _touchFeedFile(cacheKey);
+        final guide = _CachedXmltvGuide(programs: existing.programs, fetchedAt: DateTime.now());
+        _xmltvCache[cacheKey] = guide;
+        _xmltvFailedAt.remove(cacheKey);
+        return guide;
+      }
+      // No guide to reuse: the stored validators are stale relative to
+      // storage. Fetch fresh without them.
+      try {
+        fetch = await fetchFeed(useValidators: false);
+      } catch (e) {
+        if (!MediaServerHttpException.from(e).isCancellation) {
+          _xmltvFailedAt[cacheKey] = DateTime.now();
+        }
+        rethrow;
+      }
+      if (fetch.notModified) {
+        // A server cannot 304 a request that sent no validators: this
+        // is a broken server. Throw exactly like a failed download.
+        _xmltvFailedAt[cacheKey] = DateTime.now();
+        throw StateError('XMLTV feed for $cacheKey answered 304 without validators');
+      }
+    }
     final programs = <XmltvProgram>[];
     // Tee the raw bytes to a temp file in the same directory, so the
     // promote is a same-filesystem rename. Skipped entirely when the
@@ -1583,11 +1718,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
       }
     }
     try {
-      final stream = fetchStream();
-      await for (final program in parseXmltvStream(stream.map((chunk) {
-        raf?.writeFromSync(chunk);
-        return chunk;
-      }))) {
+      // I8: the parse-time window filter — programmes outside the
+      // widest guide window are dropped during the parse and never
+      // retained.
+      final window = _epgParseWindow(DateTime.now());
+      await for (final program in parseXmltvStream(
+        fetch.bytes.map((chunk) {
+          raf?.writeFromSync(chunk);
+          return chunk;
+        }),
+        windowFromEpoch: window.fromEpoch,
+        windowToEpoch: window.toEpoch,
+      )) {
         programs.add(program);
       }
       raf?.closeSync();
@@ -1625,6 +1767,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
         appLogger.w('IPTV EPG feed cache write failed for $cacheKey', error: e);
       }
     }
+    // I9: store the response validators for the next refresh (also on a
+    // 200 that sent none — that clears a stale row).
+    await _saveFeedValidators(cacheKey, fetch.etag, fetch.lastModified);
     final guide = _CachedXmltvGuide(programs: programs, fetchedAt: DateTime.now());
     _xmltvCache[cacheKey] = guide;
     _xmltvFailedAt.remove(cacheKey);
@@ -1669,7 +1814,15 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // path — the 64 KB sync chunks keep the streaming property (no
       // whole-file String) without touching the event loop.
       final programs = <XmltvProgram>[];
-      await for (final program in parseXmltvStream(_readFileInChunks(file))) {
+      // I8 (1.2.2): the parse-time window filter applies here too — a
+      // warm start keeps exactly what the current guide window needs
+      // instead of re-retaining the whole persisted feed.
+      final window = _epgParseWindow(DateTime.now());
+      await for (final program in parseXmltvStream(
+        _readFileInChunks(file),
+        windowFromEpoch: window.fromEpoch,
+        windowToEpoch: window.toEpoch,
+      )) {
         programs.add(program);
       }
       return _CachedXmltvGuide(programs: programs, fetchedAt: file.lastModifiedSync());
@@ -1701,24 +1854,63 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  /// The M3U feed as a byte stream (build #26): the old bare `http.get`
-  /// buffered the whole body, and its abort only raced the get — the
-  /// socket could finish in the background. An [AbortableRequest] aborts
-  /// at the socket (as the Xtream feed does), and the short-lived client
-  /// is closed when the stream ends, errors, or is cancelled, so an
-  /// abandoned download never holds a socket open.
-  Stream<List<int>> _m3uFeedStream(String epgUrl, Future<void>? abortTrigger) async* {
-    final client = http.Client();
+  /// A byte stream that closes [client] when the stream ends, errors, or
+  /// is cancelled — the per-fetch client must not outlive its response.
+  static Stream<List<int>> _closeClientOnDone(Stream<List<int>> stream, http.Client client) async* {
     try {
-      final request = http.AbortableRequest('GET', Uri.parse(epgUrl), abortTrigger: abortTrigger);
-      final streamed = await client.send(request).timeout(const Duration(seconds: 120));
-      if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
-        throw StateError('XMLTV fetch failed with HTTP ${streamed.statusCode}');
-      }
-      yield* streamed.stream.timeout(const Duration(seconds: 120));
+      yield* stream;
     } finally {
       client.close();
     }
+  }
+
+  /// The M3U feed as a byte stream plus the conditional-fetch outcome
+  /// (build #26, 1.2.2 I9): the old bare `http.get` buffered the whole
+  /// body, and its abort only raced the get — the socket could finish in
+  /// the background. An [AbortableRequest] aborts at the socket (as the
+  /// Xtream feed does), and the short-lived client is closed when the
+  /// stream ends, errors, or is cancelled, so an abandoned download
+  /// never holds a socket open. When [etag]/[lastModified] are given
+  /// they are sent as If-None-Match / If-Modified-Since; a 304 comes
+  /// back as `notModified: true` with an empty body.
+  Future<XmltvFeedFetch> _m3uFeedFetch(
+    String epgUrl,
+    Future<void>? abortTrigger, {
+    String? etag,
+    String? lastModified,
+  }) async {
+    final client = http.Client();
+    http.StreamedResponse streamed;
+    try {
+      final request = http.AbortableRequest('GET', Uri.parse(epgUrl), abortTrigger: abortTrigger);
+      if (etag != null) request.headers['If-None-Match'] = etag;
+      if (lastModified != null) request.headers['If-Modified-Since'] = lastModified;
+      streamed = await client.send(request).timeout(const Duration(seconds: 120));
+    } catch (e) {
+      client.close();
+      rethrow;
+    }
+    if (streamed.statusCode == 304) {
+      // A 304 has no body by definition: the feed the caller already
+      // holds is current.
+      client.close();
+      return (
+        bytes: const Stream<List<int>>.empty(),
+        notModified: true,
+        etag: streamed.headers['etag'],
+        lastModified: streamed.headers['last-modified'],
+      );
+    }
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      client.close();
+      throw StateError('XMLTV fetch failed with HTTP ${streamed.statusCode}');
+    }
+    return (
+      bytes: _closeClientOnDone(streamed.stream.timeout(const Duration(seconds: 120)), client),
+      notModified: false,
+      etag: streamed.headers['etag'],
+      lastModified: streamed.headers['last-modified'],
+    );
   }
 
   /// Bump on every cache clear so the guide can tell its per-channel state
@@ -1799,7 +1991,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// provider cannot be removed, disabled, or moved.
   Future<List<IptvEpgSourceConfig>> epgSources() async {
     final user = await _epgStore.loadUserSources();
-    final provider = _providerSourceAttempt();
+    final provider = await _providerSourceAttempt();
     return [if (provider != null) _providerConfig(), ...user];
   }
 
@@ -2213,7 +2405,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     for (final attempt in attempts) {
       try {
         final started = DateTime.now();
-        final (guide, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchStream, ttl, force: force);
+        final (guide, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchFeed, ttl, force: force);
         if (loadedFresh) {
           await _recordSourceSuccess(attempt.config, attempt.cacheKey, guide, started);
         }
@@ -2322,6 +2514,19 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // A clear is a fresh start: forget playback-gate deferrals (D1b)
     // too — the guide re-fetches visible rows from scratch.
     _deferredEpgChannels.clear();
+    // A clear is a fresh start for validators too (1.2.2 I9): a 304
+    // against a deleted feed has no guide to reuse. The 304 backstop
+    // would recover anyway, but a clear must not depend on it.
+    unawaited(
+      (() async {
+        try {
+          await _epgStore.clearValidators();
+        } catch (_) {
+          // Best-effort: stale validators are harmless — the backstop
+          // re-fetches fresh when there is no guide to reuse.
+        }
+      })(),
+    );
     // Best-effort and fire-and-forget: the in-memory caches are already
     // empty and the guide is cleared, so don't gate the settings action
     // (or the guide) on the disk delete — it completes in the background.
@@ -2660,19 +2865,34 @@ class _CachedChannelEpg {
 /// [_xmltvCache] (`xtream:<id>` for the provider feed, the EPG URL for
 /// a playlist guide, `user:<id>` for an added source); [keyPrefix]
 /// names the source in programme keys.
+///
+/// 1.2.2 I9: [fetchFeed] returns the response body as a byte stream plus
+/// the conditional-fetch outcome. When [XmltvFeedFetcher.useValidators]
+/// is true (the default) the fetcher sends the stored ETag /
+/// Last-Modified for its feed; a 304 comes back as `notModified: true`
+/// with an empty body. `useValidators: false` is the backstop — a 304
+/// against no stored guide must be retried fresh, and a server cannot
+/// 304 a request that sent no validators.
 class _EpgSourceAttempt {
   final IptvEpgSourceConfig config;
   final String cacheKey;
   final String keyPrefix;
-  final Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream;
+  final XmltvFeedFetcher fetchFeed;
 
   const _EpgSourceAttempt({
     required this.config,
     required this.cacheKey,
     required this.keyPrefix,
-    required this.fetchStream,
+    required this.fetchFeed,
   });
 }
+
+/// One EPG feed fetch attempt's fetcher (1.2.2 I9): returns the response
+/// body as a byte stream plus the conditional-fetch outcome.
+typedef XmltvFeedFetcher = Future<XmltvFeedFetch> Function(
+  Future<void>? abortTrigger, {
+  bool useValidators,
+});
 
 class _CachedXmltvGuide {
   final List<XmltvProgram> programs;

@@ -61,6 +61,24 @@ class XtreamCatalogTooLargeException implements Exception {
   String toString() => 'Xtream catalog response too large: $chars chars';
 }
 
+/// One XMLTV feed fetch: the response body as a byte stream plus the
+/// conditional-fetch outcome (1.2.2 I9). [notModified] means the server
+/// answered 304 to the validators sent — there is no body to download and
+/// nothing to re-parse; the caller reuses the guide it already has.
+/// [etag]/[lastModified] are the response's validators (from a 200 or a
+/// 304), to send back as If-None-Match / If-Modified-Since on the next
+/// refresh; both are null when the server sends none, and the next fetch
+/// is then unconditional, exactly as before. Whether the panel honours
+/// conditional fetch is UNPROVEN — a dynamically generated xmltv.php
+/// likely sends no validators at all, in which case this is a no-op and
+/// the feed downloads in full every time (the old behaviour).
+typedef XmltvFeedFetch = ({
+  Stream<List<int>> bytes,
+  bool notModified,
+  String? etag,
+  String? lastModified,
+});
+
 /// Minimal Xtream Codes API client (player_api.php / get.php / xmltv.php).
 ///
 /// Xtream has no canonical spec; the shapes below are the ones this
@@ -450,7 +468,19 @@ class XtreamApi {
   /// body as the transport delivers it — gzip is already decoded by the
   /// underlying HttpClient (autoUncompress), verified by the loopback gzip
   /// test in iptv_build26_epg_streaming_test.dart.
-  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+  ///
+  /// 1.2.2 I9 (conditional fetch): when [etag]/[lastModified] are given
+  /// they are sent as If-None-Match / If-Modified-Since. A 304 answer
+  /// comes back as `notModified: true` with an empty body stream — the
+  /// caller reuses its guide instead of downloading and re-parsing.
+  /// [etag]/[lastModified] in the result are the response's validators
+  /// (from a 200 or a 304); null when the server sends none.
+  Future<XmltvFeedFetch> getXmltvFeed({
+    String? etag,
+    String? lastModified,
+    Duration timeout = const Duration(seconds: 120),
+    Future<void>? abortTrigger,
+  }) async {
     final uri = Uri.parse('$serverUrl/xmltv.php?username=$username&password=$password');
     http.StreamedResponse streamed;
     try {
@@ -461,6 +491,8 @@ class XtreamApi {
       // off for merely being slow.
       final request = http.AbortableRequest('GET', uri, abortTrigger: abortTrigger);
       request.headers['User-Agent'] = _effectiveUserAgent;
+      if (etag != null) request.headers['If-None-Match'] = etag;
+      if (lastModified != null) request.headers['If-Modified-Since'] = lastModified;
       streamed = await _http.send(request).timeout(timeout);
     } catch (e) {
       final mapped = MediaServerHttpException.from(e, uri: uri);
@@ -468,6 +500,17 @@ class XtreamApi {
         await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
       }
       throw mapped;
+    }
+    if (streamed.statusCode == 304) {
+      // A 304 has no body by definition: the feed the caller already
+      // holds is current. The response validators are the ones to send
+      // next time (a server may rotate them on a 304).
+      return (
+        bytes: const Stream<List<int>>.empty(),
+        notModified: true,
+        etag: streamed.headers['etag'],
+        lastModified: streamed.headers['last-modified'],
+      );
     }
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
       // Buffer only the (small) error body for the refusal record, as
@@ -492,7 +535,21 @@ class XtreamApi {
         requestUri: uri,
       );
     }
-    yield* streamed.stream.timeout(timeout);
+    return (
+      bytes: streamed.stream.timeout(timeout),
+      notModified: false,
+      etag: streamed.headers['etag'],
+      lastModified: streamed.headers['last-modified'],
+    );
+  }
+
+  /// Full XMLTV guide as a byte stream (large — callers stream-parse it
+  /// instead of materialising the whole body; build #26). Implemented on
+  /// top of [getXmltvFeed] so there is one network path. A first fetch
+  /// has no validators, so this never 304s.
+  Stream<List<int>> getXmltvStream({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async* {
+    final fetch = await getXmltvFeed(timeout: timeout, abortTrigger: abortTrigger);
+    yield* fetch.bytes.timeout(timeout);
   }
 
   /// Full XMLTV guide (large — callers fetch it only when the guide is

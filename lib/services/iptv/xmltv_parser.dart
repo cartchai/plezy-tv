@@ -47,7 +47,19 @@ class XmltvProgram {
 /// (unclosed element at EOF, mismatched tags, invalid XML, or a document
 /// with no elements at all — an empty feed file reads as corrupt, exactly
 /// like [parseXmltv] throwing on an empty body).
-Stream<XmltvProgram> parseXmltvStream(Stream<List<int>> bytes) async* {
+///
+/// 1.2.2 I8 (parse-time window filter): when [windowFromEpoch] /
+/// [windowToEpoch] are given, a programme is yielded only if it overlaps
+/// the window (`stop > from && start < to` — the same overlap test the
+/// guide's mapper uses, so a show straddling an edge is kept). Programmes
+/// outside the window are dropped during the parse and never retained —
+/// the retained list is what the ~180-203 MB floor at Trex scale is made
+/// of. No window means no filtering (the old behaviour).
+Stream<XmltvProgram> parseXmltvStream(
+  Stream<List<int>> bytes, {
+  int? windowFromEpoch,
+  int? windowToEpoch,
+}) async* {
   // State for the programme currently being assembled.
   var inProgramme = false;
   var channelId = '';
@@ -61,6 +73,11 @@ Stream<XmltvProgram> parseXmltvStream(Stream<List<int>> bytes) async* {
 
   XmltvProgram? tryBuild() {
     if (channelId.isEmpty || startEpoch == null || stopEpoch == null || stopEpoch! <= startEpoch!) return null;
+    // I8 (1.2.2): parse-time window filter — drop programmes that cannot
+    // overlap the widest guide window instead of retaining them and
+    // filtering per channel at read time.
+    if (windowFromEpoch != null && stopEpoch! <= windowFromEpoch) return null;
+    if (windowToEpoch != null && startEpoch! >= windowToEpoch) return null;
     return XmltvProgram(
       channelId: channelId,
       startEpoch: startEpoch!,

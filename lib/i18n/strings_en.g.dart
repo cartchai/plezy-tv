@@ -3910,6 +3910,10 @@ class Translations$about$en {
 		'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
 		'The same programme no longer shows twice in the guide when the guide lists it twice',
 	];
+	List<String> get changelog2288 => [
+		'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
+		'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -10775,6 +10779,8 @@ extension on Translations {
 			'about.changelog2287.1' => 'Channels you\'ve already looked at now pick up a refreshed guide instead of showing yesterday\'s listings until tomorrow',
 			'about.changelog2287.2' => 'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
 			'about.changelog2287.3' => 'The same programme no longer shows twice in the guide when the guide lists it twice',
+			'about.changelog2288.0' => 'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
+			'about.changelog2288.1' => 'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10856,10 +10862,10 @@ extension on Translations {
 			'explore.watchlistUpdateFailed' => 'Couldn\'t update watchlist',
 			'explore.watchlistNoMatch' => 'Couldn\'t match this item to a watchlist',
 			'explore.notInLibrary' => 'Not in your library',
-			'explore.inTheseLibraries' => 'In these libraries',
-			'explore.checkingLibrary' => 'Checking your library...',
 			_ => null,
 		} ?? switch (path) {
+			'explore.inTheseLibraries' => 'In these libraries',
+			'explore.checkingLibrary' => 'Checking your library...',
 			'explore.libraryCheckFailed' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Couldn\'t check ${n} server', other: 'Couldn\'t check ${n} servers', ), 
 			'explore.emptyTitle' => 'Nothing here yet',
 			'explore.emptyMessage' => ({required Object source}) => 'Rows from ${source} will appear here once they have content.',
@@ -11370,10 +11376,10 @@ extension on Translations {
 			'downloads.removeSyncRule' => 'Remove sync rule',
 			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"? Downloaded episodes will be kept.',
 			'downloads.removeListSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"?',
-			'downloads.deleteSyncRuleDownloads' => 'Also delete associated downloads',
-			'downloads.deleteSyncRuleDownloadsDescription' => 'Downloads used by another sync rule or profile will be kept.',
 			_ => null,
 		} ?? switch (path) {
+			'downloads.deleteSyncRuleDownloads' => 'Also delete associated downloads',
+			'downloads.deleteSyncRuleDownloadsDescription' => 'Downloads used by another sync rule or profile will be kept.',
 			'downloads.syncRuleCreated' => ({required Object count}) => 'Sync rule created — keeping ${count} unwatched episodes',
 			'downloads.syncRuleUpdated' => 'Sync rule updated',
 			'downloads.syncRuleRemoved' => 'Sync rule removed',
@@ -11884,10 +11890,10 @@ extension on Translations {
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
-			'deepLinks.copy' => 'Copy',
-			'deepLinks.copied' => 'Link copied',
 			_ => null,
 		} ?? switch (path) {
+			'deepLinks.copy' => 'Copy',
+			'deepLinks.copied' => 'Link copied',
 			'iptv.title' => 'IPTV',
 			'iptv.favorites.title' => 'IPTV favourites',
 			'iptv.favorites.liveTv' => 'Live TV',

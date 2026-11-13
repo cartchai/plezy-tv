@@ -368,6 +368,65 @@ class IptvEpgSourcesStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_fingerprintKey, fingerprint);
   }
+
+  String get _validatorsKey => 'iptv_epg_feed_validators:$connectionId';
+
+  /// Conditional-fetch validators (1.2.2 I9) per feed [cacheKey]: the
+  /// ETag / Last-Modified the server sent with the feed, sent back as
+  /// If-None-Match / If-Modified-Since on the next refresh. A 304 means
+  /// the feed on disk is current — no download, no re-parse. Both null
+  /// when the server sends no validators (a dynamically generated
+  /// xmltv.php likely sends none) — the next fetch is then
+  /// unconditional, exactly as before. Corrupt rows read as empty.
+  Future<({String? etag, String? lastModified})> loadValidators(String cacheKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_validatorsKey);
+    if (raw == null || raw.isEmpty) return (etag: null, lastModified: null);
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return (etag: null, lastModified: null);
+      final row = decoded[cacheKey];
+      if (row is! Map<String, dynamic>) return (etag: null, lastModified: null);
+      return (etag: row['etag'] as String?, lastModified: row['lastModified'] as String?);
+    } catch (_) {
+      return (etag: null, lastModified: null);
+    }
+  }
+
+  /// Store the validators from the latest feed response, replacing
+  /// whatever was stored for [cacheKey] — the validators describe the
+  /// current representation. Saving both null removes the row (the
+  /// server sent no validators). Best-effort callers never throw on a
+  /// lost validator: the next refresh just downloads in full.
+  Future<void> saveValidators(String cacheKey, String? etag, String? lastModified) async {
+    final prefs = await SharedPreferences.getInstance();
+    Map<String, dynamic> all = {};
+    try {
+      final raw = prefs.getString(_validatorsKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) all = Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      // A corrupt table reads as empty; the save below replaces it.
+    }
+    if (etag == null && lastModified == null) {
+      all.remove(cacheKey);
+    } else {
+      all[cacheKey] = {
+        'etag': ?etag,
+        'lastModified': ?lastModified,
+      };
+    }
+    await prefs.setString(_validatorsKey, jsonEncode(all));
+  }
+
+  /// Forget every stored validator (Clear guide): a 304 against a
+  /// deleted feed has no guide to reuse.
+  Future<void> clearValidators() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_validatorsKey);
+  }
 }
 
 /// Why a channel has no EPG (the "Channels without guide" grouping, and

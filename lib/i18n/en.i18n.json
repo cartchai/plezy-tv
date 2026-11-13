@@ -1649,6 +1649,10 @@
       "Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing",
       "The same programme no longer shows twice in the guide when the guide lists it twice"
     ],
+    "changelog2288": [
+      "The guide now only keeps the programmes it can show, so it uses less memory while you browse",
+      "When a guide source reports it hasn't changed, the app skips downloading it again and reuses the copy it already has"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
