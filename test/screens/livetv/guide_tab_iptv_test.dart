@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:plezy/connection/connection.dart';
+import 'package:plezy/exceptions/media_server_exceptions.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/media/iptv_client.dart';
@@ -62,6 +63,11 @@ class _EpgControllableApi extends XtreamApi {
   /// feed that fails is a failure, not an empty answer).
   bool failXmltv = false;
 
+  /// When set, the feed throws THIS error instead of the generic one —
+  /// so a test can make the feed fail with a 403 (denial) rather than a
+  /// plain failure (1.2.3 banner test).
+  Object? failXmltvError;
+
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(
@@ -105,6 +111,7 @@ class _EpgControllableApi extends XtreamApi {
   }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
+    if (failXmltvError != null) throw failXmltvError!;
     if (failXmltv) throw Exception('xmltv feed unavailable in guide tests');
     return '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
   }
@@ -301,6 +308,60 @@ void main() {
 
     expect(find.text(t.liveTv.guideLoadFailed), findsNothing);
     expect(find.text('Retried Show'), findsOneWidget);
+  });
+
+  testWidgets('a denied guide shows a persistent banner naming the denial, with a retry-all', (tester) async {
+    // 1.2.3: when every visible channel's fetch fails and none loaded,
+    // the guide says so plainly at the top — "the panel denied access"
+    // (403) — instead of leaving hour blocks with no explanation. The
+    // banner stays until a fetch succeeds, and its Retry refetches
+    // every failed channel at once.
+    final harness = _IptvGuideHarness();
+    harness.api.failXmltvError = MediaServerHttpException(
+      type: MediaServerHttpErrorType.unknown,
+      message: 'Xtream access denied',
+      statusCode: 403,
+    );
+    addTearDown(harness.dispose);
+    await harness.init();
+    await harness.pump(tester);
+    await harness.waitForEpgCalls(tester, 2);
+
+    // Both short-EPG calls fail with a 403; the feed fails with a 403
+    // too, so both fetches throw (D1a) instead of loading empty.
+    final denied = MediaServerHttpException(
+      type: MediaServerHttpErrorType.unknown,
+      message: 'Xtream access denied',
+      statusCode: 403,
+    );
+    harness.api.completeError('100', denied);
+    harness.api.completeError('101', denied);
+    await tester.pumpAndSettle();
+
+    // Per-row retry states AND the banner naming the denial.
+    expect(find.text(t.liveTv.guideLoadFailed), findsNWidgets(2));
+    expect(find.text(t.iptv.epgGuideDenied), findsOneWidget);
+    expect(find.text(t.common.retry), findsOneWidget);
+
+    // The banner's Retry refetches both channels (force, D8); with the
+    // feed answering again, completing them with programmes clears it.
+    harness.api.failXmltvError = null;
+    await tester.tap(find.text(t.common.retry));
+    await harness.waitForEpgCalls(tester, 4);
+    final now = DateTime.now();
+    final hourStart = DateTime(now.year, now.month, now.day, now.hour).add(const Duration(hours: 1));
+    harness.api.complete('100', [
+      _epg(id: 'a', title: 'Retried Show', start: hourStart, end: hourStart.add(const Duration(hours: 1))),
+    ]);
+    harness.api.complete('101', [
+      _epg(id: 'b', title: 'Retried Sport', start: hourStart, end: hourStart.add(const Duration(hours: 1))),
+    ]);
+    await tester.pumpAndSettle();
+
+    expect(find.text(t.iptv.epgGuideDenied), findsNothing);
+    expect(find.text(t.liveTv.guideLoadFailed), findsNothing);
+    expect(find.text('Retried Show'), findsOneWidget);
+    expect(find.text('Retried Sport'), findsOneWidget);
   });
 
   testWidgets('channel with no EPG renders one info block per uncovered hour', (tester) async {

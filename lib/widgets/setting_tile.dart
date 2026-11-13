@@ -111,6 +111,11 @@ class SettingNavigationTile extends StatelessWidget {
   final FocusNode? focusNode;
   final IconData trailingIcon;
 
+  /// Replaces the chevron when set (1.2.3: a working spinner while a
+  /// tap's async action runs — the tile stays a tile, the trailing
+  /// shows it is busy instead of looking dead).
+  final Widget? trailing;
+
   const SettingNavigationTile({
     super.key,
     required this.icon,
@@ -120,6 +125,7 @@ class SettingNavigationTile extends StatelessWidget {
     this.onTap,
     this.focusNode,
     this.trailingIcon = Symbols.chevron_right_rounded,
+    this.trailing,
   }) : assert(destinationBuilder != null || onTap != null);
 
   @override
@@ -129,7 +135,7 @@ class SettingNavigationTile extends StatelessWidget {
       icon: icon,
       title: title,
       subtitle: subtitle != null ? Text(subtitle!) : null,
-      trailing: AppIcon(trailingIcon, fill: 1),
+      trailing: trailing ?? AppIcon(trailingIcon, fill: 1),
       onTap: onTap ?? () => Navigator.push(context, MaterialPageRoute(builder: destinationBuilder!)),
     );
   }

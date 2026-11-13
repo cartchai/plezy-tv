@@ -460,7 +460,28 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // entry is kept so a failed refetch can still serve it (below).
     final servable = cached != null && cached.covers(from, to) && cached.isFresh(ttl) && !forceRefresh;
     final generationStale = servable && _isFeedGenerationStale(cached);
-    if (servable && !generationStale) {
+    // 1.2.3 RC3: a stored entry with ZERO programmes and NO feed
+    // generations is a pre-1.2.1 poisoned empty entry (1.1.1's D1
+    // silent-empty path wrote [] with no generations key). It must NOT
+    // count as servable — it refetches once, below, instead of serving
+    // hour blocks forever with no attempt ever stamped. A legitimately
+    // empty entry always carries generations from the feeds consulted
+    // while fetching it, so it still serves — EXCEPT a connection with
+    // no EPG source at all (M3U without an EPG URL, no added sources):
+    // _fetchFeedPrograms returns [] with no generations when attempts
+    // is empty, so that entry is genuine and must keep serving. The
+    // gate below is that distinction (and a cancelled fetch, which also
+    // writes an empty+unstamped entry, correctly refetches on revisit:
+    // the cancellation meant no data was ever fetched).
+    var poisoned = false;
+    if (servable &&
+        !generationStale &&
+        cached.programs.isEmpty &&
+        cached.feedGenerations.isEmpty) {
+      final attempts = await _epgSourceAttempts();
+      poisoned = attempts.isNotEmpty;
+    }
+    if (servable && !generationStale && !poisoned) {
       return _slice(cached.programs, from, to);
     }
 
@@ -1233,9 +1254,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
   Future<void> _recordSourceFailure(IptvEpgSourceConfig config, Object error) async {
     final statuses = await _epgStore.loadStatuses();
     final status = statuses[config.id] ?? IptvEpgSourceStatus.empty;
+    // 1.2.3: the reason is shown on the sources screen chip — store the
+    // URL-free message, never error.toString(): a
+    // MediaServerHttpException appends the request host+path to its
+    // toString, and the panel URL must never surface in the UI (or be
+    // persisted in a status).
     await _epgStore.saveStatus(
       config.id,
-      status.copyWith(lastFailure: DateTime.now(), lastFailureReason: error.toString()),
+      status.copyWith(lastFailure: DateTime.now(), lastFailureReason: epgFeedErrorReason(error)),
     );
   }
 
@@ -2298,9 +2324,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final settings = await _readEpgSettings();
     final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
     final attempts = await _epgSourceAttempts();
-    final loaded = await _loadEnabledFeeds(attempts, ttl, force: forceRefresh);
+    final outcome = await _loadEnabledFeeds(attempts, ttl, force: forceRefresh);
     final out = <IptvEpgFeedChannel>[];
-    for (final entry in loaded) {
+    for (final entry in outcome.loaded) {
       for (final channel in entry.guide.byChannel.entries) {
         out.add(
           IptvEpgFeedChannel(
@@ -2328,7 +2354,8 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
     final channels = await _client.iptvChannels();
     final attempts = await _epgSourceAttempts();
-    final loaded = await _loadEnabledFeeds(attempts, ttl);
+    final outcome = await _loadEnabledFeeds(attempts, ttl);
+    final loaded = outcome.loaded;
     final mappings = await _epgStore.loadMappings();
     final statuses = await _epgStore.loadStatuses();
     final reason = _reasonFor(
@@ -2394,14 +2421,22 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   /// The enabled sources' guides, loaded lazily (user-initiated callers
   /// only — Assign, Channels without guide, Reload TV details). A source
-  /// that defers (playback gate) or fails contributes nothing; a fresh
-  /// load records the source's status, a failure records its reason.
-  Future<List<({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })>> _loadEnabledFeeds(
+  /// that defers (playback gate) or fails contributes nothing to
+  /// [loaded]; a fresh load records the source's status, a failure
+  /// records its reason. 1.2.3: the failures and deferrals are returned
+  /// too, so Reload / Update now can name the feed outcome in their
+  /// report instead of silently dropping a failed source.
+  ///
+  /// What loading the enabled feeds produced: what loaded, what failed
+  /// (with its error), and what deferred (playback gate).
+  Future<_LoadedEpgFeeds> _loadEnabledFeeds(
     List<_EpgSourceAttempt> attempts,
     Duration? ttl, {
     bool force = false,
   }) async {
     final loaded = <({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })>[];
+    final failures = <({ _EpgSourceAttempt attempt, Object error })>[];
+    final deferred = <_EpgSourceAttempt>[];
     for (final attempt in attempts) {
       try {
         final started = DateTime.now();
@@ -2411,16 +2446,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
         }
         loaded.add((attempt: attempt, guide: guide));
       } on _EpgFeedDeferred {
+        deferred.add(attempt);
         continue;
       } catch (e) {
         // A cancellation aborts the whole bulk load (the app
         // backgrounded); a failed source is recorded and skipped.
         if (MediaServerHttpException.from(e).isCancellation) rethrow;
         await _recordSourceFailure(attempt.config, e);
+        failures.add((attempt: attempt, error: e));
         continue;
       }
     }
-    return loaded;
+    return (loaded: loaded, failures: failures, deferred: deferred);
   }
 
   /// Channel keys with a persisted per-channel EPG file, from one
@@ -2449,28 +2486,145 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// and series are untouched) and refresh the EPG for this connection,
   /// then report counts. The recovery action for D1-poisoned entries:
   /// it busts the per-channel cache the way Update now does.
+  ///
+  /// 1.2.3 RC1: the cache bust runs FIRST, before the list re-fetch, so
+  /// poison clears even when the list fails — and the list failure is
+  /// CAUGHT and carried on the result, never thrown: the tap must
+  /// ALWAYS end in a report naming the failure ("panel denied access
+  /// (HTTP 403), 0 channels loaded"), never in silence. The feeds are
+  /// still tried after a list failure, and every feed's outcome is on
+  /// the result, so the dialog can tell "the feed failed" apart from
+  /// "the feed loaded but matched nothing".
   Future<IptvReloadTvDetailsResult> reloadTvDetails() async {
-    final channels = await _client.refreshLiveChannelsFromNetwork();
+    // Bust first: on a 403 the old order threw before this line.
     await refreshEpgCache();
+    List<LiveTvChannel> channels;
+    Object? channelListError;
+    try {
+      channels = await _client.refreshLiveChannelsFromNetwork();
+    } catch (e) {
+      channelListError = e;
+      channels = const <LiveTvChannel>[];
+    }
     final settings = await _readEpgSettings();
     final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
     final attempts = await _epgSourceAttempts();
-    final loaded = await _loadEnabledFeeds(attempts, ttl);
+    // An explicit user retry bypasses the 5-minute negative cache (D8):
+    // Reload actually re-tries a feed that failed minutes ago instead
+    // of reporting the remembered failure without downloading.
+    // D9: loading the feeds is an attempt — stamp it, so "Last attempt"
+    // certifies the activity even when the list or the feed then fails.
+    _noteEpgAttempt(DateTime.now());
+    final outcome = await _loadEnabledFeeds(attempts, ttl, force: true);
     final mappings = await _epgStore.loadMappings();
     final now = DateTime.now();
     final from = now.subtract(Duration(days: settings.pastDays));
     final to = now.add(Duration(days: settings.daysToLoad));
     var withGuide = 0;
     for (final channel in channels) {
-      if (_channelHasFeedMatch(channel.key, loaded, mappings, settings, from, to)) withGuide++;
+      if (_channelHasFeedMatch(channel.key, outcome.loaded, mappings, settings, from, to)) withGuide++;
     }
-    final feedChannelIds = loaded.expand((e) => e.guide.byChannel.keys).toSet().length;
+    final feedChannelIds = outcome.loaded.expand((e) => e.guide.byChannel.keys).toSet().length;
     return IptvReloadTvDetailsResult(
       channelsLoaded: channels.length,
       withGuide: withGuide,
       withoutGuide: channels.length - withGuide,
       feedChannelIds: feedChannelIds,
+      channelListFailureKind: channelListError == null ? null : classifyEpgFeedError(channelListError),
+      channelListFailureReason: channelListError == null ? null : epgFeedErrorReason(channelListError),
+      // No list, no match counts: the feed lines name the feed's own
+      // size instead of a match count that means nothing without a list.
+      feedOutcomes: _feedOutcomes(
+        outcome,
+        channelListError == null ? channels : null,
+        mappings,
+        settings,
+        from,
+        to,
+      ),
     );
+  }
+
+  /// "Update now" (1.2.3 RC2): bust the cache AND load the enabled
+  /// feeds once, then report the outcome — so the action earns its
+  /// success message instead of claiming "Guide updated" for a cache
+  /// clear that downloads nothing. The fetch is the same lazy feed
+  /// load the guide uses, with the 5-minute negative cache bypassed
+  /// (D8: an explicit user retry is not a storm). It never touches
+  /// the catalog: no channel-list re-fetch, so the report names each
+  /// feed's own size rather than match counts (see [_feedOutcomes]).
+  Future<IptvEpgUpdateNowResult> updateEpgNow() async {
+    await refreshEpgCache();
+    final settings = await _readEpgSettings();
+    final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
+    final attempts = await _epgSourceAttempts();
+    // D9: loading the feeds is an attempt — stamp it, so "Last attempt"
+    // certifies the activity even when the feed then fails.
+    _noteEpgAttempt(DateTime.now());
+    final outcome = await _loadEnabledFeeds(attempts, ttl, force: true);
+    final mappings = await _epgStore.loadMappings();
+    final now = DateTime.now();
+    final from = now.subtract(Duration(days: settings.pastDays));
+    final to = now.add(Duration(days: settings.daysToLoad));
+    return IptvEpgUpdateNowResult(
+      feedOutcomes: _feedOutcomes(outcome, null, mappings, settings, from, to),
+    );
+  }
+
+  /// Per-source outcomes for a Reload / Update-now report (1.2.3): one
+  /// line per enabled source, naming what happened to ITS feed. Loaded
+  /// feeds name how many of this connection's channels they can serve
+  /// ([channels] is null when the list was not available — Update now,
+  /// or a Reload whose list failed — and the report then names the
+  /// feed's own size instead of a match count).
+  List<IptvEpgFeedOutcome> _feedOutcomes(
+    _LoadedEpgFeeds outcome,
+    List<LiveTvChannel>? channels,
+    Map<String, IptvEpgMapping> mappings,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to,
+  ) {
+    final out = <IptvEpgFeedOutcome>[];
+    for (final entry in outcome.loaded) {
+      int? matched;
+      if (channels != null) {
+        var count = 0;
+        for (final channel in channels) {
+          if (_channelHasFeedMatch(channel.key, [entry], mappings, settings, from, to)) count++;
+        }
+        matched = count;
+      }
+      out.add(
+        IptvEpgFeedOutcome(
+          sourceId: entry.attempt.config.id,
+          sourceName: entry.attempt.config.name,
+          kind: matched == null || matched > 0 ? IptvEpgFeedOutcomeKind.loaded : IptvEpgFeedOutcomeKind.loadedNoMatch,
+          feedChannels: entry.guide.byChannel.length,
+          matchedChannels: matched,
+        ),
+      );
+    }
+    for (final failure in outcome.failures) {
+      out.add(
+        IptvEpgFeedOutcome(
+          sourceId: failure.attempt.config.id,
+          sourceName: failure.attempt.config.name,
+          kind: classifyEpgFeedError(failure.error),
+          reason: epgFeedErrorReason(failure.error),
+        ),
+      );
+    }
+    for (final attempt in outcome.deferred) {
+      out.add(
+        IptvEpgFeedOutcome(
+          sourceId: attempt.config.id,
+          sourceName: attempt.config.name,
+          kind: IptvEpgFeedOutcomeKind.deferred,
+        ),
+      );
+    }
+    return out;
   }
 
   /// Refresh the guide when the quiet hour passed since the last data
@@ -2865,6 +3019,16 @@ class _CachedChannelEpg {
 /// [_xmltvCache] (`xtream:<id>` for the provider feed, the EPG URL for
 /// a playlist guide, `user:<id>` for an added source); [keyPrefix]
 /// names the source in programme keys.
+/// What loading the enabled feeds produced (PlezTV 1.2.3): what loaded,
+/// what failed (with its error), and what deferred (playback gate) — so
+/// Reload / Update now can name each feed's outcome in their report
+/// instead of silently dropping a failed source.
+typedef _LoadedEpgFeeds = ({
+  List<({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })> loaded,
+  List<({ _EpgSourceAttempt attempt, Object error })> failures,
+  List<_EpgSourceAttempt> deferred,
+});
+
 ///
 /// 1.2.2 I9: [fetchFeed] returns the response body as a byte stream plus
 /// the conditional-fetch outcome. When [XmltvFeedFetcher.useValidators]

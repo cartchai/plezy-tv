@@ -45,6 +45,9 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
   Map<String, IptvEpgSourceStatus> _statuses = {};
   bool _addedFirst = false;
   bool _loading = true;
+  // 1.2.3: true while a Reload is running — the Reload row shows a
+  // spinner instead of looking dead while the list + feeds load.
+  bool _reloading = false;
   int _updateIntervalHours = 24;
 
   IptvLiveTvSupport? _boundSupport() {
@@ -281,19 +284,69 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
 
   Future<void> _reloadTvDetails() async {
     final support = _boundSupport();
-    if (support == null) return;
-    final result = await support.reloadTvDetails();
+    if (support == null || _reloading) return;
+    setState(() => _reloading = true);
+    IptvReloadTvDetailsResult result;
+    try {
+      result = await support.reloadTvDetails();
+    } catch (e) {
+      // 1.2.3 RC1: reloadTvDetails never throws by contract — but a
+      // throw must never escape the tap handler either (belt and
+      // braces): build the failure into a report dialog so the tap
+      // still ends in a report, never in silence.
+      if (!mounted) return;
+      setState(() => _reloading = false);
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(t.iptv.epgReloadTvDetails),
+          content: Text(t.iptv.epgReloadUnexpectedFailure(reason: epgFeedErrorReason(e))),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.ok))],
+        ),
+      );
+      if (mounted) await _load();
+      return;
+    }
     if (!mounted) return;
+    // Clear the spinner BEFORE the report appears (1.2.3: the
+    // indicator shows while the reload runs and clears when the report
+    // appears — it must not keep spinning behind the dialog).
+    setState(() => _reloading = false);
+    final lines = <String>[];
+    if (result.channelListFailureKind != null) {
+      lines.add(
+        t.iptv.epgReloadChannelListFailed(
+          reason: switch (result.channelListFailureKind!) {
+            IptvEpgFeedOutcomeKind.denied => t.iptv.epgFeedDeniedReason,
+            IptvEpgFeedOutcomeKind.notAnswering => t.iptv.epgFeedNotAnsweringReason,
+            _ => result.channelListFailureReason ?? '',
+          },
+        ),
+      );
+    }
+    for (final outcome in result.feedOutcomes) {
+      lines.add(epgFeedOutcomeLine(outcome, result.channelsLoaded));
+    }
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(t.iptv.epgReloadTvDetails),
-        content: Text(
-          t.iptv.epgReloadTvDetailsResult(
-            channels: result.channelsLoaded,
-            withGuide: result.withGuide,
-            withoutGuide: result.withoutGuide,
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              t.iptv.epgReloadTvDetailsResult(
+                channels: result.channelsLoaded,
+                withGuide: result.withGuide,
+                withoutGuide: result.withoutGuide,
+              ),
+            ),
+            if (lines.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              for (final line in lines) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(line)),
+            ],
+          ],
         ),
         actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.ok))],
       ),
@@ -390,6 +443,12 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
                     icon: Symbols.refresh_rounded,
                     title: t.iptv.epgReloadTvDetails,
                     subtitle: t.iptv.epgReloadTvDetailsDescription,
+                    // 1.2.3: visible working feedback while the reload
+                    // runs — the row shows a spinner until the report
+                    // appears, so the tap never looks dead.
+                    trailing: _reloading
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : null,
                     onTap: () => unawaited(_reloadTvDetails()),
                   ),
                   SettingNavigationTile(

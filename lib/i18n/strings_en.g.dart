@@ -3910,6 +3910,12 @@ class Translations$about$en {
 		'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
 		'The same programme no longer shows twice in the guide when the guide lists it twice',
 	];
+	List<String> get changelog2289 => [
+		'Reload TV details and Update now now say plainly what happened — if the panel denies access or doesn\'t answer, the report names it, and it names whether the guide feed loaded but matched none of your channels',
+		'Reload TV details and Update now show a spinner while they work, so a tap no longer looks dead while the guide loads',
+		'Channels stuck with an empty guide from an older version now refetch instead of showing empty blocks forever',
+		'The guide shows a banner when the panel denies access or doesn\'t answer, with a retry button',
+	];
 	List<String> get changelog2288 => [
 		'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
 		'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
@@ -6948,6 +6954,51 @@ class Translations$iptv$en {
 
 	/// en: '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide'
 	String epgReloadTvDetailsResult({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide';
+
+	/// en: 'Channel list could not be re-fetched — ${reason}'
+	String epgReloadChannelListFailed({required Object reason}) => 'Channel list could not be re-fetched — ${reason}';
+
+	/// en: 'Reload failed unexpectedly — ${reason}'
+	String epgReloadUnexpectedFailure({required Object reason}) => 'Reload failed unexpectedly — ${reason}';
+
+	/// en: '${source}: loaded — ${matched} of ${channels} channels have guide data'
+	String epgFeedOutcomeLoaded({required Object source, required Object matched, required Object channels}) => '${source}: loaded — ${matched} of ${channels} channels have guide data';
+
+	/// en: '${source}: loaded — ${feedChannels} channels in the feed'
+	String epgFeedOutcomeLoadedFeedOnly({required Object source, required Object feedChannels}) => '${source}: loaded — ${feedChannels} channels in the feed';
+
+	/// en: '${source}: loaded, but matched none of your ${channels} channels'
+	String epgFeedOutcomeLoadedNoMatch({required Object source, required Object channels}) => '${source}: loaded, but matched none of your ${channels} channels';
+
+	/// en: '${source}: loaded, but the feed is empty'
+	String epgFeedOutcomeLoadedEmpty({required Object source}) => '${source}: loaded, but the feed is empty';
+
+	/// en: '${source}: the panel denied access (HTTP 403)'
+	String epgFeedOutcomeDenied({required Object source}) => '${source}: the panel denied access (HTTP 403)';
+
+	/// en: '${source}: the panel is not answering (timed out)'
+	String epgFeedOutcomeNotAnswering({required Object source}) => '${source}: the panel is not answering (timed out)';
+
+	/// en: 'the panel denied access (HTTP 403)'
+	String get epgFeedDeniedReason => 'the panel denied access (HTTP 403)';
+
+	/// en: 'the panel is not answering (timed out)'
+	String get epgFeedNotAnsweringReason => 'the panel is not answering (timed out)';
+
+	/// en: '${source}: waiting — will load when playback stops'
+	String epgFeedOutcomeDeferred({required Object source}) => '${source}: waiting — will load when playback stops';
+
+	/// en: '${source}: ${reason}'
+	String epgFeedOutcomeFailed({required Object source, required Object reason}) => '${source}: ${reason}';
+
+	/// en: 'The panel denied access — the guide couldn't load'
+	String get epgGuideDenied => 'The panel denied access — the guide couldn\'t load';
+
+	/// en: 'The panel is not answering — the guide couldn't load'
+	String get epgGuideNotAnswering => 'The panel is not answering — the guide couldn\'t load';
+
+	/// en: 'The guide couldn't load'
+	String get epgGuideFailed => 'The guide couldn\'t load';
 
 	/// en: 'Channels without guide'
 	String get epgNoGuideTitle => 'Channels without guide';
@@ -10779,6 +10830,10 @@ extension on Translations {
 			'about.changelog2287.1' => 'Channels you\'ve already looked at now pick up a refreshed guide instead of showing yesterday\'s listings until tomorrow',
 			'about.changelog2287.2' => 'Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing',
 			'about.changelog2287.3' => 'The same programme no longer shows twice in the guide when the guide lists it twice',
+			'about.changelog2289.0' => 'Reload TV details and Update now now say plainly what happened — if the panel denies access or doesn\'t answer, the report names it, and it names whether the guide feed loaded but matched none of your channels',
+			'about.changelog2289.1' => 'Reload TV details and Update now show a spinner while they work, so a tap no longer looks dead while the guide loads',
+			'about.changelog2289.2' => 'Channels stuck with an empty guide from an older version now refetch instead of showing empty blocks forever',
+			'about.changelog2289.3' => 'The guide shows a banner when the panel denies access or doesn\'t answer, with a retry button',
 			'about.changelog2288.0' => 'The guide now only keeps the programmes it can show, so it uses less memory while you browse',
 			'about.changelog2288.1' => 'When a guide source reports it hasn\'t changed, the app skips downloading it again and reuses the copy it already has',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
@@ -10858,12 +10913,12 @@ extension on Translations {
 			'explore.addToWatchlist' => 'Add to Watchlist',
 			'explore.removeFromWatchlist' => 'Remove from Watchlist',
 			'explore.addedToWatchlist' => 'Added to watchlist',
+			_ => null,
+		} ?? switch (path) {
 			'explore.removedFromWatchlist' => 'Removed from watchlist',
 			'explore.watchlistUpdateFailed' => 'Couldn\'t update watchlist',
 			'explore.watchlistNoMatch' => 'Couldn\'t match this item to a watchlist',
 			'explore.notInLibrary' => 'Not in your library',
-			_ => null,
-		} ?? switch (path) {
 			'explore.inTheseLibraries' => 'In these libraries',
 			'explore.checkingLibrary' => 'Checking your library...',
 			'explore.libraryCheckFailed' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: 'Couldn\'t check ${n} server', other: 'Couldn\'t check ${n} servers', ), 
@@ -11372,12 +11427,12 @@ extension on Translations {
 			'downloads.keepSynced' => 'Keep synced',
 			'downloads.downloadOnce' => 'Download once',
 			'downloads.keepNUnwatched' => ({required Object count}) => 'Keep ${count} unwatched',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.editSyncRule' => 'Edit sync rule',
 			'downloads.removeSyncRule' => 'Remove sync rule',
 			'downloads.removeSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"? Downloaded episodes will be kept.',
 			'downloads.removeListSyncRuleConfirm' => ({required Object title}) => 'Stop syncing "${title}"?',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.deleteSyncRuleDownloads' => 'Also delete associated downloads',
 			'downloads.deleteSyncRuleDownloadsDescription' => 'Downloads used by another sync rule or profile will be kept.',
 			'downloads.syncRuleCreated' => ({required Object count}) => 'Sync rule created — keeping ${count} unwatched episodes',
@@ -11886,12 +11941,12 @@ extension on Translations {
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',
 			'deepLinks.showHint' => 'Opening this link plays the next episode. Add &mode=shuffle to play the show on shuffle.',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.movieHint' => 'Opening this link plays the movie.',
 			'deepLinks.episodeHint' => 'Opening this link plays this episode.',
 			'deepLinks.profileHint' => 'Opening this link switches to this profile.',
 			'deepLinks.openAsProfile' => ({required Object name}) => 'Open as ${name}',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.copy' => 'Copy',
 			'deepLinks.copied' => 'Link copied',
 			'iptv.title' => 'IPTV',
@@ -11999,6 +12054,21 @@ extension on Translations {
 			'iptv.epgReloadTvDetails' => 'Reload TV details',
 			'iptv.epgReloadTvDetailsDescription' => 'Re-fetch the channel list and the guide, and report what loaded',
 			'iptv.epgReloadTvDetailsResult' => ({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide',
+			'iptv.epgReloadChannelListFailed' => ({required Object reason}) => 'Channel list could not be re-fetched — ${reason}',
+			'iptv.epgReloadUnexpectedFailure' => ({required Object reason}) => 'Reload failed unexpectedly — ${reason}',
+			'iptv.epgFeedOutcomeLoaded' => ({required Object source, required Object matched, required Object channels}) => '${source}: loaded — ${matched} of ${channels} channels have guide data',
+			'iptv.epgFeedOutcomeLoadedFeedOnly' => ({required Object source, required Object feedChannels}) => '${source}: loaded — ${feedChannels} channels in the feed',
+			'iptv.epgFeedOutcomeLoadedNoMatch' => ({required Object source, required Object channels}) => '${source}: loaded, but matched none of your ${channels} channels',
+			'iptv.epgFeedOutcomeLoadedEmpty' => ({required Object source}) => '${source}: loaded, but the feed is empty',
+			'iptv.epgFeedOutcomeDenied' => ({required Object source}) => '${source}: the panel denied access (HTTP 403)',
+			'iptv.epgFeedOutcomeNotAnswering' => ({required Object source}) => '${source}: the panel is not answering (timed out)',
+			'iptv.epgFeedDeniedReason' => 'the panel denied access (HTTP 403)',
+			'iptv.epgFeedNotAnsweringReason' => 'the panel is not answering (timed out)',
+			'iptv.epgFeedOutcomeDeferred' => ({required Object source}) => '${source}: waiting — will load when playback stops',
+			'iptv.epgFeedOutcomeFailed' => ({required Object source, required Object reason}) => '${source}: ${reason}',
+			'iptv.epgGuideDenied' => 'The panel denied access — the guide couldn\'t load',
+			'iptv.epgGuideNotAnswering' => 'The panel is not answering — the guide couldn\'t load',
+			'iptv.epgGuideFailed' => 'The guide couldn\'t load',
 			'iptv.epgNoGuideTitle' => 'Channels without guide',
 			'iptv.epgNoGuideDescription' => 'Channels with no guide data. Tap Assign to pick a guide for a channel by hand.',
 			'iptv.epgNoGuideEmpty' => 'Every channel has guide data',

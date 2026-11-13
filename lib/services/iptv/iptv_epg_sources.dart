@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:plezy/exceptions/media_server_exceptions.dart';
+import 'package:plezy/i18n/strings.g.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -521,10 +523,155 @@ class IptvReloadTvDetailsResult {
   final int withoutGuide;
   final int feedChannelIds;
 
+  /// Why the channel-list re-fetch failed, when it did (1.2.3 RC1).
+  /// Null when the list loaded. The report dialog names this instead of
+  /// showing nothing — a 403 is "the panel denied access", a timeout is
+  /// "the panel is not answering".
+  final IptvEpgFeedOutcomeKind? channelListFailureKind;
+
+  /// URL-free short text for the list failure (see [epgFeedErrorReason]).
+  final String? channelListFailureReason;
+
+  /// One outcome per enabled source (1.2.3, Matt's follow-up): the
+  /// report must name the FEED outcome, not just the channel counts —
+  /// feed 403, feed timeout, feed loaded-but-matched-nothing, and feed
+  /// loaded-with-matches are four different stories.
+  final List<IptvEpgFeedOutcome> feedOutcomes;
+
   const IptvReloadTvDetailsResult({
     required this.channelsLoaded,
     required this.withGuide,
     required this.withoutGuide,
     required this.feedChannelIds,
+    this.channelListFailureKind,
+    this.channelListFailureReason,
+    this.feedOutcomes = const [],
   });
+}
+
+/// The result of "Update now" (1.2.3 RC2): the same per-source feed
+/// outcomes as a Reload, without a channel-list re-fetch — Update now
+/// never touches the catalog, so no match counts, only the feed's own
+/// size (see [IptvEpgFeedOutcome.matchedChannels]).
+class IptvEpgUpdateNowResult {
+  final List<IptvEpgFeedOutcome> feedOutcomes;
+
+  const IptvEpgUpdateNowResult({required this.feedOutcomes});
+}
+
+/// How one EPG source's feed ended up during a Reload / Update-now
+/// attempt (PlezTV 1.2.3) — so the report dialog can name the feed
+/// outcome instead of leaving the user to guess whether the feed
+/// failed or loaded-but-matched-nothing.
+enum IptvEpgFeedOutcomeKind {
+  /// The feed loaded and matched at least one of this connection's
+  /// channels.
+  loaded,
+
+  /// The feed loaded but matched NONE of this connection's channels
+  /// (M2 — the feed is fine, the ids/names do not line up).
+  loadedNoMatch,
+
+  /// The panel denied access (HTTP 403 — and 401, same family).
+  denied,
+
+  /// The panel did not answer (timeout / connection error).
+  notAnswering,
+
+  /// The feed load was deferred because something is playing (D1b) —
+  /// it never downloaded, and will retry when playback stops.
+  deferred,
+
+  /// Any other failure (reason carries the detail).
+  failed,
+}
+
+/// One source's outcome inside a Reload / Update-now report.
+class IptvEpgFeedOutcome {
+  /// The source id (`'provider'` or a user source id).
+  final String sourceId;
+
+  /// Display name shown in the report.
+  final String sourceName;
+
+  final IptvEpgFeedOutcomeKind kind;
+
+  /// Distinct XMLTV channel ids in the loaded feed (0 when the feed
+  /// never loaded).
+  final int feedChannels;
+
+  /// How many of this connection's channels the feed can serve. Null
+  /// when the channel list was not available (Update now never
+  /// re-fetches it) — the report then names the feed's own size
+  /// instead of a match count.
+  final int? matchedChannels;
+
+  /// Short failure text for [IptvEpgFeedOutcomeKind.denied],
+  /// [IptvEpgFeedOutcomeKind.notAnswering] and
+  /// [IptvEpgFeedOutcomeKind.failed]. Never contains a URL — see
+  /// [epgFeedErrorReason].
+  final String? reason;
+
+  const IptvEpgFeedOutcome({
+    required this.sourceId,
+    required this.sourceName,
+    required this.kind,
+    this.feedChannels = 0,
+    this.matchedChannels,
+    this.reason,
+  });
+}
+
+/// Classify an EPG feed/list failure for display (PlezTV 1.2.3): a 403
+/// (or 401) means the panel denied access; a timeout or connection
+/// error means the panel is not answering; anything else is a plain
+/// failure.
+IptvEpgFeedOutcomeKind classifyEpgFeedError(Object error) {
+  if (error is MediaServerAuthException) {
+    return (error.statusCode == 401 || error.statusCode == 403)
+        ? IptvEpgFeedOutcomeKind.denied
+        : IptvEpgFeedOutcomeKind.failed;
+  }
+  final mapped = MediaServerHttpException.from(error);
+  if (mapped.statusCode == 403) return IptvEpgFeedOutcomeKind.denied;
+  if (mapped.isTransient) return IptvEpgFeedOutcomeKind.notAnswering;
+  // Some paths wrap the failure as a plain error whose text still
+  // names the status (e.g. a fake, or a StateError carrying the panel
+  // reply). The 5-minute "failed recently" StateError carries no
+  // status code and falls through to `failed`, as it should.
+  if (mapped.message.contains('403')) return IptvEpgFeedOutcomeKind.denied;
+  return IptvEpgFeedOutcomeKind.failed;
+}
+
+/// One report line for a feed outcome (PlezTV 1.2.3): the user must be
+/// able to tell from the dialog alone whether the feed failed or
+/// loaded-but-matched-nothing. Shared by the Reload report and the
+/// Update-now report. [channelsTotal] is the connection's channel
+/// count (0 when the list was not available — the lines then name the
+/// feed's own size instead of a match count).
+String epgFeedOutcomeLine(IptvEpgFeedOutcome outcome, int channelsTotal) {
+  return switch (outcome.kind) {
+    IptvEpgFeedOutcomeKind.loaded when outcome.matchedChannels != null => t.iptv.epgFeedOutcomeLoaded(
+      source: outcome.sourceName,
+      matched: outcome.matchedChannels!,
+      channels: channelsTotal,
+    ),
+    IptvEpgFeedOutcomeKind.loaded when outcome.feedChannels == 0 => t.iptv.epgFeedOutcomeLoadedEmpty(source: outcome.sourceName),
+    IptvEpgFeedOutcomeKind.loaded => t.iptv.epgFeedOutcomeLoadedFeedOnly(source: outcome.sourceName, feedChannels: outcome.feedChannels),
+    IptvEpgFeedOutcomeKind.loadedNoMatch => t.iptv.epgFeedOutcomeLoadedNoMatch(source: outcome.sourceName, channels: channelsTotal),
+    IptvEpgFeedOutcomeKind.denied => t.iptv.epgFeedOutcomeDenied(source: outcome.sourceName),
+    IptvEpgFeedOutcomeKind.notAnswering => t.iptv.epgFeedOutcomeNotAnswering(source: outcome.sourceName),
+    IptvEpgFeedOutcomeKind.deferred => t.iptv.epgFeedOutcomeDeferred(source: outcome.sourceName),
+    IptvEpgFeedOutcomeKind.failed => t.iptv.epgFeedOutcomeFailed(source: outcome.sourceName, reason: outcome.reason ?? ''),
+  };
+}
+
+/// A URL-free short reason for an EPG failure (PlezTV 1.2.3): the
+/// exception's own message — never [Object.toString], because a
+/// [MediaServerHttpException] appends the request host+path to its
+/// toString, and the panel URL must never surface in the UI (or in a
+/// persisted status).
+String epgFeedErrorReason(Object error) {
+  if (error is MediaServerException) return error.message;
+  return error.toString();
 }

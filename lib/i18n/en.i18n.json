@@ -1649,6 +1649,12 @@
       "Playlist channels without a guide ID now match the guide by name, so they show programmes instead of nothing",
       "The same programme no longer shows twice in the guide when the guide lists it twice"
     ],
+    "changelog2289": [
+      "Reload TV details and Update now now say plainly what happened — if the panel denies access or doesn't answer, the report names it, and it names whether the guide feed loaded but matched none of your channels",
+      "Reload TV details and Update now show a spinner while they work, so a tap no longer looks dead while the guide loads",
+      "Channels stuck with an empty guide from an older version now refetch instead of showing empty blocks forever",
+      "The guide shows a banner when the panel denies access or doesn't answer, with a retry button"
+    ],
     "changelog2288": [
       "The guide now only keeps the programmes it can show, so it uses less memory while you browse",
       "When a guide source reports it hasn't changed, the app skips downloading it again and reuses the copy it already has"
@@ -3007,6 +3013,21 @@
     "epgReloadTvDetails": "Reload TV details",
     "epgReloadTvDetailsDescription": "Re-fetch the channel list and the guide, and report what loaded",
     "epgReloadTvDetailsResult": "${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide",
+    "epgReloadChannelListFailed": "Channel list could not be re-fetched — ${reason}",
+    "epgReloadUnexpectedFailure": "Reload failed unexpectedly — ${reason}",
+    "epgFeedOutcomeLoaded": "${source}: loaded — ${matched} of ${channels} channels have guide data",
+    "epgFeedOutcomeLoadedFeedOnly": "${source}: loaded — ${feedChannels} channels in the feed",
+    "epgFeedOutcomeLoadedNoMatch": "${source}: loaded, but matched none of your ${channels} channels",
+    "epgFeedOutcomeLoadedEmpty": "${source}: loaded, but the feed is empty",
+    "epgFeedOutcomeDenied": "${source}: the panel denied access (HTTP 403)",
+    "epgFeedOutcomeNotAnswering": "${source}: the panel is not answering (timed out)",
+    "epgFeedDeniedReason": "the panel denied access (HTTP 403)",
+    "epgFeedNotAnsweringReason": "the panel is not answering (timed out)",
+    "epgFeedOutcomeDeferred": "${source}: waiting — will load when playback stops",
+    "epgFeedOutcomeFailed": "${source}: ${reason}",
+    "epgGuideDenied": "The panel denied access — the guide couldn't load",
+    "epgGuideNotAnswering": "The panel is not answering — the guide couldn't load",
+    "epgGuideFailed": "The guide couldn't load",
     "epgNoGuideTitle": "Channels without guide",
     "epgNoGuideDescription": "Channels with no guide data. Tap Assign to pick a guide for a channel by hand.",
     "epgNoGuideEmpty": "Every channel has guide data",

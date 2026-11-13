@@ -15,6 +15,7 @@ import '../../media/iptv_live_tv.dart';
 import '../../services/background_work_diagnostics_service.dart';
 import '../../services/iptv/iptv_background_sync.dart';
 import '../../services/iptv/iptv_catalog_cache.dart';
+import '../../services/iptv/iptv_epg_sources.dart';
 import '../../services/iptv/iptv_refusal_log.dart';
 import '../../services/iptv/iptv_search_index.dart';
 import '../../services/iptv/xtream_api.dart';
@@ -305,7 +306,7 @@ class IptvSettingsScreen extends StatelessWidget {
                   title: t.iptv.epgUpdateOnPlaylistChange,
                   subtitle: t.iptv.epgUpdateOnPlaylistChangeDescription,
                 ),
-                SettingNavigationTile(
+                _WorkingNavigationTile(
                   icon: Symbols.refresh_rounded,
                   title: t.iptv.epgUpdateNow,
                   subtitle: t.iptv.epgUpdateNowDescription,
@@ -423,21 +424,66 @@ class IptvSettingsScreen extends StatelessWidget {
     showSuccessSnackBar(context, t.iptv.refreshDone);
   }
 
-  /// "Update now": bust every IPTV client's EPG cache and force a fresh
-  /// fetch. The guide refetches lazily on its next build (scroll, window
-  /// shift or refresh), so the user sees fresh listings without a reload.
+  /// "Update now" (1.2.3 RC2): bust every IPTV client's EPG cache AND
+  /// load its feeds once, then report the outcome in a dialog — so the
+  /// action earns its message instead of claiming "Guide updated" for
+  /// a cache clear that downloads nothing. A feed that fails is named
+  /// (denied / not answering / loaded-but-empty), not hidden behind a
+  /// success snackbar. The fetch is deferred no longer: the guide's
+  /// next build serves what this just downloaded.
+  ///
+  /// The dialog is shown unawaited on purpose: the caller (the working
+  /// tile) must finish — and clear its spinner — as soon as the report
+  /// APPEARS, not when the user dismisses it.
   Future<void> _updateEpgNow(BuildContext context) async {
     final registry = context.read<ConnectionRegistry>();
     final multiServer = context.read<MultiServerProvider>();
     final connections = await registry.list();
+    final reports = <({String name, List<IptvEpgFeedOutcome> outcomes})>[];
     for (final connection in connections) {
       if (connection is! M3uConnection && connection is! XtreamConnection) continue;
       final client = multiServer.getClientForServer(ServerId(connection.id));
       final liveTv = client?.liveTv;
-      if (liveTv is IptvLiveTvSupport) await liveTv.refreshEpgCache();
+      if (liveTv is IptvLiveTvSupport) {
+        final result = await liveTv.updateEpgNow();
+        reports.add((name: connection.displayName, outcomes: result.feedOutcomes));
+      }
     }
     if (!context.mounted) return;
-    showSuccessSnackBar(context, t.iptv.epgUpdated);
+    if (reports.isEmpty) {
+      showSuccessSnackBar(context, t.iptv.noConnections);
+      return;
+    }
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(t.iptv.epgUpdateNow),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final report in reports) ...[
+                if (reports.length > 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(report.name, style: Theme.of(context).textTheme.titleSmall),
+                  ),
+                if (report.outcomes.isEmpty)
+                  Text(t.iptv.epgUpdated)
+                else
+                  // Update now never re-fetches the channel list, so
+                  // there is no match count to name (0) — the lines
+                  // name each feed's own size instead.
+                  for (final outcome in report.outcomes)
+                    Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(epgFeedOutcomeLine(outcome, 0))),
+              ],
+            ],
+          ),
+          actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: Text(t.common.ok))],
+        ),
+      ),
+    );
   }
 
   /// "Clear guide": empty every IPTV client's EPG cache and leave the
@@ -456,6 +502,49 @@ class IptvSettingsScreen extends StatelessWidget {
     showSuccessSnackBar(context, t.iptv.epgCleared);
   }
 }
+
+/// A navigation tile that shows a spinner while its async action runs
+/// (1.2.3: Update now must show it is working, not just clear the
+/// cache and claim success). Taps while running are ignored. The
+/// settings screen is a StatelessWidget, so the working state lives
+/// here instead of on the screen.
+class _WorkingNavigationTile extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Future<void> Function() onTap;
+
+  const _WorkingNavigationTile({required this.icon, required this.title, required this.subtitle, required this.onTap});
+
+  @override
+  State<_WorkingNavigationTile> createState() => _WorkingNavigationTileState();
+}
+
+class _WorkingNavigationTileState extends State<_WorkingNavigationTile> {
+  var _working = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SettingNavigationTile(
+      icon: widget.icon,
+      title: widget.title,
+      subtitle: widget.subtitle,
+      trailing: _working
+          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+          : null,
+      onTap: () async {
+        if (_working) return;
+        setState(() => _working = true);
+        try {
+          await widget.onTap();
+        } finally {
+          if (mounted) setState(() => _working = false);
+        }
+      },
+    );
+  }
+}
+
 
 /// "Connection refusals" row (build #27): opens the refusal log. The
 /// subtitle is the count (or the empty line); it rebuilds when a refusal

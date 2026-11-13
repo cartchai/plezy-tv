@@ -866,13 +866,17 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(t.iptv.epgUpdateNow));
     await tester.pumpAndSettle();
-    expect(find.text(t.iptv.epgUpdated), findsOneWidget);
+    // 1.2.3 RC2: Update now attempts a real refresh and reports the
+    // outcome in a dialog — it no longer claims "Guide updated" in a
+    // snackbar for a cache clear. This fake's feed is empty, so the
+    // report names the empty feed.
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.text(t.iptv.epgFeedOutcomeLoadedEmpty(source: 'Provider guide')), findsOneWidget);
+    await tester.tap(find.text(t.common.ok));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text(t.iptv.epgClearGuide));
     await tester.pumpAndSettle();
     await tester.tap(find.text(t.iptv.epgClearGuide));
-    // The "Guide updated" snackbar is still showing; the "Guide cleared"
-    // one queues behind it — let the first expire before asserting.
-    await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
     expect(find.text(t.iptv.epgCleared), findsOneWidget);
   });
@@ -1012,6 +1016,11 @@ void main() {
       expect(find.text('Version 1.2.1-2.25.0'), findsOneWidget);
       final newest121 = tester.getTopLeft(find.text('Version 1.2.1-2.25.0')).dy;
       expect(newest121, lessThan(newest120));
+      // EPG silence fix (v1.2.3): same guard for the new version — it
+      // must be present and sit above 1.2.1.
+      expect(find.text('Version 1.2.3-2.25.0'), findsOneWidget);
+      final newest123 = tester.getTopLeft(find.text('Version 1.2.3-2.25.0')).dy;
+      expect(newest123, lessThan(newest121));
     });
   });
 }

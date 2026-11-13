@@ -24,6 +24,7 @@ import '../../../models/livetv_program.dart';
 import '../../../models/media_grab_operation.dart';
 import '../../../providers/multi_server_provider.dart';
 import '../../../media/iptv_live_tv.dart';
+import '../../../services/iptv/iptv_epg_sources.dart';
 import '../../../media/media_server_client.dart';
 import '../../../theme/mono_tokens.dart';
 import '../../../utils/app_logger.dart';
@@ -326,6 +327,11 @@ class GuideTabState extends State<GuideTab>
   final Set<String> _iptvEpgInFlight = {};
   final Set<String> _iptvEpgLoaded = {};
   final Set<String> _iptvEpgFailed = {};
+  // 1.2.3: the last non-cancellation fetch error, for the denial
+  // banner — the guide names the denial (403 / timeout) instead of
+  // leaving hour blocks with no explanation. Cleared when any fetch
+  // succeeds or the state resets.
+  Object? _iptvEpgLastError;
   final Map<String, int> _iptvEpgVersionByServer = {};
 
   /// Merged per-channel program lists (real programs + "No information"
@@ -1156,6 +1162,8 @@ class GuideTabState extends State<GuideTab>
               _iptvEpgInFlight.remove(scopeKey);
               if (superseded) return;
               _iptvEpgLoaded.add(scopeKey);
+              // 1.2.3: a fetch answered — the denial (if any) is over.
+              _iptvEpgLastError = null;
               _programsByChannelScope = {
                 ..._programsByChannelScope,
                 scopeKey: programs,
@@ -1183,6 +1191,8 @@ class GuideTabState extends State<GuideTab>
               // Fail open: the row renders hour placeholders for this
               // window instead of retrying in a loop.
               _iptvEpgFailed.add(scopeKey);
+              // 1.2.3: keep the error for the denial banner.
+              _iptvEpgLastError = e;
               _mergedProgramsCache.remove(scopeKey);
             });
           }),
@@ -1200,6 +1210,7 @@ class GuideTabState extends State<GuideTab>
   void _resetIptvEpgState() {
     _iptvEpgLoaded.clear();
     _iptvEpgFailed.clear();
+    _iptvEpgLastError = null;
     _mergedProgramsCache.clear();
   }
 
@@ -1217,6 +1228,64 @@ class GuideTabState extends State<GuideTab>
     _mergedProgramsCache.remove(scopeKey);
     _ensureIptvEpg(channel, force: true);
     if (mounted) setState(() {});
+  }
+
+  /// True when the guide is empty because every visible IPTV fetch
+  /// failed (1.2.3): something failed, nothing loaded, and nothing is
+  /// still loading — so the denial banner can appear without flashing
+  /// while rows are still fetching.
+  bool get _showIptvEpgDeniedBanner =>
+      !_isIptvEpgLoading && _iptvEpgFailed.isNotEmpty && _iptvEpgLoaded.isEmpty && _iptvEpgLastError != null;
+
+  /// The persistent denial banner (1.2.3): when every visible IPTV
+  /// channel's guide fetch failed and none loaded, the guide says so
+  /// plainly — "the panel denied access" (403) or "the panel is not
+  /// answering" (timeout) — instead of leaving hour blocks with no
+  /// explanation. Distinct from the loaded-but-empty state (no banner:
+  /// the feed answered, it just matched nothing) and from the per-row
+  /// retry state (still shown, per row). The banner stays until a
+  /// fetch succeeds or the window changes.
+  Widget _buildIptvEpgDeniedBanner(ThemeData theme) {
+    final tk = tokens(context);
+    final error = _iptvEpgLastError;
+    final text = switch (error == null ? IptvEpgFeedOutcomeKind.failed : classifyEpgFeedError(error)) {
+      IptvEpgFeedOutcomeKind.denied => t.iptv.epgGuideDenied,
+      IptvEpgFeedOutcomeKind.notAnswering => t.iptv.epgGuideNotAnswering,
+      _ => t.iptv.epgGuideFailed,
+    };
+    return Material(
+      color: Color.alphaBlend(tk.surface.withValues(alpha: 0.5), tk.bg),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            AppIcon(Symbols.error_rounded, size: 18, color: tk.textMuted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: theme.textTheme.bodySmall?.copyWith(color: tk.textMuted),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(onPressed: _retryAllIptvEpg, child: Text(t.common.retry)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Retry every failed visible IPTV channel at once (1.2.3): the
+  /// banner's Retry, and the per-row retry's big brother. Each retry
+  /// forces a fresh feed download (D8), so it actually tries again
+  /// instead of failing instantly on the 5-minute negative cache.
+  void _retryAllIptvEpg() {
+    if (_iptvEpgFailed.isEmpty) return;
+    final failed = Set<String>.of(_iptvEpgFailed);
+    for (final channel in widget.channels) {
+      if (failed.contains(liveTvChannelScopeKey(channel))) _retryIptvEpg(channel);
+    }
   }
 
   /// The visible failed state for a channel whose EPG fetch failed (build
@@ -1845,6 +1914,9 @@ class GuideTabState extends State<GuideTab>
             height: 3,
             child: LinearProgressIndicator(minHeight: 3),
           ),
+        // 1.2.3: the denial banner — the guide names the denial instead
+        // of leaving hour blocks with no explanation.
+        if (_showIptvEpgDeniedBanner) _buildIptvEpgDeniedBanner(theme),
         Expanded(
           child: ListenableBuilder(
             listenable: _gridHorizontalController,
