@@ -1094,7 +1094,7 @@ class GuideTabState extends State<GuideTab>
   /// the visible ones plus cache extent — ever fetch. A fetch in flight is
   /// never duplicated, and a completed fetch merges its programs into the
   /// indexed grid state so rows, focus and search all see them.
-  void _ensureIptvEpg(LiveTvChannel channel) {
+  void _ensureIptvEpg(LiveTvChannel channel, {bool force = false}) {
     final support = _iptvSupportFor(channel);
     if (support == null) return;
     final scopeKey = liveTvChannelScopeKey(channel);
@@ -1126,7 +1126,7 @@ class GuideTabState extends State<GuideTab>
     final requestEnd = _gridEnd;
     unawaited(
       support
-          .fetchEpgForChannel(channel.key, from: requestStart, to: requestEnd)
+          .fetchEpgForChannel(channel.key, from: requestStart, to: requestEnd, force: force)
           .then((programs) {
             if (!mounted) return;
             // A window change superseded this fetch; its programs belong to
@@ -1189,12 +1189,15 @@ class GuideTabState extends State<GuideTab>
   /// failed flag (and the merged placeholders) so the row re-fetches
   /// instead of staying dead for the window. A failed fetch writes no
   /// cache entry, so the retry refetches rather than serving stale data.
+  /// 1.1.2 D8: the retry forces a fresh feed download, bypassing the
+  /// feed's 5-minute negative cache — the tap actually tries again
+  /// instead of failing instantly with "failed recently".
   void _retryIptvEpg(LiveTvChannel channel) {
     final scopeKey = liveTvChannelScopeKey(channel);
     _iptvEpgFailed.remove(scopeKey);
     _iptvEpgLoaded.remove(scopeKey);
     _mergedProgramsCache.remove(scopeKey);
-    _ensureIptvEpg(channel);
+    _ensureIptvEpg(channel, force: true);
     if (mounted) setState(() {});
   }
 

@@ -57,6 +57,11 @@ class _EpgControllableApi extends XtreamApi {
   final Map<String, Completer<List<XtreamEpgProgram>>> pending = {};
   int epgCalls = 0;
 
+  /// When true the xmltv.php feed throws instead of loading empty — the
+  /// two failure tests opt into it so BOTH sources fail (1.1.2 D1a: a
+  /// feed that fails is a failure, not an empty answer).
+  bool failXmltv = false;
+
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [
     XtreamLiveStream(
@@ -78,10 +83,12 @@ class _EpgControllableApi extends XtreamApi {
   }
 
   // The login's xmltv.php feed is the primary EPG source (Task 7), but
-  // these tests control the EPG through get_short_epg's Completers — the
-  // feed must fail fast here so the flow falls back to getShortEpg
-  // without ever touching the network or the compute isolate. The
-  // persisted feed FILE is still read (build #15 caches the feed on
+  // these tests control the EPG through get_short_epg's Completers. The
+  // feed loads EMPTY by default (1.1.2 D1a): a channel whose short-EPG
+  // answers empty and whose feed loads with nothing for it is a genuine
+  // empty — hour blocks, not a failure. A feed that FAILS is a failure
+  // (retry state), so the two failure tests opt into it with [failXmltv].
+  // The persisted feed FILE is still read (build #15 caches the feed on
   // disk); the harness gives that real I/O a runAsync window in
   // waitForEpgCalls so it can settle in the fake async zone.
   /// Build #26: the fake's feed is a small canned String, so the stream
@@ -93,7 +100,8 @@ class _EpgControllableApi extends XtreamApi {
   }
   @override
   Future<String> getXmltv({Duration timeout = const Duration(seconds: 120), Future<void>? abortTrigger}) async {
-    throw Exception('xmltv feed unavailable in guide tests');
+    if (failXmltv) throw Exception('xmltv feed unavailable in guide tests');
+    return '<?xml version="1.0" encoding="UTF-8"?><tv></tv>';
   }
 
   void complete(String streamId, List<XtreamEpgProgram> programs) =>
@@ -259,6 +267,9 @@ void main() {
     // feed throws in this harness) — the row must show a visible failed
     // state, not silent hour placeholders, and tapping it must refetch.
     final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    // 1.1.2 D1a: the feed must actually FAIL here — a loading-empty feed
+    // would make this a genuine empty (hour blocks), not a failure.
+    harness.api.failXmltv = true;
     addTearDown(harness.dispose);
     await harness.init();
     await harness.pump(tester);
@@ -545,6 +556,9 @@ void main() {
 
   testWidgets('H4: a failed EPG fetch shows a retry state, never hour blocks', (tester) async {
     final harness = _IptvGuideHarness(onlyChannelKey: '100');
+    // 1.1.2 D1a: the feed must actually FAIL here — a loading-empty feed
+    // would make this a genuine empty (hour blocks), not a failure.
+    harness.api.failXmltv = true;
     addTearDown(harness.dispose);
     await harness.init();
     await harness.pump(tester);

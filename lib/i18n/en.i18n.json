@@ -1630,6 +1630,12 @@
       "The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up",
       "Channels with no guide data no longer show one big block for the whole guide window"
     ],
+    "changelog2285": [
+      "When the TV guide can't reach the guide data, it now says so with a retry button instead of showing empty hour blocks all day",
+      "Tapping retry on a failed guide row now actually tries again instead of failing instantly for five minutes",
+      "The guide no longer gets stuck empty after you watch TV — it reloads once playback stops",
+      "Last updated in the guide settings now only changes when guide data actually arrived, and a new Last attempt line shows when it last tried"
+    ],
     "changelog2276": [
       "The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo",
       "Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up"
@@ -2955,6 +2961,7 @@
     "epgClearGuideDescription": "Delete the downloaded guide data",
     "epgLastUpdated": "Last updated",
     "epgNeverUpdated": "Never",
+    "epgLastAttemptLine": "Last attempt: ${stamp}",
     "epgUpdated": "Guide updated",
     "epgCleared": "Guide cleared",
     "xtreamSection": "Xtream Codes",

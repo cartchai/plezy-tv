@@ -3891,6 +3891,12 @@ class Translations$about$en {
 		'The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up',
 		'Channels with no guide data no longer show one big block for the whole guide window',
 	];
+	List<String> get changelog2285 => [
+		'When the TV guide can\'t reach the guide data, it now says so with a retry button instead of showing empty hour blocks all day',
+		'Tapping retry on a failed guide row now actually tries again instead of failing instantly for five minutes',
+		'The guide no longer gets stuck empty after you watch TV — it reloads once playback stops',
+		'Last updated in the guide settings now only changes when guide data actually arrived, and a new Last attempt line shows when it last tried',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -6838,6 +6844,9 @@ class Translations$iptv$en {
 
 	/// en: 'Never'
 	String get epgNeverUpdated => 'Never';
+
+	/// en: 'Last attempt: ${stamp}'
+	String epgLastAttemptLine({required Object stamp}) => 'Last attempt: ${stamp}';
 
 	/// en: 'Guide updated'
 	String get epgUpdated => 'Guide updated';
@@ -10560,6 +10569,10 @@ extension on Translations {
 			'about.changelog2283.3' => 'When a search comes up empty because a group is turned off, it now names the group',
 			'about.changelog2284.0' => 'The TV guide is back to one block per hour when a channel has no guide data, so you can pick a single hour to watch from the start on channels that offer catch-up',
 			'about.changelog2284.1' => 'Channels with no guide data no longer show one big block for the whole guide window',
+			'about.changelog2285.0' => 'When the TV guide can\'t reach the guide data, it now says so with a retry button instead of showing empty hour blocks all day',
+			'about.changelog2285.1' => 'Tapping retry on a failed guide row now actually tries again instead of failing instantly for five minutes',
+			'about.changelog2285.2' => 'The guide no longer gets stuck empty after you watch TV — it reloads once playback stops',
+			'about.changelog2285.3' => 'Last updated in the guide settings now only changes when guide data actually arrived, and a new Last attempt line shows when it last tried',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10652,12 +10665,12 @@ extension on Translations {
 			'explore.searchFailed' => 'Search failed. Check your connection and try again.',
 			'explore.badge.rankPopular' => ({required Object n}) => '#${n} popular',
 			'explore.badge.rankAiring' => ({required Object n}) => '#${n} airing',
+			_ => null,
+		} ?? switch (path) {
 			'explore.badge.rankRated' => ({required Object n}) => '#${n} rated',
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
 			'explore.badge.watchingNow' => ({required Object n}) => '${n} watching',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.available' => 'Available',
 			'explore.badge.partiallyAvailable' => 'Partly available',
 			'explore.badge.availableIn4k' => '4K available',
@@ -11166,12 +11179,12 @@ extension on Translations {
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
 			'downloads.activeSyncRules' => 'Sync rules',
 			'downloads.noSyncRules' => 'No sync rules',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.manageSyncRule' => 'Manage sync',
 			'downloads.editEpisodeCount' => 'Episode count',
 			'downloads.editSyncFilter' => 'Sync filter',
 			'downloads.syncAllItems' => 'Syncing all items',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.syncUnwatchedItems' => 'Syncing unwatched items',
 			'downloads.syncRuleServerContext' => ({required Object server, required Object status}) => 'Server: ${server} • ${status}',
 			'downloads.syncRuleAvailable' => 'Available',
@@ -11680,12 +11693,12 @@ extension on Translations {
 			'iptv.favorites.emptyHint' => 'Tap the heart on a channel, movie or show to keep it here.',
 			'iptv.favorites.channelUnavailable' => 'That channel is no longer available',
 			'iptv.settingsDescription' => 'Playlists, channel groups, guide and catch-up',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.intro' => 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.',
 			'iptv.connections' => 'Connections',
 			'iptv.addConnection' => 'Add IPTV connection',
 			'iptv.addConnectionDescription' => 'Add an M3U playlist or Xtream Codes account',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.noConnections' => 'No IPTV connections yet',
 			'iptv.noConnectionsHint' => 'Add an M3U playlist or Xtream Codes account to watch live TV.',
 			'iptv.categoriesOff' => ({required Object count}) => '${count} categories off',
@@ -11749,6 +11762,7 @@ extension on Translations {
 			'iptv.epgClearGuideDescription' => 'Delete the downloaded guide data',
 			'iptv.epgLastUpdated' => 'Last updated',
 			'iptv.epgNeverUpdated' => 'Never',
+			'iptv.epgLastAttemptLine' => ({required Object stamp}) => 'Last attempt: ${stamp}',
 			'iptv.epgUpdated' => 'Guide updated',
 			'iptv.epgCleared' => 'Guide cleared',
 			'iptv.xtreamSection' => 'Xtream Codes',

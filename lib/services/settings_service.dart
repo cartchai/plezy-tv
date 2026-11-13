@@ -949,10 +949,18 @@ class SettingsService extends BaseSharedPreferencesService {
   /// steps; applied in the EPG mapper, never stored with the programs.
   static const iptvEpgTimeOffsetMinutes = IntPref('iptv_epg_time_offset_minutes', defaultValue: 0);
 
-  /// ISO-8601 timestamp of the last successful EPG fetch across all IPTV
-  /// sources, written by the EPG layer (throttled to one write per minute).
-  /// Empty before the first load. Shown as "Last updated" in IPTV settings.
+  /// ISO-8601 timestamp of the last EPG fetch that stored at least one
+  /// programme across all IPTV sources (1.1.2 D9), written by the EPG
+  /// layer (throttled to one write per minute). Empty before the first
+  /// load. Shown as "Last updated" in IPTV settings.
   static const iptvEpgLastUpdated = StringPref('iptv_epg_last_updated', defaultValue: '');
+
+  /// ISO-8601 timestamp of the last EPG fetch ATTEMPT across all IPTV
+  /// sources (1.1.2 D9), written by the EPG layer (throttled to one write
+  /// per minute). Empty before the first attempt. Shown as "Last attempt"
+  /// in IPTV settings — unlike "Last updated", it certifies activity,
+  /// not data: an attempt that failed or returned empty still stamps it.
+  static const iptvEpgLastAttempt = StringPref('iptv_epg_last_attempt', defaultValue: '');
 
   /// Xtream User-Agent (build #20): the User-Agent sent on every Xtream
   /// panel request. Trex 403s the app's default Dart UA while TiviMate

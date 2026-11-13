@@ -29,6 +29,16 @@ import 'iptv_client.dart';
 /// disk files written before this build recorded the source.
 enum IptvEpgSource { feedById, feedByName, shortEpg, none, unknown }
 
+/// The XMLTV feed download was deferred by the playback gate (build #28,
+/// 1.1.2 D1b): no feed exists yet and a stream is playing. This is NOT a
+/// failure and NOT a genuine empty — the fetch returns empty without
+/// caching, so the channel reloads when playback stops. It extends
+/// [StateError] with the same message the gate has always thrown, so
+/// existing message-based handling still matches.
+class _EpgFeedDeferred extends StateError {
+  _EpgFeedDeferred(String cacheKey) : super('XMLTV feed for $cacheKey deferred while a stream is playing');
+}
+
 /// Guide coverage over the channels the guide has loaded EPG for (build
 /// #17, §10): how many have programmes, split by the source that served
 /// them, plus the tvg-id match rate over the same set — the numbers the
@@ -99,7 +109,15 @@ class IptvLiveTvSupport implements LiveTvSupport {
   final FavoriteChannelsRepository _favoritesRepository;
 
   IptvLiveTvSupport(this._client, [FavoriteChannelsRepository? favoritesRepository])
-    : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository();
+    : _favoritesRepository = favoritesRepository ?? const SharedPreferencesFavoriteChannelsRepository() {
+    // D1b (1.1.2): the playback-gate deferral used to claim "it retries
+    // when playback stops" while nothing listened for playback stopping
+    // (isPlayingNotifier had zero listeners). This listener is the
+    // missing half: when playback stops and any channel was deferred,
+    // the guide version bumps so visible rows re-fetch instead of
+    // showing hour blocks until the next window change.
+    IptvPlaybackActivity.instance.isPlayingNotifier.addListener(_onPlaybackActivityChanged);
+  }
 
   String get _favoritesPrefsKey => 'iptv_fav_channels:${_client.connection.id}';
 
@@ -273,6 +291,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   int _epgVersion = 0;
   DateTime? _lastEpgUpdatedAt;
   DateTime? _lastEpgPrefWrite;
+  DateTime? _lastEpgAttemptPrefWrite;
 
   /// Test-only override for the directory the persisted EPG cache lives
   /// in, so tests can use a temp dir instead of the app cache. Production
@@ -295,6 +314,28 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// fetch per channel on the first guide open is the setting's actual
   /// meaning.
   final Set<String> _startupRefreshedChannels = {};
+
+  /// Channels whose feed was deferred by the playback gate (1.1.2 D1b):
+  /// the fetch returned empty without caching. Cleared when playback
+  /// stops (the listener bumps the guide version) and by
+  /// [clearEpgCache].
+  final Set<String> _deferredEpgChannels = {};
+
+  /// D1b: when playback stops, channels deferred by the gate must
+  /// reload. The guide watches [epgVersion] and re-fetches visible rows
+  /// when it changes — bumping it here is what makes the deferred rows
+  /// heal without a window change or an Update now.
+  void _onPlaybackActivityChanged() {
+    if (IptvPlaybackActivity.instance.isPlaying) return;
+    if (_deferredEpgChannels.isEmpty) return;
+    _deferredEpgChannels.clear();
+    _epgVersion++;
+  }
+
+  /// Record a playback-gate deferral for [channelKey] (1.1.2 D1b).
+  void _recordFeedDeferral(String channelKey) {
+    _deferredEpgChannels.add(channelKey);
+  }
 
   @override
   LiveTvDvrSupport? get dvr => null;
@@ -341,10 +382,21 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// Returning [] now means only one thing: the fetch succeeded and this
   /// channel genuinely has no programmes in the window. The guide catches
   /// the throw and marks the channel FAILED (visible retry state).
+  ///
+  /// 1.1.2 D1a: "both sources failed" counts a feed that FAILS as
+  /// failed — a feed that loads but has nothing for the channel is the
+  /// only "answering empty". A playback-gate deferral (D1b) is neither:
+  /// it returns [] without caching, and reloads when playback stops.
+  /// [force] bypasses the feed's 5-minute negative cache (D8) — an
+  /// explicit retry is not a storm. Only an explicit force bypasses it:
+  /// a plain re-fetch after a failure still respects the negative cache
+  /// (see iptv_epg_cache_test: a failed feed must not be re-downloaded
+  /// per channel).
   Future<List<LiveTvProgram>> fetchEpgForChannel(
     String channelKey, {
     required DateTime from,
     required DateTime to,
+    bool force = false,
   }) async {
     final settings = await _readEpgSettings();
     final now = DateTime.now();
@@ -381,14 +433,30 @@ class IptvLiveTvSupport implements LiveTvSupport {
       return _slice(cached.programs, from, to);
     }
 
+    // D9: an attempt happened even when the fetch fails or returns
+    // empty — record it before the fetch, so "Last attempt" certifies
+    // activity while "Last updated" certifies data (stamped below,
+    // only when programmes were stored).
+    _noteEpgAttempt(now);
     List<LiveTvProgram> programs;
     IptvEpgSource source;
     try {
       final fetched = _isXtream
-          ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl)
-          : await _fetchM3uEpg(channelKey, settings, fetchFrom, fetchTo, ttl);
+          ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl, force: force)
+          : await _fetchM3uEpg(channelKey, settings, fetchFrom, fetchTo, ttl, force: force);
       programs = fetched.programs;
       source = fetched.source;
+      if (fetched.feedDeferred) {
+        // D1b: the feed was deferred by the playback gate — not a
+        // failure and not a genuine empty. Return [] WITHOUT caching,
+        // so the next fetch after playback stops downloads the feed.
+        // The deferral is recorded (see _recordFeedDeferral) so the
+        // idle listener bumps the guide version and the row re-fetches.
+        return const <LiveTvProgram>[];
+      }
+      // A successful (non-deferred) fetch resolves the channel: it is
+      // no longer a deferred one.
+      _deferredEpgChannels.remove(channelKey);
     } catch (e) {
       // Build #8 Task 3: a failed fetch must surface (see the doc comment
       // above) — swallowing it as [] recorded failures as loaded-empty.
@@ -405,8 +473,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // (The write still happens; it just doesn't hold the fetch open.)
     unawaited(_writePersistedEpg(channelKey, entry));
     unawaited(_pruneStalePersistedEpg(ttl));
-    _lastEpgUpdatedAt = now;
-    _noteEpgUpdated(now);
+    // D9: "Last updated" certifies DATA, not activity — stamp it only
+    // when at least one programme was stored. An empty fetch (a genuine
+    // empty, or a channel with no guide) leaves it alone.
+    if (programs.isNotEmpty) {
+      _lastEpgUpdatedAt = now;
+      _noteEpgUpdated(now);
+    }
     return _slice(programs, from, to);
   }
 
@@ -587,14 +660,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// A channel is never left blank by a missing or partial feed — and a
   /// fetch only THROWS when both sources fail: if either source answers
   /// (even empty), that answer stands, so a genuine empty is never
-  /// misread as a failure.
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamEpg(
+  /// misread as a failure. 1.1.2 D1a: a feed that FAILS does not count
+  /// as "answering" — only a feed that LOADS but has nothing for the
+  /// channel answers empty. A playback-gate deferral is neither a
+  /// failure nor an answer (see [_fetchXtreamEpgWithAbort]).
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
     DateTime to,
-    Duration? ttl,
-  ) async {
+    Duration? ttl, {
+    bool force = false,
+  }) async {
     // Build #28: this channel's fetch owns an AbortController, so a row
     // that scrolls away (or the app backgrounding) stops it instead of
     // letting it run to completion unobserved. The shared feed download
@@ -604,7 +681,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     _epgAbortsByChannel[channelKey] = abort;
     _activeEpgAborts.add(abort);
     try {
-      return await _fetchXtreamEpgWithAbort(channelKey, settings, from, to, ttl, abort);
+      return await _fetchXtreamEpgWithAbort(channelKey, settings, from, to, ttl, abort, force: force);
     } finally {
       _activeEpgAborts.remove(abort);
       if (identical(_epgAbortsByChannel[channelKey], abort)) {
@@ -613,14 +690,15 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamEpgWithAbort(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamEpgWithAbort(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
     DateTime to,
     Duration? ttl,
-    AbortController abort,
-  ) async {
+    AbortController abort, {
+    bool force = false,
+  }) async {
     // Build #26 (R3): the feed is fetched LAZILY — only when
     // get_short_epg misses or fails for this channel. The old code
     // started the big feed download unconditionally, in the background,
@@ -640,35 +718,56 @@ class IptvLiveTvSupport implements LiveTvSupport {
       appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
     if (shortEpg != null && shortEpg.isNotEmpty) {
-      return (programs: shortEpg, source: IptvEpgSource.shortEpg);
+      return (programs: shortEpg, source: IptvEpgSource.shortEpg, feedDeferred: false);
     }
     // get_short_epg had nothing (or failed): use the feed, starting it
     // now. A feed that loads but has nothing for the channel returns
-    // [] (genuine empty); a feed that fails only throws when get_short_epg
-    // never answered — both sources failed.
+    // [] (genuine empty); a feed that FAILS throws (1.1.2 D1a) — a
+    // failed feed is not a source answering empty, even when
+    // get_short_epg already answered empty.
     //
     // Build #28: a cancel that landed after get_short_epg answered is
     // honoured here, before waiting on the feed — the row scrolled away
     // or the app backgrounded, and the feed is a download nobody watches.
     abort.throwIfAborted();
     try {
-      return await _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl);
+      return await _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl, force: force);
+    } on _EpgFeedDeferred {
+      // D1b: the feed was deferred by the playback gate — not a failure
+      // and not a genuine empty. Return empty without caching (the
+      // caller skips the cache write for deferred results) and record
+      // the deferral, so the idle listener bumps the guide version and
+      // the channel reloads when playback stops. The old comment
+      // claimed "it retries when playback stops" — nothing listened
+      // for playback stopping, so the deferred fetch was recorded as
+      // loaded-empty for the whole interval instead.
+      _recordFeedDeferral(channelKey);
+      return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: true);
     } catch (e) {
+      // A cancellation is not a failure (build #28): the app
+      // backgrounded mid-download. The gate test pins the old
+      // behaviour here — a cancelled feed yields an empty guide, not
+      // a throw — so keep returning [] for cancellations; only a
+      // genuine feed FAILURE takes the D1a rethrow below.
+      if (MediaServerHttpException.from(e).isCancellation) {
+        return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
+      }
       if (shortEpg != null) {
-        // Build #28: a feed deferred while a stream is playing is not
-        // a failure — it is the gate doing its job, and it retries when
-        // playback stops. Logging it per row would spam the log while
-        // the user watches with the guide open. A genuine feed failure
-        // while playing is silent here for the same reason: the feed is
-        // re-attempted when idle, and the panel error is already in the
-        // refusal recorder.
+        // D1a: get_short_epg ANSWERED (empty) and the feed FAILED. A
+        // feed that fails is not a source "answering empty" — the
+        // build #8 invariant ("a fetch only throws when both sources
+        // fail") is met: one source answered empty, the other failed,
+        // so the fetch must surface as a failure (guide retry state),
+        // not as loaded-empty hour blocks. The old code returned []
+        // here and the caller cached it for the whole interval — the
+        // phone symptom (every channel hour blocks, no retry state).
         if (!IptvPlaybackActivity.instance.isPlaying) {
           appLogger.w(
             'IPTV: xmltv.php fetch failed for channel $channelKey; get_short_epg already answered empty',
             error: e,
           );
         }
-        return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
+        rethrow;
       }
       rethrow;
     }
@@ -686,28 +785,29 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// region prefixes. The source names what actually served programmes
   /// (after window filtering): a match whose programmes all fall outside
   /// the window still counts as `none` — the guide shows nothing for it.
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchXtreamXmltvPrograms(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamXmltvPrograms(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
     DateTime to,
-    Duration? ttl,
-  ) async {
-    final guide = await _xtreamXmltvGuide(ttl: ttl);
+    Duration? ttl, {
+    bool force = false,
+  }) async {
+    final guide = await _xtreamXmltvGuide(ttl: ttl, force: force);
     _lastXmltvFeedChannelIds = guide.byChannel.length;
     final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
     final byId = <XmltvProgram>[];
     if (epgChannelId != null) byId.addAll(guide.byChannel[epgChannelId] ?? const []);
     if (epgChannelId != channelKey) byId.addAll(guide.byChannel[channelKey] ?? const []);
     var programs = _mapXmltvPrograms(byId, channelKey, settings, from, to, keyPrefix: 'xtream');
-    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById);
+    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById, feedDeferred: false);
     final channelName = _client.channelNameForChannelKey(channelKey);
     if (channelName != null && channelName.isNotEmpty) {
       final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
       programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'xtream');
-      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName);
+      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName, feedDeferred: false);
     }
-    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
+    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
   }
 
   /// One channel's `get_short_epg` listings — the fallback when the
@@ -798,33 +898,42 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (_shortEpgWaiters.isNotEmpty) _shortEpgWaiters.removeAt(0).complete();
   }
 
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source})> _fetchM3uEpg(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchM3uEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
     DateTime to,
-    Duration? ttl,
-  ) async {
+    Duration? ttl, {
+    bool force = false,
+  }) async {
     final connection = _client.connection;
-    if (connection is! M3uConnection) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
+    if (connection is! M3uConnection) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
     final epgUrl = connection.epgUrl;
-    if (epgUrl == null || epgUrl.isEmpty) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
+    if (epgUrl == null || epgUrl.isEmpty) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
     // The XMLTV `channel` attribute matches the entry's tvg-id, which is
     // also the M3U channel key when present. When it misses, the entry's
     // normalized name is tried (build #17, §10) — same fallback as Xtream.
     final tvgId = _client.tvgIdForChannelKey(channelKey);
-    if (tvgId == null) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
-    final guide = await _xmltvGuide(epgUrl, ttl: ttl);
+    if (tvgId == null) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
+    // D1b: the M3U feed defers the same way the Xtream feed does — a
+    // deferred feed is not a failure and not a genuine empty.
+    _CachedXmltvGuide guide;
+    try {
+      guide = await _xmltvGuide(epgUrl, ttl: ttl, force: force);
+    } on _EpgFeedDeferred {
+      _recordFeedDeferral(channelKey);
+      return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: true);
+    }
     _lastXmltvFeedChannelIds = guide.byChannel.length;
     var programs = _mapXmltvPrograms(guide.byChannel[tvgId] ?? const [], channelKey, settings, from, to, keyPrefix: 'm3u');
-    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById);
+    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById, feedDeferred: false);
     final channelName = _client.channelNameForChannelKey(channelKey);
     if (channelName != null && channelName.isNotEmpty) {
       final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
       programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'm3u');
-      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName);
+      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName, feedDeferred: false);
     }
-    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none);
+    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
   }
 
   /// Map parsed XMLTV programmes for one channel to guide programs,
@@ -896,8 +1005,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
   Future<_CachedXmltvGuide> _xmltvGuideForKey(
     String cacheKey,
     Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
-    Duration? ttl,
-  ) async {
+    Duration? ttl, {
+    bool force = false,
+  }) async {
     bool fresh(_CachedXmltvGuide guide) => ttl == null || DateTime.now().difference(guide.fetchedAt) < ttl;
 
     final cached = _xmltvCache[cacheKey];
@@ -907,13 +1017,21 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // download for a channel whose feed just failed — the caller falls
     // back to get_short_epg / tap-to-retry instead. A stale guide still
     // beats nothing.
+    // D8: an explicit retry (force) bypasses the remembered failure —
+    // it is not a storm, so it attempts the download again instead of
+    // failing fast for 5 minutes. A forced retry also forgets the
+    // failure, so a later automatic fetch is not blocked by a failure
+    // the retry already superseded.
     final failedAt = _xmltvFailedAt[cacheKey];
     if (failedAt != null) {
-      if (DateTime.now().difference(failedAt) < xmltvNegativeCacheTtl) {
+      if (force) {
+        _xmltvFailedAt.remove(cacheKey);
+      } else if (DateTime.now().difference(failedAt) < xmltvNegativeCacheTtl) {
         if (cached != null) return cached;
         throw StateError('XMLTV feed for $cacheKey failed recently; retry shortly');
+      } else {
+        _xmltvFailedAt.remove(cacheKey);
       }
-      _xmltvFailedAt.remove(cacheKey);
     }
 
     final inFlight = _xmltvGuideFutures[cacheKey];
@@ -969,7 +1087,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // download starts. The caller falls back to get_short_epg (or an
     // empty guide) and the feed loads when playback stops.
     if (IptvPlaybackActivity.instance.isPlaying) {
-      throw StateError('XMLTV feed for $cacheKey deferred while a stream is playing');
+      // D1b: a deferral is not a failure — the caller converts it to
+      // an uncached empty instead of a cached loaded-empty.
+      throw _EpgFeedDeferred(cacheKey);
     }
     // Build #26: a concurrent caller may have started the download while
     // this one read the persisted file — share it instead of starting a
@@ -1156,8 +1276,8 @@ class IptvLiveTvSupport implements LiveTvSupport {
   }
 
   /// The M3U connection's user-supplied EPG URL, as a parsed guide.
-  Future<_CachedXmltvGuide> _xmltvGuide(String epgUrl, {Duration? ttl}) {
-    return _xmltvGuideForKey(epgUrl, (abortTrigger) => _m3uFeedStream(epgUrl, abortTrigger), ttl);
+  Future<_CachedXmltvGuide> _xmltvGuide(String epgUrl, {Duration? ttl, bool force = false}) {
+    return _xmltvGuideForKey(epgUrl, (abortTrigger) => _m3uFeedStream(epgUrl, abortTrigger), ttl, force: force);
   }
 
   /// The M3U feed as a byte stream (build #26): the old bare `http.get`
@@ -1183,11 +1303,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// The Xtream login's `xmltv.php` feed, as a parsed guide. One guide per
   /// connection (the support is per-client), fetched lazily on the first
   /// channel that needs it and shared by the rest of the guide.
-  Future<_CachedXmltvGuide> _xtreamXmltvGuide({Duration? ttl}) {
+  Future<_CachedXmltvGuide> _xtreamXmltvGuide({Duration? ttl, bool force = false}) {
     return _xmltvGuideForKey(
       'xtream:${_client.connection.id}',
       (abortTrigger) => _client.xtreamApi.getXmltvStream(abortTrigger: abortTrigger),
       ttl,
+      force: force,
     );
   }
 
@@ -1195,8 +1316,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// (loaded / failed) is stale and re-fetch visible rows.
   int get epgVersion => _epgVersion;
 
-  /// Wall-clock time of the last successful EPG fetch on this client, or
-  /// null before the first one. The settings screen reads the stored pref
+  /// Wall-clock time of the last EPG fetch that stored at least one
+  /// programme on this client (1.1.2 D9), or null before the first one.
+  /// The settings screen reads the stored pref
   /// ([SettingsService.iptvEpgLastUpdated]) instead; this is for tests and
   /// diagnostics.
   DateTime? get lastEpgUpdatedAt => _lastEpgUpdatedAt;
@@ -1265,6 +1387,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // A clear is an explicit retry: forget a failed feed too, so the next
     // guide visit downloads instead of hitting the negative cache.
     _xmltvFailedAt.clear();
+    // A clear is a fresh start: forget playback-gate deferrals (D1b)
+    // too — the guide re-fetches visible rows from scratch.
+    _deferredEpgChannels.clear();
     // Best-effort and fire-and-forget: the in-memory caches are already
     // empty and the guide is cleared, so don't gate the settings action
     // (or the guide) on the disk delete — it completes in the background.
@@ -1292,6 +1417,21 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final stamp = now.toIso8601String();
     SettingsService.getInstance().then((settings) {
       settings.write(SettingsService.iptvEpgLastUpdated, stamp);
+    });
+  }
+
+  /// Record the last EPG fetch ATTEMPT for the settings screen (1.1.2
+  /// D9): an attempt happened even when the fetch failed or returned
+  /// empty, so this stamp — unlike "Last updated" — certifies activity,
+  /// not data. Throttled to one write per minute, like
+  /// [_noteEpgUpdated]. Written before the fetch runs (see
+  /// [fetchEpgForChannel]).
+  void _noteEpgAttempt(DateTime now) {
+    if (_lastEpgAttemptPrefWrite != null && now.difference(_lastEpgAttemptPrefWrite!).inSeconds < 60) return;
+    _lastEpgAttemptPrefWrite = now;
+    final stamp = now.toIso8601String();
+    SettingsService.getInstance().then((settings) {
+      settings.write(SettingsService.iptvEpgLastAttempt, stamp);
     });
   }
 

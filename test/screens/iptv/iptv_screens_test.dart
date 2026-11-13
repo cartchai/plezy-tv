@@ -851,6 +851,10 @@ void main() {
     await tester.scrollUntilVisible(find.text(t.iptv.epgLastUpdated), 200);
     expect(find.text(t.iptv.epgLastUpdated), findsOneWidget);
     expect(find.text(t.iptv.epgNeverUpdated), findsOneWidget);
+    // 1.1.2 D9: the "Last attempt" line sits under "Last updated" and
+    // reads "Never" before the first attempt — as one combined line, so
+    // the bare "Never" finder above still matches only the data line.
+    expect(find.text(t.iptv.epgLastAttemptLine(stamp: t.iptv.epgNeverUpdated)), findsOneWidget);
 
     // Update now + Clear guide announce themselves.
     await tester.ensureVisible(find.text(t.iptv.epgUpdateNow));
@@ -988,6 +992,11 @@ void main() {
       expect(find.text('Version 1.1.1-2.25.0'), findsOneWidget);
       final newest111 = tester.getTopLeft(find.text('Version 1.1.1-2.25.0')).dy;
       expect(newest111, lessThan(newest110));
+      // EPG reliability fix (v1.1.2): same guard for the new version —
+      // it must be present and sit above 1.1.1.
+      expect(find.text('Version 1.1.2-2.25.0'), findsOneWidget);
+      final newest112 = tester.getTopLeft(find.text('Version 1.1.2-2.25.0')).dy;
+      expect(newest112, lessThan(newest111));
     });
   });
 }

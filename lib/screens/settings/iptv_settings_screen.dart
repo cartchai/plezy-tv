@@ -788,9 +788,13 @@ class _BackgroundSyncTileState extends State<_BackgroundSyncTile> {
   }
 }
 
-/// "Last updated" status line for the EPG section: the stored timestamp of
-/// the last successful EPG fetch across all IPTV clients, or "Never" before
-/// the first load. Not tappable — it is a status, not an action.
+/// "Last updated" status lines for the EPG section (1.1.2 D9): the stored
+/// timestamp of the last EPG fetch that stored a programme across all IPTV
+/// clients ("Last updated", or "Never" before the first load), plus the
+/// stored timestamp of the last fetch ATTEMPT ("Last attempt: ...") — an
+/// attempt that failed or returned empty still stamps the attempt line,
+/// so the two can never be confused again. Not tappable — it is a status,
+/// not an action.
 class _EpgLastUpdatedTile extends StatelessWidget {
   const _EpgLastUpdatedTile();
 
@@ -807,25 +811,47 @@ class _EpgLastUpdatedTile extends StatelessWidget {
             ? t.iptv.epgNeverUpdated
             : '${DateFormat.MMMd(LocaleSettings.currentLocale.intlLocaleName).format(updated)} · '
                   '${formatClockTime(updated, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context))}';
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            crossAxisAlignment: .start,
-            children: [
-              AppIcon(Symbols.update_rounded, fill: 1),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: .start,
-                  children: [
-                    Text(t.iptv.epgLastUpdated, style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 2),
-                    Text(text, style: theme.textTheme.bodyMedium),
-                  ],
-                ),
-              ),
-            ],
+        // 1.1.2 D9: the attempt line is its own listenable — a fetch that
+        // failed or returned empty stamps the attempt without touching
+        // "Last updated" above. The full line is one Text widget
+        // ("Last attempt: ...") so the bare "Never" finder in the
+        // settings test still matches only the data line above.
+        return ValueListenableBuilder<String>(
+          valueListenable: settings.SettingsService.instance.listenable(
+            settings.SettingsService.iptvEpgLastAttempt,
           ),
+          builder: (context, attemptStamp, _) {
+            final attempted = DateTime.tryParse(attemptStamp);
+            final attemptText = attempted == null
+                ? t.iptv.epgNeverUpdated
+                : '${DateFormat.MMMd(LocaleSettings.currentLocale.intlLocaleName).format(attempted)} · '
+                      '${formatClockTime(attempted, is24Hour: MediaQuery.alwaysUse24HourFormatOf(context))}';
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                crossAxisAlignment: .start,
+                children: [
+                  AppIcon(Symbols.update_rounded, fill: 1),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: .start,
+                      children: [
+                        Text(t.iptv.epgLastUpdated, style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 2),
+                        Text(text, style: theme.textTheme.bodyMedium),
+                        const SizedBox(height: 4),
+                        Text(
+                          t.iptv.epgLastAttemptLine(stamp: attemptText),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
