@@ -434,7 +434,26 @@ class IptvEpgSourcesStore {
 /// Why a channel has no EPG (the "Channels without guide" grouping, and
 /// the EPG details "why" line). A channel with no match says *why* —
 /// never a bare empty row.
-enum IptvEpgNoGuideReason { noSource, noMatch, sourceFailed, notLoaded }
+/// Why a channel has no EPG (the "Channels without guide" grouping, and
+/// the EPG details "why" line). A channel with no match says *why* —
+/// never a bare empty row.
+enum IptvEpgNoGuideReason {
+  noSource,
+  noMatch,
+  sourceFailed,
+  notLoaded,
+
+  /// The name names more than one feed channel (1.2.5 Fix 7): never a
+  /// guess — the user Assigns one manually.
+  ambiguous,
+
+  /// The name names only a feed channel from another country (Fix 7).
+  foreign,
+
+  /// A feed id was identified (by id or by name) but it has no
+  /// programmes in the window (Fix 7).
+  matchedButNoPrograms,
+}
 
 /// One channel's EPG assignment state, for the guide long-press "EPG
 /// details" view: which source serves it, which XMLTV id matched, how it
@@ -490,11 +509,17 @@ class IptvEpgFeedChannel {
   final String xmltvId;
   final int programCount;
 
+  /// The feed's display names for this id (1.2.5 Fix 2): the human
+  /// names the picker shows and searches. Empty when the feed lists
+  /// no `<channel>` element for the id.
+  final List<String> displayNames;
+
   const IptvEpgFeedChannel({
     required this.sourceId,
     required this.sourceName,
     required this.xmltvId,
     required this.programCount,
+    this.displayNames = const [],
   });
 }
 
@@ -504,10 +529,17 @@ class IptvChannelWithoutGuide {
   final String channelName;
   final IptvEpgNoGuideReason reason;
 
+  /// The feed ids the name tier could not choose between (1.2.5 Fix 7):
+  /// the candidates for an `ambiguous` or `foreign` row — or the
+  /// identified-but-empty ids for a `matchedButNoPrograms` row — so the
+  /// user can Assign one manually. Empty for every other reason.
+  final List<String> candidates;
+
   const IptvChannelWithoutGuide({
     required this.channelKey,
     required this.channelName,
     required this.reason,
+    this.candidates = const [],
   });
 }
 
@@ -517,11 +549,104 @@ class IptvChannelWithoutGuide {
 /// guide the downloaded feeds can serve (by id, name, or manual
 /// assignment) — channels whose guide comes only from the provider's
 /// per-channel lookup are counted once browsed.
+/// Per-tier match counts for one Reload (1.2.5 Fix 1): how the channels
+/// that got a guide got it, and — for the ones that did not — why.
+/// The dialog and the Logs export print these, so a feed that loads
+/// but matches nothing says which tier failed instead of only counting.
+class IptvEpgMatchTiers {
+  final int manual;
+  final int tvgId;
+  final int name;
+  final int nameLoose;
+  final int ambiguous;
+  final int foreign;
+  final int noTvgId;
+  final int tvgIdNotInFeed;
+  final int matchedButNoProgrammes;
+  final int none;
+
+  const IptvEpgMatchTiers({
+    this.manual = 0,
+    this.tvgId = 0,
+    this.name = 0,
+    this.nameLoose = 0,
+    this.ambiguous = 0,
+    this.foreign = 0,
+    this.noTvgId = 0,
+    this.tvgIdNotInFeed = 0,
+    this.matchedButNoProgrammes = 0,
+    this.none = 0,
+  });
+
+  const IptvEpgMatchTiers.empty()
+      : manual = 0,
+        tvgId = 0,
+        name = 0,
+        nameLoose = 0,
+        ambiguous = 0,
+        foreign = 0,
+        noTvgId = 0,
+        tvgIdNotInFeed = 0,
+        matchedButNoProgrammes = 0,
+        none = 0;
+
+  /// Channels that got a guide, by any tier.
+  int get matched => manual + tvgId + name + nameLoose;
+
+  /// Channels that got no guide, for any reason.
+  int get unmatched => ambiguous + foreign + noTvgId + tvgIdNotInFeed + matchedButNoProgrammes + none;
+}
+
+/// One feed channel, for the Reload report's feed sample (1.2.5 Fix 1):
+/// the raw feed id with the human names the feed lists for it, so the
+/// user can see what the feed actually calls its channels.
+class IptvEpgFeedSample {
+  final String xmltvId;
+  final List<String> displayNames;
+  final int programCount;
+
+  const IptvEpgFeedSample({
+    required this.xmltvId,
+    this.displayNames = const [],
+    this.programCount = 0,
+  });
+}
+
+/// One unmatched channel, for the Reload report's unmatched sample
+/// (1.2.5 Fix 1): the playlist name plus the ids the matcher tried.
+class IptvEpgUnmatchedSample {
+  final String channelName;
+  final String? epgChannelId;
+  final String? tvgId;
+
+  const IptvEpgUnmatchedSample({
+    required this.channelName,
+    this.epgChannelId,
+    this.tvgId,
+  });
+}
+
 class IptvReloadTvDetailsResult {
   final int channelsLoaded;
   final int withGuide;
   final int withoutGuide;
   final int feedChannelIds;
+
+  /// Per-tier match counts + no-match reasons (1.2.5 Fix 1).
+  final IptvEpgMatchTiers matchTiers;
+
+  /// Up to 5 feed channels from the first loaded feed (1.2.5 Fix 1):
+  /// what the feed actually calls its channels.
+  final List<IptvEpgFeedSample> feedSamples;
+
+  /// Up to 5 unmatched channels, in list order (1.2.5 Fix 1).
+  final List<IptvEpgUnmatchedSample> sampleUnmatched;
+
+  /// How many live channels carry a non-empty `epg_channel_id`
+  /// (1.2.5 Fix 1): when this is 0, no tvg-id tier can ever match and
+  /// the name tier is doing all the work. Null when the channel list
+  /// was not re-fetched.
+  final int? epgChannelIdCount;
 
   /// Why the channel-list re-fetch failed, when it did (1.2.3 RC1).
   /// Null when the list loaded. The report dialog names this instead of
@@ -546,6 +671,10 @@ class IptvReloadTvDetailsResult {
     this.channelListFailureKind,
     this.channelListFailureReason,
     this.feedOutcomes = const [],
+    this.matchTiers = const IptvEpgMatchTiers.empty(),
+    this.feedSamples = const [],
+    this.sampleUnmatched = const [],
+    this.epgChannelIdCount,
   });
 }
 
@@ -612,6 +741,18 @@ class IptvEpgFeedOutcome {
   /// [epgFeedErrorReason].
   final String? reason;
 
+  /// Programmes parsed before the I8 window filter (1.2.5 Fix 1).
+  /// Null when the feed never loaded.
+  final int? feedProgramsParsed;
+
+  /// Programmes retained after the window filter (1.2.5 Fix 1) — the
+  /// guide's own size. Null when the feed never loaded.
+  final int? feedProgramsRetained;
+
+  /// Distinct `<channel>` ids in the feed (1.2.5 Fix 1). Null when the
+  /// feed never loaded.
+  final int? feedChannelsParsed;
+
   const IptvEpgFeedOutcome({
     required this.sourceId,
     required this.sourceName,
@@ -619,6 +760,9 @@ class IptvEpgFeedOutcome {
     this.feedChannels = 0,
     this.matchedChannels,
     this.reason,
+    this.feedProgramsParsed,
+    this.feedProgramsRetained,
+    this.feedChannelsParsed,
   });
 }
 
@@ -658,6 +802,12 @@ String epgFeedOutcomeLine(IptvEpgFeedOutcome outcome, int channelsTotal) {
     ),
     IptvEpgFeedOutcomeKind.loaded when outcome.feedChannels == 0 => t.iptv.epgFeedOutcomeLoadedEmpty(source: outcome.sourceName),
     IptvEpgFeedOutcomeKind.loaded => t.iptv.epgFeedOutcomeLoadedFeedOnly(source: outcome.sourceName, feedChannels: outcome.feedChannels),
+    IptvEpgFeedOutcomeKind.loadedNoMatch when outcome.feedChannelsParsed == 0 =>
+      t.iptv.epgFeedOutcomeLoadedNoChannels(source: outcome.sourceName),
+    IptvEpgFeedOutcomeKind.loadedNoMatch when outcome.feedProgramsRetained == 0 && (outcome.feedProgramsParsed ?? 0) > 0 =>
+      t.iptv.epgFeedOutcomeLoadedProgramsOutsideWindow(source: outcome.sourceName, parsed: outcome.feedProgramsParsed!),
+    IptvEpgFeedOutcomeKind.loadedNoMatch when outcome.feedProgramsRetained == 0 =>
+      t.iptv.epgFeedOutcomeLoadedNoPrograms(source: outcome.sourceName),
     IptvEpgFeedOutcomeKind.loadedNoMatch => t.iptv.epgFeedOutcomeLoadedNoMatch(source: outcome.sourceName, channels: channelsTotal),
     IptvEpgFeedOutcomeKind.denied => t.iptv.epgFeedOutcomeDenied(source: outcome.sourceName),
     IptvEpgFeedOutcomeKind.notAnswering => t.iptv.epgFeedOutcomeNotAnswering(source: outcome.sourceName),

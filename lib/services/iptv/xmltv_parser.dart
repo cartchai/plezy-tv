@@ -31,6 +31,31 @@ class XmltvProgram {
   });
 }
 
+/// What one XMLTV parse saw, beyond the retained programmes (1.2.5
+/// diagnostics + matching): the feed's `<channel>` ids with their
+/// display names, the programme count before the I8 window filter,
+/// and every programme channel id seen (including ids whose
+/// programmes all fell outside the window — the loose-name fallback
+/// needs to know such an id exists even though it kept nothing).
+class XmltvParseStats {
+  /// Programme elements that parsed (valid channel + times), before
+  /// the window filter.
+  int programsSeen = 0;
+
+  /// Programmes actually yielded (after the window filter).
+  int programsYielded = 0;
+
+  /// Distinct `<channel>` ids in the feed.
+  final Set<String> channelIds = {};
+
+  /// Feed channel id -> its display names (merged when one id is
+  /// listed in several `<channel>` elements).
+  final Map<String, List<String>> channelDisplayNames = {};
+
+  /// Every programme `channel` attribute seen, pre-filter.
+  final Set<String> programChannelIds = {};
+}
+
 /// Stream-parse an XMLTV document from a byte stream, yielding one
 /// [XmltvProgram] per `<programme>` element as it closes.
 ///
@@ -59,6 +84,7 @@ Stream<XmltvProgram> parseXmltvStream(
   Stream<List<int>> bytes, {
   int? windowFromEpoch,
   int? windowToEpoch,
+  XmltvParseStats? stats,
 }) async* {
   // State for the programme currently being assembled.
   var inProgramme = false;
@@ -70,14 +96,28 @@ Stream<XmltvProgram> parseXmltvStream(
   // The child element whose text is being accumulated ('title' / 'desc').
   String? currentChild;
   var sawElement = false;
+  // State for the `<channel>` element currently being read (1.2.5:
+  // the feed's display names never entered the app before).
+  var inChannel = false;
+  var feedChannelId = '';
+  final feedChannelNames = <String>[];
+  // The `<display-name>` text currently being accumulated, null when
+  // not inside one.
+  StringBuffer? currentDisplayName;
 
   XmltvProgram? tryBuild() {
     if (channelId.isEmpty || startEpoch == null || stopEpoch == null || stopEpoch! <= startEpoch!) return null;
+    // 1.2.5: count before the window filter, and record the channel
+    // id even when the filter drops it — a feed id with no retained
+    // programmes is still an id the loose fallback can fall back from.
+    stats?.programsSeen++;
+    stats?.programChannelIds.add(channelId);
     // I8 (1.2.2): parse-time window filter — drop programmes that cannot
     // overlap the widest guide window instead of retaining them and
     // filtering per channel at read time.
     if (windowFromEpoch != null && stopEpoch! <= windowFromEpoch) return null;
     if (windowToEpoch != null && startEpoch! >= windowToEpoch) return null;
+    stats?.programsYielded++;
     return XmltvProgram(
       channelId: channelId,
       startEpoch: startEpoch!,
@@ -97,12 +137,42 @@ Stream<XmltvProgram> parseXmltvStream(
     currentChild = null;
   }
 
+  void recordChannel() {
+    if (feedChannelId.isEmpty) return;
+    final s = stats;
+    if (s == null) return;
+    s.channelIds.add(feedChannelId);
+    if (feedChannelNames.isNotEmpty) {
+      (s.channelDisplayNames[feedChannelId] ??= []).addAll(feedChannelNames);
+    }
+  }
+
+  void resetChannel() {
+    inChannel = false;
+    feedChannelId = '';
+    feedChannelNames.clear();
+    currentDisplayName = null;
+  }
+
   final events = bytes.transform(utf8.decoder).toXmlEvents(validateNesting: true);
   await for (final batch in events) {
     for (final event in batch) {
       if (event is XmlStartElementEvent) {
         sawElement = true;
-        if (event.name == 'programme') {
+        if (event.name == 'channel' && !inProgramme) {
+          // A nested <channel> resets the outer one (malformed input).
+          resetChannel();
+          inChannel = true;
+          for (final attribute in event.attributes) {
+            if (attribute.name == 'id') feedChannelId = attribute.value.trim();
+          }
+          if (event.isSelfClosing) {
+            recordChannel();
+            resetChannel();
+          }
+        } else if (event.name == 'display-name' && inChannel && currentDisplayName == null) {
+          if (!event.isSelfClosing) currentDisplayName = StringBuffer();
+        } else if (event.name == 'programme') {
           // A nested <programme> resets the outer one (malformed input);
           // the outer end event then finds empty state and yields nothing.
           resetProgramme();
@@ -133,17 +203,26 @@ Stream<XmltvProgram> parseXmltvStream(
         } else if (currentChild == 'desc') {
           desc.write(event.value);
         }
+        currentDisplayName?.write(event.value);
       } else if (event is XmlCDATAEvent) {
         if (currentChild == 'title') {
           title.write(event.value);
         } else if (currentChild == 'desc') {
           desc.write(event.value);
         }
+        currentDisplayName?.write(event.value);
       } else if (event is XmlEndElementEvent) {
         if (event.name == 'programme' && inProgramme) {
           final program = tryBuild();
           resetProgramme();
           if (program != null) yield program;
+        } else if (event.name == 'display-name' && currentDisplayName != null) {
+          final name = currentDisplayName.toString().trim();
+          if (name.isNotEmpty) feedChannelNames.add(name);
+          currentDisplayName = null;
+        } else if (event.name == 'channel' && inChannel) {
+          recordChannel();
+          resetChannel();
         } else if (event.name == currentChild) {
           currentChild = null;
         }
@@ -157,9 +236,25 @@ Stream<XmltvProgram> parseXmltvStream(
 
 /// Parse an XMLTV document into programmes. Malformed entries are skipped,
 /// never fatal: a provider file with one bad `<programme>` still yields the
-/// rest. Throws only when the document itself does not parse.
-List<XmltvProgram> parseXmltv(String body) {
+/// rest. Throws only when the document itself does not parse. The DOM
+/// path has no window filter, so [stats] sees every programme parsed.
+List<XmltvProgram> parseXmltv(String body, {XmltvParseStats? stats}) {
   final document = XmlDocument.parse(body);
+  if (stats != null) {
+    for (final channel in document.findAllElements('channel')) {
+      final id = channel.getAttribute('id')?.trim() ?? '';
+      if (id.isEmpty) continue;
+      stats.channelIds.add(id);
+      final names = channel
+          .findElements('display-name')
+          .map((e) => e.innerText.trim())
+          .where((n) => n.isNotEmpty)
+          .toList(growable: false);
+      if (names.isNotEmpty) {
+        (stats.channelDisplayNames[id] ??= []).addAll(names);
+      }
+    }
+  }
   final programs = <XmltvProgram>[];
   for (final element in document.findAllElements('programme')) {
     try {
@@ -167,6 +262,9 @@ List<XmltvProgram> parseXmltv(String body) {
       final start = _parseXmltvTime(element.getAttribute('start'));
       final stop = _parseXmltvTime(element.getAttribute('stop'));
       if (channelId.isEmpty || start == null || stop == null || stop <= start) continue;
+      stats?.programsSeen++;
+      stats?.programsYielded++;
+      stats?.programChannelIds.add(channelId);
       programs.add(
         XmltvProgram(
           channelId: channelId,

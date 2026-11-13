@@ -29,9 +29,11 @@ const _testPassword = 'pa' 'ss';
 /// No streams are ever opened.
 ///
 /// PROVING CASE (the tester will use it): the unmatchable channel —
-/// feed channel id "beIN Sports 1" vs tvg-id "beIN.Sports.1" vs name
+/// feed channel id "beIN 1" vs tvg-id "beIN.Sports.1" vs name
 /// "beIN SPORTS 1 HD". No automatic match can reach it; only a manual
-/// assignment can.
+/// assignment can. (1.2.5: the old feed id "beIN Sports 1" now matches
+/// by name — both sides normalize to "beinsports1" — so the proving
+/// case moved to an id the name tier cannot reach.)
 
 XtreamConnection _trexConnection() => XtreamConnection(
   id: 'trex',
@@ -162,13 +164,14 @@ void main() {
 
   group('Manual assignment — the beIN proving case (§3.2, §4)', () {
     test('no automatic match reaches beIN Sports 1', () async {
-      // Feed id "beIN Sports 1" vs tvg-id "beIN.Sports.1" vs name
-      // "beIN SPORTS 1 HD": byId misses on the dot, byName misses
-      // (beinsports1hd vs beinsports1). The guide shows hour blocks.
+      // Feed id "beIN 1" vs tvg-id "beIN.Sports.1" vs name
+      // "beIN SPORTS 1 HD": exact and folded tvg-id miss, the name
+      // tier misses ("beinsports1" vs "bein1"), numeric and loose
+      // miss. The guide shows hour blocks.
       await loadChannels();
       final now = DateTime.now();
       api.xmltvBody = _feedWith(
-        channelId: 'beIN Sports 1',
+        channelId: 'beIN 1',
         title: 'beIN Show',
         start: now,
         end: now.add(const Duration(hours: 1)),
@@ -182,7 +185,7 @@ void main() {
       await loadChannels();
       final now = DateTime.now();
       api.xmltvBody = _feedWith(
-        channelId: 'beIN Sports 1',
+        channelId: 'beIN 1',
         title: 'beIN Show',
         start: now,
         end: now.add(const Duration(hours: 1)),
@@ -191,7 +194,7 @@ void main() {
       // The first fetch caches the empty result — assign, then bust the
       // cache (the way Update now does) so the mapping is consulted.
       expect(await support.fetchEpgForChannel('200', from: window.from, to: window.to), isEmpty);
-      await support.assignEpg('200', xmltvId: 'beIN Sports 1', sourceId: IptvEpgSourceConfig.providerId);
+      await support.assignEpg('200', xmltvId: 'beIN 1', sourceId: IptvEpgSourceConfig.providerId);
       await support.refreshEpgCache();
       final assigned = await support.fetchEpgForChannel('200', from: window.from, to: window.to);
       expect(assigned.map((p) => p.title), ['beIN Show']);
@@ -213,7 +216,7 @@ void main() {
       await loadChannels();
       final now = DateTime.now();
       api.xmltvBody = _feedWith(
-        channelId: 'beIN Sports 1',
+        channelId: 'beIN 1',
         title: 'beIN Show',
         start: now,
         end: now.add(const Duration(hours: 1)),
@@ -227,14 +230,14 @@ void main() {
       expect(unmatched.noGuideReason, IptvEpgNoGuideReason.noMatch);
       expect(unmatched.matchedXmltvId, isNull);
 
-      await support.assignEpg('200', xmltvId: 'beIN Sports 1', sourceId: IptvEpgSourceConfig.providerId);
+      await support.assignEpg('200', xmltvId: 'beIN 1', sourceId: IptvEpgSourceConfig.providerId);
       await support.refreshEpgCache();
       expect(await support.fetchEpgForChannel('200', from: window.from, to: window.to), isNotEmpty);
       final matched = await support.channelEpgDetail('200', from: window.from, to: window.to);
       expect(matched.hasGuide, isTrue);
       expect(matched.programCount, 1);
       expect(matched.sourceId, IptvEpgSourceConfig.providerId);
-      expect(matched.matchedXmltvId, 'beIN Sports 1');
+      expect(matched.matchedXmltvId, 'beIN 1');
       expect(matched.matchMethod, 'manual');
       expect(matched.noGuideReason, isNull);
       expect(matched.lastFetch, isNotNull);

@@ -161,12 +161,15 @@ void main() {
 
   group('normalizeEpgChannelName', () {
     test('strips region prefixes and punctuation, lowercases', () {
-      expect(normalizeEpgChannelName('US| COMEDY CENTRAL HD'), 'comedycentralhd');
-      expect(normalizeEpgChannelName('Comedy Central HD'), 'comedycentralhd');
+      // 1.2.5: quality markers (HD/FHD/4K/...) are dropped as whole
+      // words, so "COMEDY CENTRAL HD" and "COMEDY CENTRAL" key the
+      // same — and "A&E HD" keys as "aande", not "aehd".
+      expect(normalizeEpgChannelName('US| COMEDY CENTRAL HD'), 'comedycentral');
+      expect(normalizeEpgChannelName('Comedy Central HD'), 'comedycentral');
       expect(normalizeEpgChannelName('|EN| TOP SERIES'), 'topseries');
-      expect(normalizeEpgChannelName('UK-NOWTV| COMEDY CENTRAL HD'), 'comedycentralhd');
+      expect(normalizeEpgChannelName('UK-NOWTV| COMEDY CENTRAL HD'), 'comedycentral');
       expect(normalizeEpgChannelName('24/7 ACTION'), '247action');
-      expect(normalizeEpgChannelName('A&E HD'), 'aehd');
+      expect(normalizeEpgChannelName('A&E HD'), 'aande');
     });
   });
 

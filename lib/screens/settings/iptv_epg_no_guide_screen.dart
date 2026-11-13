@@ -49,11 +49,17 @@ class _IptvEpgNoGuideScreenState extends State<IptvEpgNoGuideScreen> {
       IptvEpgNoGuideReason.noMatch => t.iptv.epgNoGuideReasonNoMatch,
       IptvEpgNoGuideReason.sourceFailed => t.iptv.epgNoGuideReasonSourceFailed,
       IptvEpgNoGuideReason.notLoaded => t.iptv.epgNoGuideReasonNotLoaded,
+      IptvEpgNoGuideReason.ambiguous => t.iptv.epgNoGuideReasonAmbiguous,
+      IptvEpgNoGuideReason.foreign => t.iptv.epgNoGuideReasonForeign,
+      IptvEpgNoGuideReason.matchedButNoPrograms => t.iptv.epgNoGuideReasonMatchedButNoPrograms,
     };
   }
 
   static const _reasonOrder = [
     IptvEpgNoGuideReason.noSource,
+    IptvEpgNoGuideReason.ambiguous,
+    IptvEpgNoGuideReason.foreign,
+    IptvEpgNoGuideReason.matchedButNoPrograms,
     IptvEpgNoGuideReason.noMatch,
     IptvEpgNoGuideReason.sourceFailed,
     IptvEpgNoGuideReason.notLoaded,
@@ -122,6 +128,11 @@ class _IptvEpgNoGuideScreenState extends State<IptvEpgNoGuideScreen> {
                     return ListTile(
                       leading: const AppIcon(Symbols.live_tv_rounded),
                       title: Text(channel.channelName),
+                      subtitle: channel.candidates.isEmpty
+                          ? null
+                          : Text(
+                              t.iptv.epgNoGuideCandidates(candidates: channel.candidates.take(3).join(', ')),
+                            ),
                       trailing: TextButton(
                         onPressed: () => unawaited(_assign(channel)),
                         child: Text(t.iptv.epgAssignTitle),

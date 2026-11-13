@@ -3926,6 +3926,12 @@ class Translations$about$en {
 		'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 		'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
 	];
+	List<String> get changelog2291 => [
+		'The guide now matches channels by their display names as well as their channel IDs, and ignores quality tags like HD and country prefixes like US - when comparing names',
+		'When a name matches more than one guide channel, the app no longer guesses — it says so, and you can pick the right one with Assign EPG',
+		'Reload TV details now reports how each channel matched and why the rest didn\'t, with a sample of the feed\'s channels and of the channels still without a guide',
+		'A feed that loads with no channels, or with no programmes in the loaded window, now says so plainly instead of just reporting no matches',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -6961,6 +6967,24 @@ class Translations$iptv$en {
 	/// en: '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide'
 	String epgReloadTvDetailsResult({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide';
 
+	/// en: 'Match breakdown — manual: ${manual}, tvg-id: ${tvgId}, name: ${name}, loose name: ${loose}'
+	String epgReloadMatchBreakdown({required Object manual, required Object tvgId, required Object name, required Object loose}) => 'Match breakdown — manual: ${manual}, tvg-id: ${tvgId}, name: ${name}, loose name: ${loose}';
+
+	/// en: 'No match — ambiguous: ${ambiguous}, foreign: ${foreign}, no tvg-id: ${noTvgId}, tvg-id not in feed: ${tvgIdNotInFeed}, matched but no programmes: ${matchedButNoProgrammes}'
+	String epgReloadUnmatchedBreakdown({required Object ambiguous, required Object foreign, required Object noTvgId, required Object tvgIdNotInFeed, required Object matchedButNoProgrammes}) => 'No match — ambiguous: ${ambiguous}, foreign: ${foreign}, no tvg-id: ${noTvgId}, tvg-id not in feed: ${tvgIdNotInFeed}, matched but no programmes: ${matchedButNoProgrammes}';
+
+	/// en: 'Feed sample: ${samples}'
+	String epgReloadFeedSample({required Object samples}) => 'Feed sample: ${samples}';
+
+	/// en: 'Unmatched sample: ${samples}'
+	String epgReloadUnmatchedSample({required Object samples}) => 'Unmatched sample: ${samples}';
+
+	/// en: '${withId} of ${total} live channels carry a non-empty epg_channel_id'
+	String epgReloadEpgChannelIds({required Object withId, required Object total}) => '${withId} of ${total} live channels carry a non-empty epg_channel_id';
+
+	/// en: '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept'
+	String epgReloadFeedStats({required Object source, required Object channels, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept';
+
 	/// en: 'Channel list could not be re-fetched — ${reason}'
 	String epgReloadChannelListFailed({required Object reason}) => 'Channel list could not be re-fetched — ${reason}';
 
@@ -6978,6 +7002,15 @@ class Translations$iptv$en {
 
 	/// en: '${source}: loaded, but the feed is empty'
 	String epgFeedOutcomeLoadedEmpty({required Object source}) => '${source}: loaded, but the feed is empty';
+
+	/// en: '${source}: loaded, but the feed contains no channels'
+	String epgFeedOutcomeLoadedNoChannels({required Object source}) => '${source}: loaded, but the feed contains no channels';
+
+	/// en: '${source}: loaded, but the feed contains no programmes'
+	String epgFeedOutcomeLoadedNoPrograms({required Object source}) => '${source}: loaded, but the feed contains no programmes';
+
+	/// en: '${source}: loaded, but all ${parsed} programmes fall outside the loaded window'
+	String epgFeedOutcomeLoadedProgramsOutsideWindow({required Object source, required Object parsed}) => '${source}: loaded, but all ${parsed} programmes fall outside the loaded window';
 
 	/// en: '${source}: the panel denied access (HTTP 403)'
 	String epgFeedOutcomeDenied({required Object source}) => '${source}: the panel denied access (HTTP 403)';
@@ -7026,6 +7059,18 @@ class Translations$iptv$en {
 
 	/// en: 'Guide not loaded yet'
 	String get epgNoGuideReasonNotLoaded => 'Guide not loaded yet';
+
+	/// en: 'Name matches more than one guide channel'
+	String get epgNoGuideReasonAmbiguous => 'Name matches more than one guide channel';
+
+	/// en: 'Name matches only a guide channel from another country'
+	String get epgNoGuideReasonForeign => 'Name matches only a guide channel from another country';
+
+	/// en: 'Matched a guide channel, but it has no programmes in this window'
+	String get epgNoGuideReasonMatchedButNoPrograms => 'Matched a guide channel, but it has no programmes in this window';
+
+	/// en: 'Candidates: ${candidates}'
+	String epgNoGuideCandidates({required Object candidates}) => 'Candidates: ${candidates}';
 
 	/// en: 'Assign EPG'
 	String get epgAssignTitle => 'Assign EPG';
@@ -7080,6 +7125,9 @@ class Translations$iptv$en {
 
 	/// en: 'Assigned by hand'
 	String get epgMatchMethodManual => 'Assigned by hand';
+
+	/// en: 'Loose name match'
+	String get epgMatchMethodNameLoose => 'Loose name match';
 
 	/// en: 'Update time'
 	String get epgUpdateTime => 'Update time';
@@ -10858,6 +10906,10 @@ extension on Translations {
 			'about.changelog2290.1' => 'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
 			'about.changelog2290.2' => 'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 			'about.changelog2290.3' => 'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
+			'about.changelog2291.0' => 'The guide now matches channels by their display names as well as their channel IDs, and ignores quality tags like HD and country prefixes like US - when comparing names',
+			'about.changelog2291.1' => 'When a name matches more than one guide channel, the app no longer guesses — it says so, and you can pick the right one with Assign EPG',
+			'about.changelog2291.2' => 'Reload TV details now reports how each channel matched and why the rest didn\'t, with a sample of the feed\'s channels and of the channels still without a guide',
+			'about.changelog2291.3' => 'A feed that loads with no channels, or with no programmes in the loaded window, now says so plainly instead of just reporting no matches',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10927,12 +10979,12 @@ extension on Translations {
 			'explore.rows.upcomingShows' => 'Upcoming Shows',
 			'explore.status.airing' => 'Airing',
 			'explore.status.ended' => 'Ended',
+			_ => null,
+		} ?? switch (path) {
 			'explore.status.canceled' => 'Canceled',
 			'explore.status.upcoming' => 'Upcoming',
 			'explore.episodeCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
 			'explore.cast' => 'Cast',
-			_ => null,
-		} ?? switch (path) {
 			'explore.characters' => 'Characters',
 			'explore.addToWatchlist' => 'Add to Watchlist',
 			'explore.removeFromWatchlist' => 'Remove from Watchlist',
@@ -11441,12 +11493,12 @@ extension on Translations {
 			'downloads.selectVersion' => 'Select Version',
 			'downloads.allEpisodes' => 'All episodes',
 			'downloads.unwatchedOnly' => 'Unwatched only',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Next ${count} unwatched',
 			'downloads.customAmount' => 'Custom amount...',
 			'downloads.includeSpecials' => 'Include Specials',
 			'downloads.howManyEpisodes' => 'How many episodes?',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.invalidEpisodeCount' => 'Enter a valid episode count.',
 			'downloads.keepSynced' => 'Keep synced',
 			'downloads.downloadOnce' => 'Download once',
@@ -11955,12 +12007,12 @@ extension on Translations {
 			'deepLinks.invalid' => 'This PlezTV link isn\'t valid.',
 			'deepLinks.profileNotFound' => ({required Object profile}) => 'No profile matches "${profile}".',
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',
+			_ => null,
+		} ?? switch (path) {
 			'deepLinks.notFound' => 'Couldn\'t find this title in your libraries.',
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
 			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',
 			'deepLinks.channelNotFound' => ({required Object channel}) => 'Couldn\'t find channel "${channel}".',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.showLink' => 'Show link',
 			'deepLinks.showProfileLink' => 'Show profile link',
 			'deepLinks.dialogTitle' => 'Link',
@@ -12076,12 +12128,21 @@ extension on Translations {
 			'iptv.epgReloadTvDetails' => 'Reload TV details',
 			'iptv.epgReloadTvDetailsDescription' => 'Re-fetch the channel list and the guide, and report what loaded',
 			'iptv.epgReloadTvDetailsResult' => ({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide',
+			'iptv.epgReloadMatchBreakdown' => ({required Object manual, required Object tvgId, required Object name, required Object loose}) => 'Match breakdown — manual: ${manual}, tvg-id: ${tvgId}, name: ${name}, loose name: ${loose}',
+			'iptv.epgReloadUnmatchedBreakdown' => ({required Object ambiguous, required Object foreign, required Object noTvgId, required Object tvgIdNotInFeed, required Object matchedButNoProgrammes}) => 'No match — ambiguous: ${ambiguous}, foreign: ${foreign}, no tvg-id: ${noTvgId}, tvg-id not in feed: ${tvgIdNotInFeed}, matched but no programmes: ${matchedButNoProgrammes}',
+			'iptv.epgReloadFeedSample' => ({required Object samples}) => 'Feed sample: ${samples}',
+			'iptv.epgReloadUnmatchedSample' => ({required Object samples}) => 'Unmatched sample: ${samples}',
+			'iptv.epgReloadEpgChannelIds' => ({required Object withId, required Object total}) => '${withId} of ${total} live channels carry a non-empty epg_channel_id',
+			'iptv.epgReloadFeedStats' => ({required Object source, required Object channels, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept',
 			'iptv.epgReloadChannelListFailed' => ({required Object reason}) => 'Channel list could not be re-fetched — ${reason}',
 			'iptv.epgReloadUnexpectedFailure' => ({required Object reason}) => 'Reload failed unexpectedly — ${reason}',
 			'iptv.epgFeedOutcomeLoaded' => ({required Object source, required Object matched, required Object channels}) => '${source}: loaded — ${matched} of ${channels} channels have guide data',
 			'iptv.epgFeedOutcomeLoadedFeedOnly' => ({required Object source, required Object feedChannels}) => '${source}: loaded — ${feedChannels} channels in the feed',
 			'iptv.epgFeedOutcomeLoadedNoMatch' => ({required Object source, required Object channels}) => '${source}: loaded, but matched none of your ${channels} channels',
 			'iptv.epgFeedOutcomeLoadedEmpty' => ({required Object source}) => '${source}: loaded, but the feed is empty',
+			'iptv.epgFeedOutcomeLoadedNoChannels' => ({required Object source}) => '${source}: loaded, but the feed contains no channels',
+			'iptv.epgFeedOutcomeLoadedNoPrograms' => ({required Object source}) => '${source}: loaded, but the feed contains no programmes',
+			'iptv.epgFeedOutcomeLoadedProgramsOutsideWindow' => ({required Object source, required Object parsed}) => '${source}: loaded, but all ${parsed} programmes fall outside the loaded window',
 			'iptv.epgFeedOutcomeDenied' => ({required Object source}) => '${source}: the panel denied access (HTTP 403)',
 			'iptv.epgFeedOutcomeNotAnswering' => ({required Object source}) => '${source}: the panel is not answering (timed out)',
 			'iptv.epgFeedDeniedReason' => 'the panel denied access (HTTP 403)',
@@ -12098,6 +12159,10 @@ extension on Translations {
 			'iptv.epgNoGuideReasonNoMatch' => 'No matching guide',
 			'iptv.epgNoGuideReasonSourceFailed' => 'Guide source failed',
 			'iptv.epgNoGuideReasonNotLoaded' => 'Guide not loaded yet',
+			'iptv.epgNoGuideReasonAmbiguous' => 'Name matches more than one guide channel',
+			'iptv.epgNoGuideReasonForeign' => 'Name matches only a guide channel from another country',
+			'iptv.epgNoGuideReasonMatchedButNoPrograms' => 'Matched a guide channel, but it has no programmes in this window',
+			'iptv.epgNoGuideCandidates' => ({required Object candidates}) => 'Candidates: ${candidates}',
 			'iptv.epgAssignTitle' => 'Assign EPG',
 			'iptv.epgAssignSearchHint' => 'Search guide channels',
 			'iptv.epgAssignEmpty' => 'No guide channels match',
@@ -12115,6 +12180,7 @@ extension on Translations {
 			'iptv.epgMatchMethodTvgId' => 'Channel ID',
 			'iptv.epgMatchMethodName' => 'Channel name',
 			'iptv.epgMatchMethodManual' => 'Assigned by hand',
+			'iptv.epgMatchMethodNameLoose' => 'Loose name match',
 			'iptv.epgUpdateTime' => 'Update time',
 			'iptv.epgUpdateTimeDescription' => 'Time of day the guide refreshes',
 			'iptv.epgUpdateTimeOff' => 'Off',

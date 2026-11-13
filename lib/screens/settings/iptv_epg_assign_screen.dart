@@ -66,9 +66,15 @@ class _IptvEpgAssignScreenState extends State<IptvEpgAssignScreen> {
 
   List<IptvEpgFeedChannel> get _filtered {
     final entries = _entries ?? const <IptvEpgFeedChannel>[];
-    final query = _query.trim().toLowerCase();
+    final query = normalizeEpgChannelName(_query.trim());
     if (query.isEmpty) return entries;
-    return entries.where((e) => e.xmltvId.toLowerCase().contains(query)).toList(growable: false);
+    // 1.2.5 Fix 9: the search is normalized — typing "cnn" finds
+    // "CNN.us" — and it searches the display names too, not just the
+    // raw feed id.
+    return entries.where((e) {
+      if (normalizeEpgChannelName(e.xmltvId).contains(query)) return true;
+      return e.displayNames.any((d) => normalizeEpgChannelName(d).contains(query));
+    }).toList(growable: false);
   }
 
   Future<void> _assign(IptvEpgFeedChannel entry) async {
@@ -143,11 +149,16 @@ class _IptvEpgAssignScreenState extends State<IptvEpgAssignScreen> {
               itemCount: entries.length,
               itemBuilder: (context, index) {
                 final entry = entries[index];
+                // 1.2.5 Fix 2: the human name is the title; the raw
+                // feed id moves to the subtitle when one is shown.
+                final displayName = entry.displayNames.isEmpty ? null : entry.displayNames.first;
                 return ListTile(
                   leading: const AppIcon(Symbols.live_tv_rounded),
-                  title: Text(entry.xmltvId),
+                  title: Text(displayName ?? entry.xmltvId),
                   subtitle: Text(
-                    '${entry.sourceName} · ${t.iptv.epgDetailsProgramsCount(n: entry.programCount)}',
+                    displayName == null
+                        ? '${entry.sourceName} · ${t.iptv.epgDetailsProgramsCount(n: entry.programCount)}'
+                        : '${entry.xmltvId} · ${entry.sourceName} · ${t.iptv.epgDetailsProgramsCount(n: entry.programCount)}',
                   ),
                   onTap: () => unawaited(_assign(entry)),
                 );

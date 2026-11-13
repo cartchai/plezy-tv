@@ -90,21 +90,507 @@ class IptvGuideCoverage {
   int get percentWithPrograms => total == 0 ? 0 : (withPrograms * 100 / total).round();
 }
 
-/// Normalize a channel name for the EPG name-fallback match (build #17,
-/// §10): strip a leading region/category tag ("US| ", "|EN| ",
-/// "UK-NOWTV| "), lowercase, strip non-alphanumerics. "US| COMEDY
-/// CENTRAL HD" and "Comedy Central HD" both normalize to
-/// "comedycentralhd", so a feed whose channel ids are plain names matches
-/// a playlist whose names carry region prefixes — and vice versa. No
-/// fuzzy matching: the normalized strings must be exactly equal.
-@visibleForTesting
-String normalizeEpgChannelName(String name) {
-  var s = name.trim();
-  // Leading "|XX| " tag ("|EN| TOP SERIES").
+/// Quality/format markers that say nothing about which channel it is
+/// (jellyfin-tentacle `_MARKERS`): dropped as whole words when the name
+/// is reduced to a key. A marker inside a word ("HDNet") is kept.
+const _epgNameMarkers = <String>{
+  'hd',
+  'fhd',
+  'uhd',
+  'sd',
+  'hq',
+  'lq',
+  '4k',
+  '8k',
+  'hdr',
+  'hevc',
+  'h264',
+  'h265',
+  'raw',
+  '1080p',
+  '1080i',
+  '720p',
+  '576i',
+  '50fps',
+  '60fps',
+};
+
+/// Loose-key word forms (jellyfin-tentacle `_WORD_FORMS`): only the
+/// loose pass reads "sports" as "sport".
+const _epgLooseWordForms = <String, String>{'sports': 'sport'};
+
+/// Unicode folding (a hand-rolled NFKC + NFKD for the cases channel
+/// names actually carry — Dart has no built-in normalization):
+/// superscript letters/digits (so "ᴿᴬᵂ" reads as "RAW", a marker),
+/// and accented Latin letters (so "Šiauliai" meets "Siauliai").
+/// Full-width ASCII is handled by range in [_epgFoldUnicode], not
+/// this map. Values are the lowercase base form; multi-letter
+/// expansions ("æ" -> "ae", "ß" -> "ss") are kept as strings.
+const _epgUnicodeFold = <int, String>{
+  0xB2: '2',
+  0xB3: '3',
+  0xB9: '1',
+  0xC0: 'a',
+  0xC1: 'a',
+  0xC2: 'a',
+  0xC3: 'a',
+  0xC4: 'a',
+  0xC5: 'a',
+  0xC6: 'ae',
+  0xC7: 'c',
+  0xC8: 'e',
+  0xC9: 'e',
+  0xCA: 'e',
+  0xCB: 'e',
+  0xCC: 'i',
+  0xCD: 'i',
+  0xCE: 'i',
+  0xCF: 'i',
+  0xD0: 'd',
+  0xD1: 'n',
+  0xD2: 'o',
+  0xD3: 'o',
+  0xD4: 'o',
+  0xD5: 'o',
+  0xD6: 'o',
+  0xD8: 'o',
+  0xD9: 'u',
+  0xDA: 'u',
+  0xDB: 'u',
+  0xDC: 'u',
+  0xDD: 'y',
+  0xDE: 'th',
+  0xDF: 'ss',
+  0xE0: 'a',
+  0xE1: 'a',
+  0xE2: 'a',
+  0xE3: 'a',
+  0xE4: 'a',
+  0xE5: 'a',
+  0xE6: 'ae',
+  0xE7: 'c',
+  0xE8: 'e',
+  0xE9: 'e',
+  0xEA: 'e',
+  0xEB: 'e',
+  0xEC: 'i',
+  0xED: 'i',
+  0xEE: 'i',
+  0xEF: 'i',
+  0xF0: 'd',
+  0xF1: 'n',
+  0xF2: 'o',
+  0xF3: 'o',
+  0xF4: 'o',
+  0xF5: 'o',
+  0xF6: 'o',
+  0xF8: 'o',
+  0xF9: 'u',
+  0xFA: 'u',
+  0xFB: 'u',
+  0xFC: 'u',
+  0xFD: 'y',
+  0xFE: 'th',
+  0xFF: 'y',
+  0x100: 'a',
+  0x101: 'a',
+  0x102: 'a',
+  0x103: 'a',
+  0x104: 'a',
+  0x105: 'a',
+  0x106: 'c',
+  0x107: 'c',
+  0x108: 'c',
+  0x109: 'c',
+  0x10A: 'c',
+  0x10B: 'c',
+  0x10C: 'c',
+  0x10D: 'c',
+  0x10E: 'd',
+  0x10F: 'd',
+  0x110: 'd',
+  0x111: 'd',
+  0x112: 'e',
+  0x113: 'e',
+  0x114: 'e',
+  0x115: 'e',
+  0x116: 'e',
+  0x117: 'e',
+  0x118: 'e',
+  0x119: 'e',
+  0x11A: 'e',
+  0x11B: 'e',
+  0x11C: 'g',
+  0x11D: 'g',
+  0x11E: 'g',
+  0x11F: 'g',
+  0x120: 'g',
+  0x121: 'g',
+  0x122: 'g',
+  0x123: 'g',
+  0x124: 'h',
+  0x125: 'h',
+  0x126: 'h',
+  0x127: 'h',
+  0x128: 'i',
+  0x129: 'i',
+  0x12A: 'i',
+  0x12B: 'i',
+  0x12C: 'i',
+  0x12D: 'i',
+  0x12E: 'i',
+  0x12F: 'i',
+  0x130: 'i',
+  0x131: 'i',
+  0x132: 'ij',
+  0x133: 'ij',
+  0x134: 'j',
+  0x135: 'j',
+  0x136: 'k',
+  0x137: 'k',
+  0x138: 'k',
+  0x139: 'l',
+  0x13A: 'l',
+  0x13B: 'l',
+  0x13C: 'l',
+  0x13D: 'l',
+  0x13E: 'l',
+  0x13F: 'l',
+  0x140: 'l',
+  0x141: 'l',
+  0x142: 'l',
+  0x143: 'n',
+  0x144: 'n',
+  0x145: 'n',
+  0x146: 'n',
+  0x147: 'n',
+  0x148: 'n',
+  0x14A: 'n',
+  0x14B: 'n',
+  0x14C: 'o',
+  0x14D: 'o',
+  0x14E: 'o',
+  0x14F: 'o',
+  0x150: 'o',
+  0x151: 'o',
+  0x152: 'oe',
+  0x153: 'oe',
+  0x154: 'r',
+  0x155: 'r',
+  0x156: 'r',
+  0x157: 'r',
+  0x158: 'r',
+  0x159: 'r',
+  0x15A: 's',
+  0x15B: 's',
+  0x15C: 's',
+  0x15D: 's',
+  0x15E: 's',
+  0x15F: 's',
+  0x160: 's',
+  0x161: 's',
+  0x162: 't',
+  0x163: 't',
+  0x164: 't',
+  0x165: 't',
+  0x166: 't',
+  0x167: 't',
+  0x168: 'u',
+  0x169: 'u',
+  0x16A: 'u',
+  0x16B: 'u',
+  0x16C: 'u',
+  0x16D: 'u',
+  0x16E: 'u',
+  0x16F: 'u',
+  0x170: 'u',
+  0x171: 'u',
+  0x172: 'u',
+  0x173: 'u',
+  0x174: 'w',
+  0x175: 'w',
+  0x176: 'y',
+  0x177: 'y',
+  0x178: 'y',
+  0x179: 'z',
+  0x17A: 'z',
+  0x17B: 'z',
+  0x17C: 'z',
+  0x17D: 'z',
+  0x17E: 'z',
+  0x2B0: 'h',
+  0x2B2: 'j',
+  0x2B3: 'r',
+  0x2B7: 'w',
+  0x2B8: 'y',
+  0x2E1: 'l',
+  0x2E2: 's',
+  0x2E3: 'x',
+  0x1D2C: 'a',
+  0x1D2E: 'b',
+  0x1D30: 'd',
+  0x1D31: 'e',
+  0x1D33: 'g',
+  0x1D34: 'h',
+  0x1D35: 'i',
+  0x1D36: 'j',
+  0x1D37: 'k',
+  0x1D38: 'l',
+  0x1D39: 'm',
+  0x1D3A: 'n',
+  0x1D3C: 'o',
+  0x1D3E: 'p',
+  0x1D3F: 'r',
+  0x1D40: 't',
+  0x1D41: 'u',
+  0x1D42: 'w',
+  0x1D43: 'a',
+  0x1D47: 'b',
+  0x1D48: 'd',
+  0x1D49: 'e',
+  0x1D4D: 'g',
+  0x1D4F: 'k',
+  0x1D50: 'm',
+  0x1D52: 'o',
+  0x1D56: 'p',
+  0x1D57: 't',
+  0x1D58: 'u',
+  0x1D5B: 'v',
+  0x1D9C: 'c',
+  0x1DA0: 'f',
+  0x1DBB: 'z',
+  0x2070: '0',
+  0x2071: 'i',
+  0x2074: '4',
+  0x2075: '5',
+  0x2076: '6',
+  0x2077: '7',
+  0x2078: '8',
+  0x2079: '9',
+  0x207A: '+',
+  0x207B: '-',
+  0x207C: '=',
+  0x207D: '(',
+  0x207E: ')',
+  0x207F: 'n',
+  0x2C7D: 'v',
+};
+
+/// ISO 639-1 language codes that are no ISO 3166-1 country code
+/// (jellyfin-tentacle `_LANGUAGE_ONLY`): "EN:" names English, no
+/// country — so "EN: X" has no country and is never gated as foreign.
+/// "uk" (the United Kingdom) and "eu" (Europe) are deliberately not
+/// in this list.
+const _epgLanguageOnlyCodes = <String>{
+  'aa', 'ab', 'ak', 'an', 'av', 'ay', 'ce', 'cs', 'da', 'dv', 'el', 'en', 'eo', 'fa', 'ff', 'fy', 'gv', 'ha', 'he', 'hi', 'ho', 'hy', 'hz', 'ia', 'ig', 'ii', 'ik', 'iu', 'ja', 'jv', 'ka', 'kj', 'kk', 'kl', 'ko', 'ks', 'ku', 'kv', 'lg', 'ln', 'lo', 'mi', 'nb', 'nd', 'nn', 'nv', 'ny', 'oc', 'oj', 'or', 'os', 'pi', 'qu', 'rm', 'rn', 'sq', 'su', 'sw', 'ta', 'te', 'ti', 'ts', 'ty', 'ur', 'vo', 'wa', 'wo', 'xh', 'yi', 'yo', 'zh', 'zu',
+};
+
+/// One country, two spellings (jellyfin-tentacle `_SAME_COUNTRY`).
+const _epgSameCountry = <String, String>{'uk': 'gb', 'usa': 'us'};
+
+/// A leading country/language tag (jellyfin-tentacle `_PREFIX_RE`,
+/// extended with a dash delimiter so "US - CNN HD" strips like
+/// "US: CNN HD" does — the provider shape §5 row 2 carries).
+/// Two-letter codes (plus USA/EXYU/LATAM/ARAB), so a brand such as
+/// "CNN: International" keeps its name. Applied after lowercasing.
+final _epgPrefixRegExp = RegExp(
+  r"^\s*[|\[(]?\s*(?:[a-z]{2}(?:[ /-][a-z]{2})?|usa|exyu|latam|arab)\s*(?:-\s+|[|\]):]\s*)",
+);
+
+/// A leading tier tag (jellyfin-tentacle `_TIER_RE`): "VIP:" / "NOW:".
+/// Loose pass only — the main key keeps them, so "NOW: TNT SPORT 1"
+/// and "TNT SPORT 1" are different names until the fallback.
+final _epgTierTagRegExp = RegExp(r"^\s*[|\[(]?\s*(?:vip|now)\s*[|\]):]\s*");
+
+/// The country a leading tag names (jellyfin-tentacle `_COUNTRY_RE`,
+/// same dash extension as [_epgPrefixRegExp]).
+final _epgCountryRegExp = RegExp(
+  r"^\s*[|\[(]?\s*([a-z]{2}|usa)(?:[ /-]([a-z]{2}))?\s*(?:-\s+|[|\]):])",
+);
+
+/// A trailing country suffix on a feed id (jellyfin-tentacle
+/// `_ID_COUNTRY_RE`): ".uk" / ".us" / ".de".
+final _epgIdCountryRegExp = RegExp(r'\.([a-z]{2})$');
+
+/// Words that say nothing about which channel it is when deciding
+/// whether one feed id's display names are one channel
+/// (jellyfin-tentacle `_IDENTITY_DROP`).
+const _epgIdentityDrop = <String>{'bk', 'channel', 'tv'};
+
+/// A trailing timeshift in a space-joined word list
+/// (jellyfin-tentacle `_TIMESHIFT`): "+1" / "plus 1".
+final _epgTimeshiftRegExp = RegExp(r'(?:\s+plus\s+\d{1,2})+$');
+
+/// Fold full-width ASCII, superscripts and accented letters to plain
+/// ASCII (see [_epgUnicodeFold]); everything else passes through.
+/// Full-width space (U+3000) becomes a plain space.
+String _epgFoldUnicode(String input) {
+  final out = StringBuffer();
+  for (final rune in input.runes) {
+    if (rune >= 0xFF01 && rune <= 0xFF5E) {
+      out.writeCharCode(rune - 0xFEE0);
+    } else if (rune == 0x3000) {
+      out.write(' ');
+    } else {
+      out.write(_epgUnicodeFold[rune] ?? String.fromCharCode(rune));
+    }
+  }
+  return out.toString();
+}
+
+/// The name's words, reduced the jellyfin-tentacle way: compatibility
+/// forms first (so the prefix/marker steps can see them), accents off,
+/// "&" reads as "and", "+" as "plus", split on non-alphanumerics,
+/// markers dropped as whole words. [loose] also strips a leading tier
+/// tag and reads "sports" as "sport".
+List<String> _epgNameWords(String name, {required bool loose}) {
+  var s = _epgFoldUnicode(name).toLowerCase();
+  // HTML entities (dispatcharr): decode before "&" becomes "and".
+  s = s
+      .replaceAll('&amp;', '&')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#039;', "'")
+      .replaceAll('&apos;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
+  // Leading "|XX| " and "XX| " tags (the 1.2.4 rules, kept).
   s = s.replaceFirst(RegExp(r'^\|[^|]*\|\s*'), '');
-  // Leading "XX| " tag ("US| COMEDY CENTRAL HD", "UK-NOWTV| ...").
   s = s.replaceFirst(RegExp(r'^[^|\s][^|]{0,15}\|\s*'), '');
-  return s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  if (loose) s = s.replaceFirst(_epgTierTagRegExp, '');
+  s = s.replaceFirst(_epgPrefixRegExp, '');
+  // A trailing "@Feed" suffix, then a ".xx" country suffix.
+  s = s.replaceFirst(RegExp(r'@[^\s]*$'), '');
+  s = s.replaceFirst(RegExp(r'\.[a-z]{2}$'), '');
+  s = s.replaceAll('&', ' and ').replaceAll('+', ' plus ');
+  final words = s
+      .split(RegExp(r'[^0-9a-z]+'))
+      .where((w) => w.isNotEmpty && !_epgNameMarkers.contains(w))
+      .toList(growable: false);
+  if (!loose) return words;
+  return words.map((w) => _epgLooseWordForms[w] ?? w).toList(growable: false);
+}
+
+/// Reduce a channel name to the key two sources can be compared on
+/// (1.2.5: jellyfin-tentacle's `channel_name_key`, ported — see
+/// RESEARCH_EPG_MATCHING.md §2.1/§5): strip a leading country/
+/// language tag ("CA:", "CA EN:", "US - ", "|US|", "[UK]"), drop
+/// quality markers as words ("HD", "FHD", "4K", "RAW", "1080p"),
+/// fold accents/superscripts, read "&" as "and", drop a trailing
+/// ".xx" country suffix and "@Feed" suffix, drop spaces. "US - CNN HD"
+/// and "CNN.us" both reduce to "cnn"; "Comedy Central HD" and
+/// "Comedy Central" both reduce to "comedycentral". No fuzzy matching:
+/// the reduced strings must be exactly equal.
+///
+/// Deviation from the template (verified against the cloned
+/// `channel_names.py`): the template's key alone does NOT meet §5 rows
+/// 2, 3, 5 and 7 — its prefix regex has no dash delimiter ("US - "
+/// survives) and it never strips the ".xx" country suffix ("CNN.us"
+/// keeps "us"). The dash delimiter and the suffix strip are PlezTV
+/// additions, and they are what the §5 table tests.
+///
+/// Public (not test-only): the Assign picker normalizes its search
+/// with this, so typing "cnn" finds "CNN.us".
+String normalizeEpgChannelName(String name) => _epgNameWords(name, loose: false).join();
+
+/// The loose key (jellyfin-tentacle `loose_name_key`): the main key
+/// with a leading tier tag ("VIP:" / "NOW:") stripped and "sports"
+/// read as "sport". Fallback only — folded into the main key it would
+/// join channels of different countries.
+@visibleForTesting
+String looseEpgChannelNameKey(String name) => _epgNameWords(name, loose: true).join();
+
+/// The words of [name] before the spaces are dropped (the main key).
+@visibleForTesting
+List<String> epgChannelNameWords(String name) => _epgNameWords(name, loose: false);
+
+/// The words of [name] for the loose key.
+@visibleForTesting
+List<String> looseEpgChannelNameWords(String name) => _epgNameWords(name, loose: true);
+
+List<String> _epgTagCodes(String name) {
+  final match = _epgCountryRegExp.firstMatch(_epgFoldUnicode(name).toLowerCase());
+  if (match == null) return const [];
+  return [match.group(1), match.group(2)].whereType<String>().toList(growable: false);
+}
+
+/// The leading tag's first code as a country, language codes included
+/// (jellyfin-tentacle `_first_tag`).
+String? _epgFirstTag(String name) {
+  final codes = _epgTagCodes(name);
+  if (codes.isEmpty) return null;
+  return _epgSameCountry[codes[0]] ?? codes[0];
+}
+
+/// The country a provider's leading tag names: "CA EN: DISCOVERY HD"
+/// -> "ca", "EN CA: X" -> "ca", "|UK| SKY ONE" -> "gb". Null without
+/// a tag or with only a language ("EN: X" names English, no country).
+@visibleForTesting
+String? epgChannelCountry(String name) {
+  for (final code in _epgTagCodes(name)) {
+    if (!_epgLanguageOnlyCodes.contains(code)) return _epgSameCountry[code] ?? code;
+  }
+  return null;
+}
+
+/// The country a feed id's two-letter suffix names: "TNTSport1.uk" -> "gb".
+@visibleForTesting
+String? epgFeedIdCountry(String feedId) {
+  final match = _epgIdCountryRegExp.firstMatch(_epgFoldUnicode(feedId).toLowerCase());
+  if (match == null) return null;
+  final code = match.group(1)!;
+  return _epgSameCountry[code] ?? code;
+}
+
+/// The countries an XMLTV channel belongs to: its id's two-letter
+/// suffix and any tag its display names carry. A language tag counts
+/// here, so such a channel never becomes another country's guide.
+@visibleForTesting
+Set<String> epgFeedChannelCountries(String feedId, List<String> displayNames) {
+  final out = <String>{};
+  final idCountry = epgFeedIdCountry(feedId);
+  if (idCountry != null) out.add(idCountry);
+  for (final name in displayNames) {
+    final country = _epgFirstTag(name);
+    if (country != null) out.add(country);
+  }
+  return out;
+}
+
+/// True when the names are one channel's (jellyfin-tentacle
+/// `_one_channel`): the same after identity reduction, or one ending
+/// the other ("HISTORY" / "DISCOVERY HISTORY" is a brand prefix).
+/// "LRT" / "LRT PLUS" differ at the END: two channels. A name that is
+/// only a number (a channel number) is not counted.
+@visibleForTesting
+bool epgDisplayNamesAreOneChannel(List<String> names, {bool loose = false}) {
+  final wordsOf = loose ? looseEpgChannelNameWords : epgChannelNameWords;
+  final ids = <String>{};
+  for (final name in names) {
+    final identity = _epgIdentity(name, wordsOf);
+    if (identity.isEmpty || int.tryParse(identity) != null) continue;
+    ids.add(identity);
+  }
+  final sorted = ids.toList(growable: false)..sort((a, b) => a.length.compareTo(b.length));
+  if (sorted.length <= 1) return true;
+  final longest = sorted.last;
+  return sorted.sublist(0, sorted.length - 1).every((i) => i.length >= 3 && longest.endsWith(i));
+}
+
+String _epgIdentity(String name, List<String> Function(String) wordsOf) {
+  final words = wordsOf(name).join(' ');
+  final withoutTimeshift = words.replaceFirst(_epgTimeshiftRegExp, '');
+  return withoutTimeshift.split(' ').where((w) => !_epgIdentityDrop.contains(w)).join();
+}
+
+/// True when [feedId] or any of [names] carries a timeshift ("+1" /
+/// "plus 1"): the plain candidate wins over a timeshifted one when a
+/// name names more than one feed channel.
+bool _epgHasTimeshift(String feedId, List<String> names) {
+  if (_epgTimeshiftRegExp.hasMatch(epgChannelNameWords(feedId).join(' '))) return true;
+  for (final name in names) {
+    if (_epgTimeshiftRegExp.hasMatch(epgChannelNameWords(name).join(' '))) return true;
+  }
+  return false;
 }
 
 /// Live TV for IPTV connections (M3U + Xtream Codes).
@@ -114,6 +600,21 @@ String normalizeEpgChannelName(String name) {
 /// Xtream channels with `tv_archive = 1`, via the `/timeshift/` endpoint —
 /// the session synthesizes its [CaptureBuffer] from `tv_archive_duration`
 /// and rebuilds the URL for a requested offset. There is no DVR surface.
+/// What one channel resolved to against one loaded guide (1.2.5):
+/// the match (when the guide serves the channel in the window) or
+/// the reason it did not (for the Reload diagnostics and the
+/// without-guide overview). A match always carries in-window
+/// programmes; a non-match carries an empty programme list and the
+/// reason in [blockedReason].
+typedef _GuideResolution = ({
+  List<LiveTvProgram> programs,
+  String? matchedXmltvId,
+  String? matchMethod,
+  String? sourceId,
+  String? blockedReason,
+  List<String> blockedCandidates,
+});
+
 class IptvLiveTvSupport implements LiveTvSupport {
   final IptvClient _client;
   final FavoriteChannelsRepository _favoritesRepository;
@@ -1019,10 +1520,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
         keyPrefix: attempt.keyPrefix,
         offsetMinutes: attempt.config.timeShiftMinutes,
       );
-      if (match == null) continue;
+      if (match.matchedXmltvId == null) continue;
       return (
         programs: match.programs,
-        source: match.matchMethod == 'name' ? IptvEpgSource.feedByName : IptvEpgSource.feedById,
+        source: match.matchMethod == 'name' || match.matchMethod == 'name-loose'
+            ? IptvEpgSource.feedByName
+            : IptvEpgSource.feedById,
         feedDeferred: false,
         sourceId: attempt.config.id,
         matchedXmltvId: match.matchedXmltvId,
@@ -1061,10 +1564,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
 
   /// The match chain for one loaded guide (shared by the fetch path, the
   /// local details probe, and the without-guide computation): a manual
-  /// assignment for this source first, then the tvg-id, then the
-  /// normalized name. Null when nothing in this guide serves the channel
-  /// in the window.
-  ({List<LiveTvProgram> programs, String matchedXmltvId, String matchMethod})? _matchInGuide(
+  /// assignment for this source first, then the tvg-id (exact,
+  /// case-insensitive, numeric), then the normalized name against the
+  /// feed's display names and ids, then — only when an earlier tier
+  /// identified a feed id that brought no in-window programmes — the
+  /// loose name. Never null: a non-match names its reason, so the
+  /// diagnostics can say why instead of only counting.
+  _GuideResolution _matchInGuide(
     _CachedXmltvGuide guide,
     String channelKey,
     IptvEpgMapping? mapping,
@@ -1078,54 +1584,171 @@ class IptvLiveTvSupport implements LiveTvSupport {
     required String keyPrefix,
     int? offsetMinutes,
   }) {
+    List<LiveTvProgram> mapPrograms(List<XmltvProgram> rows) => _mapXmltvPrograms(
+          rows,
+          channelKey,
+          settings,
+          from,
+          to,
+          keyPrefix: keyPrefix,
+          offsetMinutes: offsetMinutes,
+        );
+
+    _GuideResolution matched(List<LiveTvProgram> programs, String xmltvId, String method) => (
+          programs: programs,
+          matchedXmltvId: xmltvId,
+          matchMethod: method,
+          sourceId: sourceId,
+          blockedReason: null,
+          blockedCandidates: const <String>[],
+        );
+
+    _GuideResolution blocked(String reason, [List<String> candidates = const <String>[]]) => (
+          programs: const <LiveTvProgram>[],
+          matchedXmltvId: null,
+          matchMethod: null,
+          sourceId: null,
+          blockedReason: reason,
+          blockedCandidates: candidates,
+        );
+
+    // Feed ids that were identified (by id, or by name) but brought no
+    // in-window programmes: the loose fallback falls back from these,
+    // and the diagnostics name them.
+    final identifiedButEmpty = <String>{};
+
+    // 1. Manual assignment for this source.
     if (mapping != null && mapping.sourceId == sourceId) {
-      final mapped = _mapXmltvPrograms(
-        guide.byChannel[mapping.xmltvId] ?? const [],
-        channelKey,
-        settings,
-        from,
-        to,
-        keyPrefix: keyPrefix,
-        offsetMinutes: offsetMinutes,
-      );
-      if (mapped.isNotEmpty) {
-        return (programs: mapped, matchedXmltvId: mapping.xmltvId, matchMethod: 'manual');
+      final rows = guide.byChannel[mapping.xmltvId] ?? const [];
+      final programs = mapPrograms(rows);
+      if (programs.isNotEmpty) return matched(programs, mapping.xmltvId, 'manual');
+      if (rows.isNotEmpty || guide.channelIdsSeen.contains(mapping.xmltvId)) {
+        identifiedButEmpty.add(mapping.xmltvId);
       }
     }
-    // The tvg-id candidates, in the old order: Xtream tries its
-    // `epg_channel_id` then the stream id (the key); M3U tries its
+    // 2. tvg-id, exact. The candidates, in the old order: Xtream tries
+    // its `epg_channel_id` then the stream id (the key); M3U tries its
     // tvg-id, which IS the key when present. One list covers both.
     final candidates = <String>{?epgChannelId, ?tvgId, channelKey}.toList(growable: false);
     for (final id in candidates) {
-      final programs = _mapXmltvPrograms(
-        guide.byChannel[id] ?? const [],
-        channelKey,
-        settings,
-        from,
-        to,
-        keyPrefix: keyPrefix,
-        offsetMinutes: offsetMinutes,
-      );
-      if (programs.isNotEmpty) {
-        return (programs: programs, matchedXmltvId: id, matchMethod: 'tvg-id');
+      final rows = guide.byChannel[id];
+      if (rows == null) {
+        if (guide.channelIdsSeen.contains(id)) identifiedButEmpty.add(id);
+        continue;
+      }
+      final programs = mapPrograms(rows);
+      if (programs.isNotEmpty) return matched(programs, id, 'tvg-id');
+      identifiedButEmpty.add(id);
+    }
+    // 3. tvg-id, case-insensitive (Fix 3): the fold only names a feed
+    // id when exactly one raw id folds to it — two ids differing only
+    // in case are never guessed between.
+    for (final id in candidates) {
+      final fold = id.toLowerCase();
+      final feedId = guide.foldedChannelIds[fold];
+      if (feedId == null) continue;
+      final programs = mapPrograms(guide.byChannelFolded[fold] ?? const []);
+      if (programs.isNotEmpty) return matched(programs, feedId, 'tvg-id');
+      identifiedButEmpty.add(feedId);
+    }
+    // 4. Numeric feed id == stream id (Fix 5, dispatcharr): a feed id
+    // that parses as an integer, whole-string, > 0, naming exactly one
+    // raw id. Proves itself only when the strings differ ("012345" vs
+    // the stream id 12345) — the exact tier already caught the rest.
+    final streamId = int.tryParse(channelKey);
+    if (streamId != null && streamId > 0) {
+      final feedId = guide.numericChannelIds[streamId];
+      if (feedId != null) {
+        final programs = mapPrograms(guide.byNumericId[streamId] ?? const []);
+        if (programs.isNotEmpty) return matched(programs, feedId, 'tvg-id');
+        identifiedButEmpty.add(feedId);
       }
     }
+    // 5. Name, against the feed's display names and ids (Fix 2/7):
+    // the name is only a match when it names exactly one feed channel
+    // — never a guess. A channel from another country blocks with
+    // 'foreign'; more than one in-country namesake blocks with
+    // 'ambiguous'. A "+1" timeshift copy loses to the plain channel.
     if (channelName != null && channelName.isNotEmpty) {
-      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
-      final programs = _mapXmltvPrograms(
-        byName,
-        channelKey,
-        settings,
-        from,
-        to,
-        keyPrefix: keyPrefix,
-        offsetMinutes: offsetMinutes,
-      );
-      if (programs.isNotEmpty) {
-        return (programs: programs, matchedXmltvId: byName.first.channelId, matchMethod: 'name');
+      final key = normalizeEpgChannelName(channelName);
+      if (key.isNotEmpty) {
+        var nameCandidates = guide.nameCandidatesFor(key);
+        final country = epgChannelCountry(channelName);
+        if (country != null && nameCandidates.isNotEmpty) {
+          final local = nameCandidates.where((id) {
+            final countries = epgFeedChannelCountries(id, guide.displayNames[id] ?? const <String>[]);
+            return countries.isEmpty || countries.contains(country);
+          }).toSet();
+          if (local.isEmpty) {
+            final sorted = nameCandidates.toList(growable: false)..sort();
+            return blocked('foreign', sorted);
+          }
+          nameCandidates = local;
+        }
+        final serving = nameCandidates.where((id) => guide.byChannel.containsKey(id)).toSet();
+        if (serving.isEmpty) {
+          // Named, but every namesake is a feed id with no retained
+          // programmes: identified, not matched — the loose fallback
+          // may still find a split copy.
+          identifiedButEmpty.addAll(nameCandidates);
+        } else {
+          var pick = serving;
+          if (pick.length > 1) {
+            final plain = pick.where((id) => !_epgHasTimeshift(id, guide.displayNames[id] ?? const <String>[])).toSet();
+            if (plain.length == 1) pick = plain;
+          }
+          if (pick.length == 1) {
+            final feedId = pick.single;
+            final programs = mapPrograms(guide.byChannel[feedId] ?? const []);
+            if (programs.isNotEmpty) return matched(programs, feedId, 'name');
+            identifiedButEmpty.add(feedId);
+          } else {
+            final sorted = pick.toList(growable: false)..sort();
+            return blocked('ambiguous', sorted);
+          }
+        }
+      }
+      // 6. Loose-name fallback for a split feed id (Fix 6, the TNT
+      // case): only when an earlier tier identified a feed id that
+      // brought nothing, and only when the channel's country is
+      // known (from the playlist name, or from the identified id's
+      // `.xx` suffix) — the loose key is too weak to cross countries
+      // on its own. The loose key strips tier tags ("NOW:", "VIP:")
+      // and reads "sports" as "sport", so a feed split into
+      // "UK: TNT SPORTS 1" and "NOW: TNT SPORT 1" is found by the
+      // copy that is actually in the window.
+      if (identifiedButEmpty.isNotEmpty) {
+        final looseKey = looseEpgChannelNameKey(channelName);
+        final country = epgChannelCountry(channelName) ?? epgFeedIdCountry(identifiedButEmpty.first);
+        if (looseKey.isNotEmpty && country != null) {
+          var looseCandidates = guide.looseCandidatesFor(looseKey);
+          looseCandidates.removeAll(identifiedButEmpty);
+          looseCandidates = looseCandidates.where((id) {
+            final countries = epgFeedChannelCountries(id, guide.displayNames[id] ?? const <String>[]);
+            return countries.contains(country);
+          }).toSet();
+          final serving = looseCandidates.where((id) => guide.byChannel.containsKey(id)).toSet();
+          if (serving.isNotEmpty) {
+            var pick = serving;
+            if (pick.length > 1) {
+              final plain = pick.where((id) => !_epgHasTimeshift(id, guide.displayNames[id] ?? const <String>[])).toSet();
+              if (plain.length == 1) pick = plain;
+            }
+            if (pick.length == 1) {
+              final feedId = pick.single;
+              final programs = mapPrograms(guide.byChannel[feedId] ?? const []);
+              if (programs.isNotEmpty) return matched(programs, feedId, 'name-loose');
+            }
+          }
+        }
       }
     }
-    return null;
+    if (identifiedButEmpty.isNotEmpty) {
+      final sorted = identifiedButEmpty.toList(growable: false)..sort();
+      return blocked('matched-but-no-programmes', sorted);
+    }
+    if (epgChannelId != null || tvgId != null) return blocked('tvg-id-not-in-feed');
+    return blocked('no-tvg-id');
   }
 
   /// One feed fetch per enabled source, in priority order (PlezTV 1.2.0,
@@ -1687,7 +2310,16 @@ class IptvLiveTvSupport implements LiveTvSupport {
       if (existing != null) {
         await _saveFeedValidators(cacheKey, fetch.etag, fetch.lastModified);
         await _touchFeedFile(cacheKey);
-        final guide = _CachedXmltvGuide(programs: existing.programs, fetchedAt: DateTime.now());
+        // 1.2.5 Fix 1: a 304 reuses the stored guide — its parse stats
+        // (display names, pre-filter counts) carry forward with it.
+        final guide = _CachedXmltvGuide(
+          programs: existing.programs,
+          fetchedAt: DateTime.now(),
+          displayNames: existing.displayNames,
+          programsParsed: existing.programsParsed,
+          channelsParsed: existing.channelsParsed,
+          channelIdsSeen: existing.channelIdsSeen,
+        );
         _xmltvCache[cacheKey] = guide;
         _xmltvFailedAt.remove(cacheKey);
         return guide;
@@ -1710,6 +2342,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
       }
     }
     final programs = <XmltvProgram>[];
+    // 1.2.5 Fix 1: the parse stats (display names, pre-filter counts)
+    // are what the Reload diagnostics report from.
+    final stats = XmltvParseStats();
     // Tee the raw bytes to a temp file in the same directory, so the
     // promote is a same-filesystem rename. Skipped entirely when the
     // persisted side is disabled for tests. If the temp file cannot even
@@ -1755,6 +2390,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
         }),
         windowFromEpoch: window.fromEpoch,
         windowToEpoch: window.toEpoch,
+        stats: stats,
       )) {
         programs.add(program);
       }
@@ -1796,7 +2432,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // I9: store the response validators for the next refresh (also on a
     // 200 that sent none — that clears a stale row).
     await _saveFeedValidators(cacheKey, fetch.etag, fetch.lastModified);
-    final guide = _CachedXmltvGuide(programs: programs, fetchedAt: DateTime.now());
+    final guide = _CachedXmltvGuide(
+      programs: programs,
+      fetchedAt: DateTime.now(),
+      displayNames: stats.channelDisplayNames,
+      programsParsed: stats.programsSeen,
+      channelsParsed: stats.channelIds.length,
+      channelIdsSeen: {...stats.channelIds, ...stats.programChannelIds},
+    );
     _xmltvCache[cacheKey] = guide;
     _xmltvFailedAt.remove(cacheKey);
     return guide;
@@ -1840,6 +2483,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // path — the 64 KB sync chunks keep the streaming property (no
       // whole-file String) without touching the event loop.
       final programs = <XmltvProgram>[];
+      final stats = XmltvParseStats();
       // I8 (1.2.2): the parse-time window filter applies here too — a
       // warm start keeps exactly what the current guide window needs
       // instead of re-retaining the whole persisted feed.
@@ -1848,10 +2492,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
         _readFileInChunks(file),
         windowFromEpoch: window.fromEpoch,
         windowToEpoch: window.toEpoch,
+        stats: stats,
       )) {
         programs.add(program);
       }
-      return _CachedXmltvGuide(programs: programs, fetchedAt: file.lastModifiedSync());
+      return _CachedXmltvGuide(
+        programs: programs,
+        fetchedAt: file.lastModifiedSync(),
+        displayNames: stats.channelDisplayNames,
+        programsParsed: stats.programsSeen,
+        channelsParsed: stats.channelIds.length,
+        channelIdsSeen: {...stats.channelIds, ...stats.programChannelIds},
+      );
     } catch (_) {
       try {
         if (file != null && file.existsSync()) file.deleteSync();
@@ -2213,20 +2865,33 @@ class IptvLiveTvSupport implements LiveTvSupport {
       );
     }
     final probe = await _probeLocalMatch(channelKey, settings, from, to);
-    if (probe != null) return probe;
+    if (probe.detail != null) return probe.detail!;
+    // The probe's per-channel reason when a feed was loaded (1.2.5
+    // Fix 7): an ambiguous or foreign name, or a feed id that brought
+    // no programmes, says so — the global reason only covers "no
+    // source / nothing loaded".
+    final perChannelReason = switch (probe.resolution.blockedReason) {
+      'ambiguous' => IptvEpgNoGuideReason.ambiguous,
+      'foreign' => IptvEpgNoGuideReason.foreign,
+      'matched-but-no-programmes' => IptvEpgNoGuideReason.matchedButNoPrograms,
+      'no-tvg-id' || 'tvg-id-not-in-feed' => IptvEpgNoGuideReason.noMatch,
+      _ => null,
+    };
     return IptvChannelEpgDetail(
       channelKey: channelKey,
       channelName: _client.channelNameForChannelKey(channelKey),
       programCount: 0,
       lastFetch: cached?.fetchedAt,
-      noGuideReason: await _noGuideReason(ttl),
+      noGuideReason: perChannelReason ?? await _noGuideReason(ttl),
     );
   }
 
   /// The local match probe for [channelEpgDetail]: the match chain
-  /// against the feeds already loaded in memory (no network). Null when
-  /// no loaded feed serves the channel in the window.
-  Future<IptvChannelEpgDetail?> _probeLocalMatch(
+  /// against the feeds already loaded in memory (no network). The
+  /// detail when a loaded feed serves the channel in the window, and
+  /// the resolution either way — a non-match names its reason, so the
+  /// detail can say why instead of only the global reason.
+  Future<({IptvChannelEpgDetail? detail, _GuideResolution resolution})> _probeLocalMatch(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -2234,39 +2899,28 @@ class IptvLiveTvSupport implements LiveTvSupport {
   ) async {
     final attempts = await _epgSourceAttempts();
     final mappings = await _epgStore.loadMappings();
-    final mapping = mappings[channelKey];
-    final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
-    final tvgId = _client.tvgIdForChannelKey(channelKey);
     final channelName = _client.channelNameForChannelKey(channelKey);
+    final loaded = <({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })>[];
     for (final attempt in attempts) {
       final guide = _xmltvCache[attempt.cacheKey];
       if (guide == null) continue;
-      final match = _matchInGuide(
-        guide,
-        channelKey,
-        mapping,
-        attempt.config.id,
-        epgChannelId,
-        tvgId,
-        channelName,
-        settings,
-        from,
-        to,
-        keyPrefix: attempt.keyPrefix,
-        offsetMinutes: attempt.config.timeShiftMinutes,
-      );
-      if (match == null) continue;
-      return IptvChannelEpgDetail(
+      loaded.add((attempt: attempt, guide: guide));
+    }
+    final resolution = _resolveChannelAcrossFeeds(channelKey, loaded, mappings, settings, from, to);
+    if (resolution.matchedXmltvId == null) return (detail: null, resolution: resolution);
+    final entry = loaded.firstWhere((e) => e.attempt.config.id == resolution.sourceId);
+    return (
+      detail: IptvChannelEpgDetail(
         channelKey: channelKey,
         channelName: channelName,
-        sourceId: attempt.config.id,
-        sourceName: attempt.config.name,
-        matchedXmltvId: match.matchedXmltvId,
-        matchMethod: match.matchMethod,
-        programCount: match.programs.length,
-      );
-    }
-    return null;
+        sourceId: entry.attempt.config.id,
+        sourceName: entry.attempt.config.name,
+        matchedXmltvId: resolution.matchedXmltvId,
+        matchMethod: resolution.matchMethod,
+        programCount: resolution.programs.length,
+      ),
+      resolution: resolution,
+    );
   }
 
   /// The no-guide reason for a channel, derived from the feeds' state
@@ -2334,6 +2988,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
             sourceName: entry.attempt.config.name,
             xmltvId: channel.key,
             programCount: channel.value.length,
+            displayNames: entry.guide.displayNames[channel.key] ?? const [],
           ),
         );
       }
@@ -2377,9 +3032,26 @@ class IptvLiveTvSupport implements LiveTvSupport {
           (persistedKeys.contains(channel.key) ? await _readPersistedEpg(channel.key) : null);
       if (cached != null) _epgCache[channel.key] = cached;
       if (cached != null && cached.programs.isNotEmpty) continue;
-      if (_channelHasFeedMatch(channel.key, loaded, mappings, settings, from, to)) continue;
+      final resolution = _resolveChannelAcrossFeeds(channel.key, loaded, mappings, settings, from, to);
+      if (resolution.matchedXmltvId != null) continue;
+      // Per-channel reason from the provider (first loaded) feed's
+      // block (1.2.5 Fix 7): an ambiguous or foreign name, or a feed
+      // id that brought no programmes, says so — the global reason
+      // only covers "no source / nothing loaded".
+      final (perChannelReason, candidates) = switch (resolution.blockedReason) {
+        'ambiguous' => (IptvEpgNoGuideReason.ambiguous, resolution.blockedCandidates),
+        'foreign' => (IptvEpgNoGuideReason.foreign, resolution.blockedCandidates),
+        'matched-but-no-programmes' => (IptvEpgNoGuideReason.matchedButNoPrograms, resolution.blockedCandidates),
+        'no-tvg-id' || 'tvg-id-not-in-feed' => (IptvEpgNoGuideReason.noMatch, const <String>[]),
+        _ => (reason, const <String>[]),
+      };
       out.add(
-        IptvChannelWithoutGuide(channelKey: channel.key, channelName: channel.title ?? channel.key, reason: reason),
+        IptvChannelWithoutGuide(
+          channelKey: channel.key,
+          channelName: channel.title ?? channel.key,
+          reason: perChannelReason,
+          candidates: candidates,
+        ),
       );
     }
     return out;
@@ -2395,12 +3067,29 @@ class IptvLiveTvSupport implements LiveTvSupport {
     DateTime from,
     DateTime to,
   ) {
+    return _resolveChannelAcrossFeeds(channelKey, loaded, mappings, settings, from, to).matchedXmltvId != null;
+  }
+
+  /// Resolve one channel against the loaded feeds in priority order
+  /// (1.2.5): the first feed that serves it wins; otherwise the first
+  /// feed's block reason (the provider feed is first) is what the
+  /// diagnostics name. The resolution always carries a reason when it
+  /// carries no match — never null.
+  _GuideResolution _resolveChannelAcrossFeeds(
+    String channelKey,
+    List<({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })> loaded,
+    Map<String, IptvEpgMapping> mappings,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to,
+  ) {
     final mapping = mappings[channelKey];
     final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
     final tvgId = _client.tvgIdForChannelKey(channelKey);
     final channelName = _client.channelNameForChannelKey(channelKey);
+    _GuideResolution? firstBlocked;
     for (final entry in loaded) {
-      final match = _matchInGuide(
+      final resolution = _matchInGuide(
         entry.guide,
         channelKey,
         mapping,
@@ -2414,9 +3103,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
         keyPrefix: entry.attempt.keyPrefix,
         offsetMinutes: entry.attempt.config.timeShiftMinutes,
       );
-      if (match != null) return true;
+      if (resolution.matchedXmltvId != null) return resolution;
+      firstBlocked ??= resolution;
     }
-    return false;
+    return firstBlocked ??
+        (
+          programs: const <LiveTvProgram>[],
+          matchedXmltvId: null,
+          matchMethod: null,
+          sourceId: null,
+          blockedReason: 'no-feed',
+          blockedCandidates: const <String>[],
+        );
   }
 
   /// The enabled sources' guides, loaded lazily (user-initiated callers
@@ -2521,10 +3219,96 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final from = now.subtract(Duration(days: settings.pastDays));
     final to = now.add(Duration(days: settings.daysToLoad));
     var withGuide = 0;
+    // 1.2.5 Fix 1: per-tier counts, so the report says HOW channels
+    // matched (and why the rest did not), not just how many.
+    var manualMatches = 0;
+    var tvgIdMatches = 0;
+    var nameMatches = 0;
+    var looseNameMatches = 0;
+    var ambiguousCount = 0;
+    var foreignCount = 0;
+    var noTvgIdCount = 0;
+    var tvgIdNotInFeedCount = 0;
+    var matchedButNoProgrammesCount = 0;
+    var noFeedCount = 0;
+    final sampleUnmatched = <IptvEpgUnmatchedSample>[];
+    var epgChannelIdCount = 0;
     for (final channel in channels) {
-      if (_channelHasFeedMatch(channel.key, outcome.loaded, mappings, settings, from, to)) withGuide++;
+      if ((_client.epgChannelIdForChannelKey(channel.key) ?? '').isNotEmpty) epgChannelIdCount++;
+      final resolution = _resolveChannelAcrossFeeds(channel.key, outcome.loaded, mappings, settings, from, to);
+      if (resolution.matchedXmltvId != null) {
+        withGuide++;
+        switch (resolution.matchMethod) {
+          case 'manual':
+            manualMatches++;
+          case 'name':
+            nameMatches++;
+          case 'name-loose':
+            looseNameMatches++;
+          default:
+            tvgIdMatches++;
+        }
+      } else {
+        switch (resolution.blockedReason) {
+          case 'ambiguous':
+            ambiguousCount++;
+          case 'foreign':
+            foreignCount++;
+          case 'no-tvg-id':
+            noTvgIdCount++;
+          case 'tvg-id-not-in-feed':
+            tvgIdNotInFeedCount++;
+          case 'matched-but-no-programmes':
+            matchedButNoProgrammesCount++;
+          default:
+            noFeedCount++;
+        }
+        if (sampleUnmatched.length < 5) {
+          sampleUnmatched.add(
+            IptvEpgUnmatchedSample(
+              channelName: channel.title ?? channel.key,
+              epgChannelId: _client.epgChannelIdForChannelKey(channel.key),
+              tvgId: _client.tvgIdForChannelKey(channel.key),
+            ),
+          );
+        }
+      }
     }
     final feedChannelIds = outcome.loaded.expand((e) => e.guide.byChannel.keys).toSet().length;
+    // Feed sample: the first loaded feed's first 5 ids, sorted, with
+    // their display names — what the feed actually calls its channels.
+    final feedSamples = <IptvEpgFeedSample>[];
+    if (outcome.loaded.isNotEmpty) {
+      final first = outcome.loaded.first.guide;
+      final ids = first.byChannel.keys.toList(growable: false)..sort();
+      for (final id in ids.take(5)) {
+        feedSamples.add(
+          IptvEpgFeedSample(
+            xmltvId: id,
+            displayNames: first.displayNames[id] ?? const [],
+            programCount: first.byChannel[id]?.length ?? 0,
+          ),
+        );
+      }
+    }
+    // The Reload report and the Logs export carry the same numbers
+    // (1.2.5 Fix 1): a feed that loads but matches nothing must say
+    // which tier failed, in the dialog and in the export.
+    final feedSummary = outcome.loaded.isEmpty
+        ? 'no feeds loaded'
+        : outcome.loaded
+            .map((e) => '${e.attempt.config.name}: ${e.guide.channelsParsed} channels, ${e.guide.programsParsed} parsed, ${e.guide.programs.length} retained')
+            .join('; ');
+    appLogger.i(
+      'IPTV EPG reload: ${channels.length} channels, $withGuide with guide '
+      '(manual $manualMatches, tvg-id $tvgIdMatches, name $nameMatches, loose-name $looseNameMatches; '
+      'no match: ambiguous $ambiguousCount, foreign $foreignCount, no-tvg-id $noTvgIdCount, '
+      'tvg-id-not-in-feed $tvgIdNotInFeedCount, matched-but-no-programmes $matchedButNoProgrammesCount, '
+      'no-feed $noFeedCount); $epgChannelIdCount carry epg_channel_id; '
+      'feeds: $feedSummary; '
+      'feed sample: ${feedSamples.map((e) => e.xmltvId).join(', ')}; '
+      'unmatched sample: ${sampleUnmatched.map((e) => e.channelName).join(', ')}',
+    );
     return IptvReloadTvDetailsResult(
       channelsLoaded: channels.length,
       withGuide: withGuide,
@@ -2542,6 +3326,21 @@ class IptvLiveTvSupport implements LiveTvSupport {
         from,
         to,
       ),
+      matchTiers: IptvEpgMatchTiers(
+        manual: manualMatches,
+        tvgId: tvgIdMatches,
+        name: nameMatches,
+        nameLoose: looseNameMatches,
+        ambiguous: ambiguousCount,
+        foreign: foreignCount,
+        noTvgId: noTvgIdCount,
+        tvgIdNotInFeed: tvgIdNotInFeedCount,
+        matchedButNoProgrammes: matchedButNoProgrammesCount,
+        none: noFeedCount,
+      ),
+      feedSamples: feedSamples,
+      sampleUnmatched: sampleUnmatched,
+      epgChannelIdCount: epgChannelIdCount,
     );
   }
 
@@ -2566,6 +3365,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final now = DateTime.now();
     final from = now.subtract(Duration(days: settings.pastDays));
     final to = now.add(Duration(days: settings.daysToLoad));
+    // 1.2.5 Fix 1: the feed stats land in the Logs export too, so an
+    // Update-now that loads an empty feed leaves a trace.
+    final feedSummary = outcome.loaded.isEmpty
+        ? 'no feeds loaded'
+        : outcome.loaded
+            .map((e) => '${e.attempt.config.name}: ${e.guide.channelsParsed} channels, ${e.guide.programsParsed} parsed, ${e.guide.programs.length} retained')
+            .join('; ');
+    appLogger.i('IPTV EPG update now: $feedSummary');
     return IptvEpgUpdateNowResult(
       feedOutcomes: _feedOutcomes(outcome, null, mappings, settings, from, to),
     );
@@ -2602,6 +3409,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
           kind: matched == null || matched > 0 ? IptvEpgFeedOutcomeKind.loaded : IptvEpgFeedOutcomeKind.loadedNoMatch,
           feedChannels: entry.guide.byChannel.length,
           matchedChannels: matched,
+          feedProgramsParsed: entry.guide.programsParsed,
+          feedProgramsRetained: entry.guide.programs.length,
+          feedChannelsParsed: entry.guide.channelsParsed,
         ),
       );
     }
@@ -3078,13 +3888,41 @@ class _CachedXmltvGuide {
   final List<XmltvProgram> programs;
   final DateTime fetchedAt;
 
+  /// The feed's `<channel>` display names, id -> names (1.2.5 Fix 2).
+  /// Empty when the feed lists no `<channel>` elements.
+  final Map<String, List<String>> displayNames;
+
+  /// Programmes parsed before the I8 window filter (1.2.5 Fix 1).
+  /// 0 when unknown (a 304-reused guide keeps the previous count).
+  final int programsParsed;
+
+  /// Distinct `<channel>` ids in the feed (1.2.5 Fix 1). 0 when the
+  /// feed lists no `<channel>` elements.
+  final int channelsParsed;
+
+  /// Every channel id the feed mentions — `<channel>` ids plus every
+  /// programme `channel` attribute seen pre-filter (1.2.5 Fix 6): a
+  /// feed id whose programmes all fell outside the window still
+  /// exists, and the loose fallback can fall back from it.
+  final Set<String> channelIdsSeen;
+
   /// Dedupe by (channel, start) at import (1.2.1 D3, tvheadend model):
   /// a provider that re-publishes a programme must not render it
   /// twice. First-wins — the guide indexes programmes by the same key
   /// the mapper builds (`epg:<source>:<channel>:<beginsAt>`), so an
   /// exact duplicate would collide in the guide.
-  _CachedXmltvGuide({required List<XmltvProgram> programs, required this.fetchedAt})
-      : programs = _dedupePrograms(programs);
+  _CachedXmltvGuide({
+    required List<XmltvProgram> programs,
+    required this.fetchedAt,
+    Map<String, List<String>>? displayNames,
+    int? programsParsed,
+    int? channelsParsed,
+    Set<String>? channelIdsSeen,
+  })  : programs = _dedupePrograms(programs),
+        displayNames = displayNames ?? const {},
+        programsParsed = programsParsed ?? 0,
+        channelsParsed = channelsParsed ?? 0,
+        channelIdsSeen = channelIdsSeen ?? const {};
 
   static List<XmltvProgram> _dedupePrograms(List<XmltvProgram> programs) {
     final seen = <String>{};
@@ -3106,6 +3944,68 @@ class _CachedXmltvGuide {
   /// the same way makes them match when the exact tvg-id lookup misses.
   late final Map<String, List<XmltvProgram>> byNormalizedName = _indexByNormalizedName(programs);
 
+  /// Programmes indexed by the feed's display names (1.2.5 Fix 2):
+  /// a feed id's display names are the human names every other app
+  /// matches against — the raw id ("CNN.us") is not one.
+  late final Map<String, List<XmltvProgram>> byDisplayName = _indexByDisplayName(programs, displayNames);
+
+  /// Programmes indexed by the lowercased channel id (1.2.5 Fix 3):
+  /// the case-insensitive tvg-id tier. Only folds that name exactly
+  /// one raw id are kept — two ids differing only in case are never
+  /// guessed between.
+  late final Map<String, List<XmltvProgram>> byChannelFolded = _indexByChannelFolded(programs);
+
+  /// The raw id behind each unique fold (Fix 3): the match reports
+  /// the feed's own spelling, the one programmes are kept under.
+  late final Map<String, String> foldedChannelIds = _foldedChannelIds(programs);
+
+  /// Programmes indexed by numeric feed id (1.2.5 Fix 5, dispatcharr):
+  /// a feed id that parses as an integer, whole-string, > 0 — and
+  /// only when that integer names exactly one raw id.
+  late final Map<int, List<XmltvProgram>> byNumericId = _indexByNumericId(programs);
+
+  /// The raw id behind each unique numeric feed id (Fix 5).
+  late final Map<int, String> numericChannelIds = _numericChannelIds(programs);
+
+  /// Programmes indexed by the loose name key (1.2.5 Fix 6): tier
+  /// tags stripped, "sports" read as "sport". Fallback only.
+  late final Map<String, List<XmltvProgram>> byLooseName = _indexByLooseName(programs, displayNames);
+
+  /// Distinct feed ids behind each display-name key (Fix 7): the
+  /// uniqueness gate counts feed channels, not programmes.
+  late final Map<String, Set<String>> displayNameChannels = _channelsByDisplayName(displayNames);
+
+  /// Distinct feed ids behind each normalized-id key (Fix 7).
+  late final Map<String, Set<String>> normalizedNameChannels = _channelsByNormalizedName(programs);
+
+  /// Distinct feed ids behind each loose key (Fix 6/7).
+  late final Map<String, Set<String>> looseNameChannels = _channelsByLooseName(programs, displayNames);
+
+  /// Feed ids whose display names are different channels' names
+  /// (Fix 7): no channel is matched by name through one.
+  late final Set<String> mixedChannelIds = _mixedChannelIds(displayNames);
+
+  /// The same, under the loose key (Fix 6).
+  late final Set<String> looseMixedChannelIds = _mixedChannelIds(displayNames, loose: true);
+
+  /// The feed channels one normalized name names, for the name tier:
+  /// the union of the display-name and id indexes, minus mixed ids.
+  Set<String> nameCandidatesFor(String key) {
+    final out = <String>{};
+    out.addAll(displayNameChannels[key] ?? const <String>{});
+    out.addAll(normalizedNameChannels[key] ?? const <String>{});
+    out.removeAll(mixedChannelIds);
+    return out;
+  }
+
+  /// The feed channels one loose key names (Fix 6), minus loose-mixed ids.
+  Set<String> looseCandidatesFor(String key) {
+    final out = <String>{};
+    out.addAll(looseNameChannels[key] ?? const <String>{});
+    out.removeAll(looseMixedChannelIds);
+    return out;
+  }
+
   static Map<String, List<XmltvProgram>> _index(List<XmltvProgram> programs) {
     final map = <String, List<XmltvProgram>>{};
     for (final program in programs) {
@@ -3122,5 +4022,160 @@ class _CachedXmltvGuide {
       (map[key] ??= []).add(program);
     }
     return map;
+  }
+
+  static Map<String, List<XmltvProgram>> _indexByDisplayName(
+    List<XmltvProgram> programs,
+    Map<String, List<String>> displayNames,
+  ) {
+    final byId = _index(programs);
+    final map = <String, List<XmltvProgram>>{};
+    // One (key, id) pair adds the id's programmes once: two display
+    // names of one id can normalize to the same key ("CNN", "CNN HD").
+    final added = <String>{};
+    for (final entry in displayNames.entries) {
+      final programsForId = byId[entry.key];
+      if (programsForId == null) continue;
+      for (final name in entry.value) {
+        final key = normalizeEpgChannelName(name);
+        if (key.isEmpty) continue;
+        if (!added.add('$key\n${entry.key}')) continue;
+        (map[key] ??= []).addAll(programsForId);
+      }
+    }
+    return map;
+  }
+
+  static Map<String, List<XmltvProgram>> _indexByChannelFolded(List<XmltvProgram> programs) {
+    final byFold = <String, Set<String>>{};
+    for (final program in programs) {
+      byFold.putIfAbsent(program.channelId.toLowerCase(), () => <String>{}).add(program.channelId);
+    }
+    final map = <String, List<XmltvProgram>>{};
+    for (final program in programs) {
+      final fold = program.channelId.toLowerCase();
+      if (byFold[fold]!.length != 1) continue;
+      (map[fold] ??= []).add(program);
+    }
+    return map;
+  }
+
+  static Map<String, String> _foldedChannelIds(List<XmltvProgram> programs) {
+    final byFold = <String, Set<String>>{};
+    for (final program in programs) {
+      byFold.putIfAbsent(program.channelId.toLowerCase(), () => <String>{}).add(program.channelId);
+    }
+    final out = <String, String>{};
+    for (final entry in byFold.entries) {
+      if (entry.value.length == 1) out[entry.key] = entry.value.single;
+    }
+    return out;
+  }
+
+  static Map<int, List<XmltvProgram>> _indexByNumericId(List<XmltvProgram> programs) {
+    final map = <int, List<XmltvProgram>>{};
+    for (final program in programs) {
+      final numeric = int.tryParse(program.channelId);
+      if (numeric == null || numeric <= 0) continue;
+      (map[numeric] ??= []).add(program);
+    }
+    return map;
+  }
+
+  static Map<int, String> _numericChannelIds(List<XmltvProgram> programs) {
+    final byNumeric = <int, Set<String>>{};
+    for (final program in programs) {
+      final numeric = int.tryParse(program.channelId);
+      if (numeric == null || numeric <= 0) continue;
+      byNumeric.putIfAbsent(numeric, () => <String>{}).add(program.channelId);
+    }
+    final out = <int, String>{};
+    for (final entry in byNumeric.entries) {
+      if (entry.value.length == 1) out[entry.key] = entry.value.single;
+    }
+    return out;
+  }
+
+  static Map<String, List<XmltvProgram>> _indexByLooseName(
+    List<XmltvProgram> programs,
+    Map<String, List<String>> displayNames,
+  ) {
+    final byId = _index(programs);
+    final map = <String, List<XmltvProgram>>{};
+    final added = <String>{};
+    void add(String name, String channelId, List<XmltvProgram> forId) {
+      final key = looseEpgChannelNameKey(name);
+      if (key.isEmpty) return;
+      if (!added.add('$key\n$channelId')) return;
+      (map[key] ??= []).addAll(forId);
+    }
+
+    for (final entry in byId.entries) {
+      add(entry.key, entry.key, entry.value);
+      for (final name in displayNames[entry.key] ?? const <String>[]) {
+        add(name, entry.key, entry.value);
+      }
+    }
+    return map;
+  }
+
+  static Map<String, Set<String>> _channelsByDisplayName(Map<String, List<String>> displayNames) {
+    final map = <String, Set<String>>{};
+    for (final entry in displayNames.entries) {
+      for (final name in entry.value) {
+        final key = normalizeEpgChannelName(name);
+        if (key.isEmpty) continue;
+        (map[key] ??= <String>{}).add(entry.key);
+      }
+    }
+    return map;
+  }
+
+  static Map<String, Set<String>> _channelsByNormalizedName(List<XmltvProgram> programs) {
+    final map = <String, Set<String>>{};
+    for (final program in programs) {
+      final key = normalizeEpgChannelName(program.channelId);
+      if (key.isEmpty) continue;
+      (map[key] ??= <String>{}).add(program.channelId);
+    }
+    return map;
+  }
+
+  static Map<String, Set<String>> _channelsByLooseName(
+    List<XmltvProgram> programs,
+    Map<String, List<String>> displayNames,
+  ) {
+    final map = <String, Set<String>>{};
+    void add(String name, String channelId) {
+      final key = looseEpgChannelNameKey(name);
+      if (key.isEmpty) return;
+      (map[key] ??= <String>{}).add(channelId);
+    }
+
+    for (final program in programs) {
+      add(program.channelId, program.channelId);
+    }
+    for (final entry in displayNames.entries) {
+      for (final name in entry.value) {
+        add(name, entry.key);
+      }
+    }
+    return map;
+  }
+
+  /// Feed ids whose display names are different channels' names
+  /// (jellyfin `_one_channel`, Fix 7): no channel is matched by name
+  /// through one. With `loose`, the loose key decides.
+  static Set<String> _mixedChannelIds(Map<String, List<String>> displayNames, {bool loose = false}) {
+    final mixed = <String>{};
+    for (final entry in displayNames.entries) {
+      final names = entry.value;
+      if (names.length < 2) continue;
+      final one = loose
+          ? epgDisplayNamesAreOneChannel(names, loose: true)
+          : epgDisplayNamesAreOneChannel(names);
+      if (!one) mixed.add(entry.key);
+    }
+    return mixed;
   }
 }

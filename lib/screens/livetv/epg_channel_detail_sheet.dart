@@ -70,6 +70,7 @@ class _EpgChannelDetailSheetState extends State<_EpgChannelDetailSheet> {
     return switch (method) {
       'tvg-id' => t.iptv.epgMatchMethodTvgId,
       'name' => t.iptv.epgMatchMethodName,
+      'name-loose' => t.iptv.epgMatchMethodNameLoose,
       'manual' => t.iptv.epgMatchMethodManual,
       _ => '—',
     };
@@ -81,6 +82,9 @@ class _EpgChannelDetailSheetState extends State<_EpgChannelDetailSheet> {
       IptvEpgNoGuideReason.noMatch => t.iptv.epgNoGuideReasonNoMatch,
       IptvEpgNoGuideReason.sourceFailed => t.iptv.epgNoGuideReasonSourceFailed,
       IptvEpgNoGuideReason.notLoaded => t.iptv.epgNoGuideReasonNotLoaded,
+      IptvEpgNoGuideReason.ambiguous => t.iptv.epgNoGuideReasonAmbiguous,
+      IptvEpgNoGuideReason.foreign => t.iptv.epgNoGuideReasonForeign,
+      IptvEpgNoGuideReason.matchedButNoPrograms => t.iptv.epgNoGuideReasonMatchedButNoPrograms,
     };
   }
 

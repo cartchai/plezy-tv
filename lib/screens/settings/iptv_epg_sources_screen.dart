@@ -327,6 +327,62 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
     for (final outcome in result.feedOutcomes) {
       lines.add(epgFeedOutcomeLine(outcome, result.channelsLoaded));
     }
+    // 1.2.5 Fix 1: the diagnostics block — how channels matched, why
+    // the rest did not, what the feed actually contains, and a sample
+    // of each side. Only when a channel list was re-fetched (a Reload
+    // whose list failed has no match counts to report).
+    if (result.channelListFailureKind == null) {
+      final tiers = result.matchTiers;
+      lines.add(
+        t.iptv.epgReloadMatchBreakdown(
+          manual: tiers.manual,
+          tvgId: tiers.tvgId,
+          name: tiers.name,
+          loose: tiers.nameLoose,
+        ),
+      );
+      if (tiers.unmatched > 0) {
+        lines.add(
+          t.iptv.epgReloadUnmatchedBreakdown(
+            ambiguous: tiers.ambiguous,
+            foreign: tiers.foreign,
+            noTvgId: tiers.noTvgId,
+            tvgIdNotInFeed: tiers.tvgIdNotInFeed,
+            matchedButNoProgrammes: tiers.matchedButNoProgrammes,
+          ),
+        );
+      }
+      for (final outcome in result.feedOutcomes) {
+        if (outcome.feedProgramsParsed == null) continue;
+        lines.add(
+          t.iptv.epgReloadFeedStats(
+            source: outcome.sourceName,
+            channels: outcome.feedChannelsParsed ?? 0,
+            parsed: outcome.feedProgramsParsed ?? 0,
+            retained: outcome.feedProgramsRetained ?? 0,
+          ),
+        );
+      }
+      if (result.feedSamples.isNotEmpty) {
+        lines.add(
+          t.iptv.epgReloadFeedSample(
+            samples: result.feedSamples
+                .map((e) => e.displayNames.isEmpty ? e.xmltvId : '${e.xmltvId} (${e.displayNames.join(', ')})')
+                .join(', '),
+          ),
+        );
+      }
+      if (result.sampleUnmatched.isNotEmpty) {
+        lines.add(
+          t.iptv.epgReloadUnmatchedSample(samples: result.sampleUnmatched.map((e) => e.channelName).join(', ')),
+        );
+      }
+      if (result.epgChannelIdCount != null) {
+        lines.add(
+          t.iptv.epgReloadEpgChannelIds(withId: result.epgChannelIdCount!, total: result.channelsLoaded),
+        );
+      }
+    }
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
