@@ -2214,27 +2214,6 @@ class IptvClient implements MediaServerClient {
     _writeDiskText(dataset, jsonEncode(rows.map(toJson).toList()));
   }
 
-  /// Write a freshly fetched catalog, preferring the raw response body
-  /// (build #13): the body is exactly what the panel sent, so caching
-  /// it verbatim costs no encode at all — jsonEncode of 199k VOD rows
-  /// on the UI isolate froze the app for ~1.3s on first launch. Falls
-  /// back to [_writeDiskCatalog] when there is no raw body: a catalog
-  /// merged by the per-category crawl has no single body, and a test
-  /// fake's rows have none either.
-  void _writeCatalogRows<T>(
-    String dataset,
-    List<T> rows,
-    Map<String, dynamic> Function(T row) toJson,
-    String? rawBody,
-  ) {
-    if (rows.isEmpty) return;
-    if (rawBody != null && rawBody.isNotEmpty) {
-      _writeDiskText(dataset, rawBody);
-    } else {
-      _writeDiskCatalog(dataset, rows, toJson);
-    }
-  }
-
   /// Same generation-guarded fire-and-forget write, for a raw text
   /// payload (the M3U playlist). See [_writeDiskCatalog].
   void _writeDiskText(String dataset, String body) {
@@ -5458,14 +5437,36 @@ class IptvClient implements MediaServerClient {
       _liveCategoriesFuture = null;
       _liveCategoryNamesFuture = null;
       _xtreamChannelByKey.clear();
+      // 1.2.4 (rebase): Reload routes through the same filtered paths
+      // as the first load — the disk file AND the published memo hold
+      // visible rows only, or Reload re-grows the pruned disk file and
+      // re-fills the live memo (FORK §45.8d).
+      final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeLive);
       final rows = await _xtreamApi.getLiveStreams();
-      _writeCatalogRows(
-        IptvCatalogDiskCache.liveDataset,
-        rows,
-        (r) => r.toJson(),
-        _xtreamApi.lastLiveStreamsBody,
-      );
-      _liveStreamsFuture = Future.value(rows);
+      final visible = _visibleRows(rows, (r) => r.categoryId, filter);
+      final rawBody = _xtreamApi.lastLiveStreamsBody;
+      if (visible.isNotEmpty) {
+        if (rawBody != null && rawBody.isNotEmpty) {
+          if (filter.isNoOp) {
+            _writeDiskText(IptvCatalogDiskCache.liveDataset, rawBody);
+          } else {
+            unawaited(
+              XtreamApi.encodeLiveStreamsBodyVisible(rawBody, filter)
+                  .then((body) => _writeDiskText(IptvCatalogDiskCache.liveDataset, body))
+                  .catchError((Object e) {
+                appLogger.w('IPTV: visible disk encode failed for live', error: e);
+              }),
+            );
+          }
+        } else {
+          _writeDiskCatalog(IptvCatalogDiskCache.liveDataset, visible, (r) => r.toJson());
+        }
+      } else if (rows.isNotEmpty) {
+        // Panel answered in full but every row is hidden — the
+        // deliberate empty-array file (same rule as the first load).
+        _writeDiskText(IptvCatalogDiskCache.liveDataset, '[]');
+      }
+      _liveStreamsFuture = Future.value(visible);
       _liveStreamsLoaded = true;
       await IptvEpgSourcesStore(
         connection.id,
