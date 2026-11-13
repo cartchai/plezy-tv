@@ -749,7 +749,10 @@ https://example.com/cnn.m3u8
     // get_series payload contains rows with mistyped fields (e.g. a numeric
     // `cover`). The old `.map(X.fromJson)` parse threw the whole 46k-row
     // list away on the first bad row, so Movies loaded and Series showed
-    // nothing. Each row must parse independently now.
+    // nothing. Each row must parse independently now. v1.0.17: a mistyped
+    // string field is COERCED (flexibleString) and the row is KEPT, not
+    // dropped — a numeric cover or icon is a usable value, not a reason
+    // to lose the title.
     XtreamApi apiReturning(String body) => XtreamApi(
       serverUrl: 'https://panel.example.com:8080',
       username: 'user',
@@ -757,7 +760,7 @@ https://example.com/cnn.m3u8
       httpClient: MockClient((_) async => http.Response(body, 200)),
     );
 
-    test('getSeries drops a mistyped row and keeps its siblings', () async {
+    test('getSeries keeps a mistyped row and its siblings', () async {
       final api = apiReturning(
         jsonEncode([
           {'series_id': 10, 'name': 'Alpha Show', 'category_id': '1'},
@@ -768,10 +771,11 @@ https://example.com/cnn.m3u8
       addTearDown(api.close);
 
       final series = await api.getSeries();
-      expect(series.map((s) => s.name), ['Alpha Show', 'Beta Show']);
+      expect(series.map((s) => s.name), ['Alpha Show', 'Bad Cover', 'Beta Show']);
+      expect(series[1].cover, '12345');
     });
 
-    test('getVodStreams drops a mistyped row and keeps its siblings', () async {
+    test('getVodStreams keeps a mistyped row and its siblings', () async {
       final api = apiReturning(
         jsonEncode([
           {'stream_id': 1, 'name': 'Alpha Movie', 'container_extension': 'mp4'},
@@ -782,10 +786,11 @@ https://example.com/cnn.m3u8
       addTearDown(api.close);
 
       final streams = await api.getVodStreams();
-      expect(streams.map((s) => s.name), ['Alpha Movie', 'Beta Movie']);
+      expect(streams.map((s) => s.name), ['Alpha Movie', 'Bad Cover', 'Beta Movie']);
+      expect(streams[1].cover, '7');
     });
 
-    test('getLiveStreams drops a mistyped row and keeps its siblings', () async {
+    test('getLiveStreams keeps a mistyped row and its siblings', () async {
       final api = apiReturning(
         jsonEncode([
           {'stream_id': 100, 'name': 'Good Channel'},
@@ -796,7 +801,8 @@ https://example.com/cnn.m3u8
       addTearDown(api.close);
 
       final streams = await api.getLiveStreams();
-      expect(streams.map((s) => s.name), ['Good Channel', 'Other Channel']);
+      expect(streams.map((s) => s.name), ['Good Channel', 'Bad Icon', 'Other Channel']);
+      expect(streams[1].streamIcon, '42');
     });
 
     test('tv_archive_duration is days, not seconds', () async {
