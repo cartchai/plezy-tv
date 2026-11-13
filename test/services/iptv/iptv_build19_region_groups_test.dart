@@ -1,4 +1,4 @@
-// Schema repair — PlezTV v1.0.19 (Option B).
+// Schema repair — PlezTV v1.1.0 (Option B).
 //
 // The v1.0.16 write-time skip wrote lossy index + disk files (visible
 // rows only). On upgrade, a per-connection schema flag
@@ -80,7 +80,7 @@ void main() {
     return client;
   }
 
-  group('schema repair v1.0.19', () {
+  group('schema repair v1.1.0', () {
     test('a clean first sync stamps schema version 2', () async {
       final client = await clientWith(_RepairFakeApi());
       expect(await _schemaVersion(), 0);
@@ -93,7 +93,7 @@ void main() {
       expect(await _schemaVersion(), 2);
     });
 
-    test('a pre-1.0.19 install (version 1) re-fetches on the next plain sync', () async {
+    test('a pre-1.1.0 install (version 1) re-fetches on the next plain sync', () async {
       final client = await clientWith(_RepairFakeApi());
 
       await client.syncSearchIndex(force: true);

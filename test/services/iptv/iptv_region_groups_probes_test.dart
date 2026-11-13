@@ -1,4 +1,4 @@
-// Region-groups probes (v1.0.19, Option B) — moved in from the research
+// Region-groups probes (v1.1.0, Option B) — moved in from the research
 // worktree (~/workspace/tmp_work/plezy-tv-research-region-groups).
 //
 // Matt's report (2026-11-12 ~23:05 EST, on v1.0.17): series search works,
@@ -16,7 +16,7 @@
 // sync, no re-index, no re-seed, so un-hiding could not bring back rows
 // that were never written.
 //
-// Option B (v1.0.19): the index + disk hold the FULL catalog and filter
+// Option B (v1.1.0): the index + disk hold the FULL catalog and filter
 // only at read time, so the toggle restores the shows immediately with no
 // sync — R2b/R2c flip to PASS, and R2b pins the diagnostic that the
 // full index makes possible (hiddenMatches == 1, hiddenInitials ==

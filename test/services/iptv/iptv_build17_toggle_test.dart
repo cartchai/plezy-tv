@@ -58,7 +58,7 @@ void main() {
   /// warm-ups read the disk, and the seed warms the index from it — so
   /// the catalogs are warm with zero panel requests).
   ///
-  /// v1.0.19: the seeded disk holds the FULL catalog, as a v1.0.19+
+  /// v1.1.0: the seeded disk holds the FULL catalog, as a v1.1.0+
   /// build would have written it — stamp schema version 2, or the
   /// first sync would re-fetch everything as a repair and the
   /// zero-panel-requests warm-up assertion below would be vacuous.

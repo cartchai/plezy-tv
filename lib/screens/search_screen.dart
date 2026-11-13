@@ -838,7 +838,7 @@ class _SearchScreenState extends State<SearchScreen>
     // the show does not exist. The diagnostics are set by searchItems
     // before the results arrive, so they are consistent here.
     int hiddenMatches = 0;
-    // v1.0.19: the letter-group initials that hid those matches, so the
+    // v1.1.0: the letter-group initials that hid those matches, so the
     // empty state can name the hiding group.
     List<String> hiddenGroups = const [];
     Connection? scopedIptvConnection;
@@ -1074,7 +1074,7 @@ class _SearchEmptyState extends StatelessWidget {
 
   String _subtitle(IptvSearchIndexState? state) {
     if (hiddenMatches > 0) {
-      // v1.0.19: name the hiding group when the diagnostics know it.
+      // v1.1.0: name the hiding group when the diagnostics know it.
       if (hiddenGroups.length == 1) {
         return t.search.hiddenByCategoryFilterGroup(n: hiddenMatches, count: hiddenMatches, group: hiddenGroups.first);
       }

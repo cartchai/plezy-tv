@@ -7,7 +7,7 @@
 // series section reports 1 hidden match (the show exists in "|EN| TOP
 // SERIES" — the filter hid it, the search did not miss it).
 //
-// v1.0.19 (Option B): the seed helper now writes the same full rows
+// v1.1.0 (Option B): the seed helper now writes the same full rows
 // production writes, so this test pins production behaviour, not a
 // seed-only shape — and the diagnostics now also name the hiding
 // initial (hiddenInitials == ['EN']).

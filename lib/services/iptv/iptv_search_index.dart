@@ -916,7 +916,7 @@ class IndexWriteParams {
   final String categoryBody;
   final int syncStampMs;
 
-  /// Categories turned off by the user (v1.0.19, Option B):
+  /// Categories turned off by the user (v1.1.0, Option B):
   /// per-category ids and letter-group initials, exactly as stored on
   /// the connection. Rows from these categories DO land in the index
   /// now — the hidden sets only feed the [IndexWriteResult.hiddenSkipped]
@@ -967,14 +967,14 @@ class IndexWriteResult {
   final int droppedRows;
 
   /// Categories the fetched rows covered, out of the fetched category
-  /// list — the guard's numbers, for the same diagnostic. Since v1.0.19
+  /// list — the guard's numbers, for the same diagnostic. Since v1.1.0
   /// these count ALL categories: hidden categories are included in both
   /// numbers (the v1.0.16 visible-only denominator is gone with the
   /// write-time skip).
   final int coveredCategories;
   final int totalCategories;
 
-  /// Rows in hidden categories (v1.0.19): counted, NOT dropped — the
+  /// Rows in hidden categories (v1.1.0): counted, NOT dropped — the
   /// rows land in the index like any other and are filtered at read
   /// time. Reported separately from [droppedRows] so the C1-vs-C3
   /// diagnosis is not polluted by rows the user asked to exclude.
@@ -1021,7 +1021,7 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     };
     final hiddenIds = params.hiddenCategoryIds.toSet();
     final hiddenInitials = params.hiddenCategoryInitials.toSet();
-    // Option B (v1.0.19): the index holds the FULL catalog — no
+    // Option B (v1.1.0): the index holds the FULL catalog — no
     // write-time skip. The v1.0.16 skip dropped hidden rows from the
     // index and the disk file, so un-hiding a group could never bring
     // back rows that were never written (Matt's phone: EN was hidden at

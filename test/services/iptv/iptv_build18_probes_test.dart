@@ -627,7 +627,7 @@ void main() {
         await seedIptvSearchIndexFromFakePanel(api, 'conn-xt-1', types: {'live', 'movie'});
         final results = await client.searchItems('game of thrones', onlineAllowed: true);
         final diag = client.lastSearchDiagnostics!;
-        // v1.0.19: the submit's sync is fire-and-forget, and its first
+        // v1.1.0: the submit's sync is fire-and-forget, and its first
         // fetch now waits on a prefs read (the schema version) — let it
         // land before counting its calls, or the assertion races the
         // sync's start. The diagnostics above are the first search's,

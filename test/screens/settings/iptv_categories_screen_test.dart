@@ -145,7 +145,7 @@ void main() {
     // Initials: EN ×11 and NF ×9 offered, alphabetically; ES ×1 is below
     // the repeat threshold and never offered.
     expect(find.textContaining('Turn off whole groups at once'), findsOneWidget);
-    // v1.0.19: the header counts groups, and each row says its count
+    // v1.1.0: the header counts groups, and each row says its count
     // covers all types (the counts are global across Live TV, Movies
     // and TV Series).
     expect(find.textContaining('2 groups, 0 hidden'), findsOneWidget);

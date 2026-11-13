@@ -317,7 +317,7 @@ class IptvClient implements MediaServerClient {
   }
 
   /// The letter-group initials that hid the last search's matches, for
-  /// one library (v1.0.19): the search screen's empty state names the
+  /// one library (v1.1.0): the search screen's empty state names the
   /// hiding group instead of only counting. Empty when there was no
   /// search yet, when nothing was hidden, or when the library is not
   /// one of this connection's libraries.
@@ -483,7 +483,7 @@ class IptvClient implements MediaServerClient {
               // stamping now told the sync this type was just synced, so
               // a days-old disk was never refreshed for a week.
               syncStampMs: catalog.fetchedAt.millisecondsSinceEpoch,
-              // v1.0.19 (Option B): the seed lands the FULL rows from
+              // v1.1.0 (Option B): the seed lands the FULL rows from
               // whatever the disk file holds — the hidden sets only
               // feed the isolate's hiddenSkipped diagnostic count.
               hiddenCategoryIds: _hiddenCategories.toList(),
@@ -569,13 +569,13 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// The current catalog schema (v1.0.19): index + disk files hold the
+  /// The current catalog schema (v1.1.0): index + disk files hold the
   /// FULL catalog, filtered only at read time. A stored version below
   /// this means the files were written by the v1.0.16 lossy schema and
   /// the next sync re-fetches every type once to repair them.
   static const _currentCatalogSchemaVersion = 2;
 
-  /// SharedPreferences key for the catalog schema version (v1.0.19,
+  /// SharedPreferences key for the catalog schema version (v1.1.0,
   /// Option B): which schema the stored index + disk files were written
   /// under, per connection. Version 2 is the first schema whose index +
   /// disk hold the FULL catalog; version 1 (or absent) is the v1.0.16
@@ -602,7 +602,7 @@ class IptvClient implements MediaServerClient {
     }
   }
 
-  /// Record the catalog schema version as synced (v1.0.19): called only
+  /// Record the catalog schema version as synced (v1.1.0): called only
   /// after a sync loop completes cleanly, never on abort — an aborted
   /// run must not claim the repair is done. Never throws.
   Future<void> _writeCatalogSchemaVersion(int version) async {
@@ -762,9 +762,9 @@ class IptvClient implements MediaServerClient {
     final intervalHours = intervalHoursOverride ?? _catalogSyncIntervalHours();
     final dbPath = await IptvSearchIndex.dbFilePath();
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    // v1.0.19 (Option B): the stored catalog schema. Version 2 is the
+    // v1.1.0 (Option B): the stored catalog schema. Version 2 is the
     // first schema whose index + disk files hold the FULL catalog (the
-    // v1.0.16 write-time skip wrote visible rows only, so a pre-1.0.19
+    // v1.0.16 write-time skip wrote visible rows only, so a pre-1.1.0
     // index/disk is lossy: un-hiding a group could not bring back rows
     // that were never written). When the stored version is below 2 the
     // next sync re-fetches every type once — the repair — and the
@@ -916,7 +916,7 @@ class IptvClient implements MediaServerClient {
               catalogBody: body,
               categoryBody: jsonEncode(categories.map((c) => c.toJson()).toList()),
               syncStampMs: nowMs,
-              // v1.0.19 (Option B): the isolate lands the FULL rows;
+              // v1.1.0 (Option B): the isolate lands the FULL rows;
               // the hidden sets only feed its hiddenSkipped count.
               hiddenCategoryIds: _hiddenCategories.toList(),
               hiddenCategoryInitials: _hiddenCategoryInitials.toList(),
@@ -965,7 +965,7 @@ class IptvClient implements MediaServerClient {
           // due) refreshes it when the panel answers in full.
           if (!result.partial) {
             try {
-              // v1.0.19 (Option B): the disk file holds the FULL catalog
+              // v1.1.0 (Option B): the disk file holds the FULL catalog
               // (the raw body, verbatim) — the v1.0.16 filtered body is
               // gone. The cache size and the seed now reflect the whole
               // catalog; the read-time filter hides rows, never the
@@ -999,7 +999,7 @@ class IptvClient implements MediaServerClient {
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'failed'));
         }
       }
-      // v1.0.19 (Option B, D1 rule carried over): stamp the catalog
+      // v1.1.0 (Option B, D1 rule carried over): stamp the catalog
       // schema version ONLY when the run actually completed. A type
       // skipped 'failed', 'empty-response', 'oversize' or
       // 'partial-kept' kept its old rows with a recent lastSync, so
@@ -2039,7 +2039,7 @@ class IptvClient implements MediaServerClient {
     }
     final rows = await _xtreamApi.getLiveStreams();
     _liveLoadSource = 'network';
-    // v1.0.19 (Option B): the disk file holds the FULL catalog — the
+    // v1.1.0 (Option B): the disk file holds the FULL catalog — the
     // v1.0.16 write-time filter is gone. Live first-load has no
     // coverage guard (series fix left it as-is).
     _writeCatalogRows(
@@ -2099,7 +2099,7 @@ class IptvClient implements MediaServerClient {
       return false;
     }
     if (categories.isEmpty) return false;
-    // v1.0.19 (Option B): the denominator counts ALL categories — a
+    // v1.1.0 (Option B): the denominator counts ALL categories — a
     // fetch covering the whole catalog is complete even when most
     // categories are hidden, and hidden rows count toward the covered
     // set (they are in the disk file now, filtered at read time).
@@ -2141,7 +2141,7 @@ class IptvClient implements MediaServerClient {
           IptvSearchIndex.typeMovie,
           loaded.rows.map((r) => r.categoryId).whereType<String>(),
         )) {
-      // v1.0.19 (Option B): the disk file holds the FULL catalog (the
+      // v1.1.0 (Option B): the disk file holds the FULL catalog (the
       // guard above already counts all categories).
       _writeCatalogRows(
         IptvCatalogDiskCache.vodDataset,
@@ -2167,7 +2167,7 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: VOD category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    // v1.0.19 (Option B): the crawl fetches ALL categories — hidden ones
+    // v1.1.0 (Option B): the crawl fetches ALL categories — hidden ones
     // too. Rows are still never persisted (build #18); the read-time
     // filter hides them, and the next full sync re-fetches in one call.
     final wanted = categories.toList(growable: false);
@@ -2256,7 +2256,7 @@ class IptvClient implements MediaServerClient {
           IptvSearchIndex.typeSeries,
           loaded.rows.map((r) => r.categoryId).whereType<String>(),
         )) {
-      // v1.0.19 (Option B): the disk file holds the FULL catalog (the
+      // v1.1.0 (Option B): the disk file holds the FULL catalog (the
       // guard above already counts all categories).
       _writeCatalogRows(
         IptvCatalogDiskCache.seriesDataset,
@@ -2280,7 +2280,7 @@ class IptvClient implements MediaServerClient {
       appLogger.w('IPTV: series category list unavailable for fallback: $e');
       return const <XtreamCategory>[];
     });
-    // v1.0.19 (Option B): the crawl fetches ALL categories — hidden ones
+    // v1.1.0 (Option B): the crawl fetches ALL categories — hidden ones
     // too. Rows are still never persisted (build #18); the read-time
     // filter hides them, and the next full sync re-fetches in one call.
     final wanted = categories.toList(growable: false);
@@ -4163,7 +4163,7 @@ class IptvClient implements MediaServerClient {
         if (!match.hasMatch(entry.name)) continue;
         // A hidden group (its own switch, or its category initial) hides
         // its entries from search too. Item names are never filtered.
-        // A match in a hidden group is counted on the trace (v1.0.19),
+        // A match in a hidden group is counted on the trace (v1.1.0),
         // like the Xtream append builders, so the search screen can
         // name the hiding group instead of showing a bare "No results".
         if (_isHiddenGroup(entry.groupTitle)) {
@@ -5121,7 +5121,7 @@ class _SectionTrace {
   /// the filter hid them instead of showing a bare "No results".
   int hiddenMatches = 0;
 
-  /// The letter-group initials that hid those matches (v1.0.19): the
+  /// The letter-group initials that hid those matches (v1.1.0): the
   /// search screen names the hiding group instead of only counting.
   final hiddenInitials = <String>{};
   int ms = 0;
@@ -5201,7 +5201,7 @@ class IptvSearchSectionDiagnostics {
   /// you turned off" message reads this.
   final int hiddenMatches;
 
-  /// The letter-group initials that hid those matches (v1.0.19) — the
+  /// The letter-group initials that hid those matches (v1.1.0) — the
   /// search screen's "matches are in the EN group, which you turned
   /// off" message reads this. Empty when nothing was hidden by a group
   /// (hidden by per-category id only).

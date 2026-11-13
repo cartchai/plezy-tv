@@ -331,7 +331,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
 
   void _setAllInitials(bool shown) {
     if (shown) {
-      // Show all means show ALL (v1.0.19): clear every hidden initial,
+      // Show all means show ALL (v1.1.0): clear every hidden initial,
       // including ones below the offer threshold or in the content-word
       // denylist that have no toggle on screen — the old code only
       // cleared the offered ones, so a group hidden that way could
@@ -545,7 +545,7 @@ class _IptvCategoriesScreenState extends State<IptvCategoriesScreen> {
       );
     }
     final hidden = _hiddenInitials.length;
-    // v1.0.19: the header counts GROUPS, not categories — the old
+    // v1.1.0: the header counts GROUPS, not categories — the old
     // sectionCount label said "37 categories" for 37 groups.
     final title =
         '${t.iptvCategories.initialsHeading} · ${t.iptvCategories.groupsSectionCount(total: initials.length, hidden: hidden)}';

@@ -671,7 +671,7 @@ https://example.com/cnn.ts
     // Build v1.0.10 (M3): same index note as the TTL group above.
     setUp(() async {
       IptvSearchIndex.debugDirectoryProvider = () async => tempDir;
-      // v1.0.19: the seeded state models a steady-state v1.0.19 disk
+      // v1.1.0: the seeded state models a steady-state v1.1.0 disk
       // (fresh types + one stale type), so stamp schema version 2 —
       // otherwise the first sync repairs (re-fetches all three types)
       // and the "exactly one event" premise fails.

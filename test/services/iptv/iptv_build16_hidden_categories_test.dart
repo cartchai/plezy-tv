@@ -1,4 +1,4 @@
-// HIDDEN CATEGORIES, READ-TIME ONLY — PlezTV v1.0.19 (Option B).
+// HIDDEN CATEGORIES, READ-TIME ONLY — PlezTV v1.1.0 (Option B).
 //
 // Reversal of the v1.0.16 write-time skip (Matt, 2026-11-12: "make it so
 // data from turned off categories doesn't download or cache" — the skip
@@ -200,7 +200,7 @@ void main() {
     }
   });
 
-  group('hidden categories, read-time only v1.0.19', () {
+  group('hidden categories, read-time only v1.1.0', () {
     test('H1: hidden-by-id rows land in the index but stay unsearchable', () async {
       final client = _clientWith(_HiddenPanel(), hiddenCategoryIds: const ['cat3', 'cat4']);
 
