@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:xml/xml.dart';
 
 import '../connection/connection.dart';
 import '../exceptions/media_server_exceptions.dart';
@@ -17,6 +18,7 @@ import '../models/livetv_channel.dart';
 import '../models/livetv_program.dart';
 import '../models/transcode_quality_preset.dart';
 import '../services/favorite_channels_repository.dart';
+import '../services/iptv/iptv_epg_sources.dart';
 import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/xmltv_parser.dart';
 import '../services/settings_service.dart';
@@ -55,6 +57,11 @@ class IptvGuideCoverage {
   final int unknown;
   final int feedChannelIds;
 
+  /// Channels with programmes per configured source id (PlezTV 1.2.0) —
+  /// the per-source breakdown of the coverage diagnostic (§3.4). Only
+  /// entries that recorded a source id are counted.
+  final Map<String, int> bySourceId;
+
   const IptvGuideCoverage({
     required this.total,
     required this.withPrograms,
@@ -64,6 +71,7 @@ class IptvGuideCoverage {
     required this.none,
     required this.unknown,
     required this.feedChannelIds,
+    this.bySourceId = const {},
   });
 
   const IptvGuideCoverage.empty()
@@ -74,7 +82,8 @@ class IptvGuideCoverage {
       fromShortEpg = 0,
       none = 0,
       unknown = 0,
-      feedChannelIds = 0;
+      feedChannelIds = 0,
+      bySourceId = const {};
 
   /// Share of loaded channels with programmes, 0–100 (0 when none loaded).
   int get percentWithPrograms => total == 0 ? 0 : (withPrograms * 100 / total).round();
@@ -244,7 +253,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   final Map<String, _CachedChannelEpg> _epgCache = {};
 
   /// Parsed XMLTV files, keyed by EPG URL (M3U) or by a sentinel for the
-  /// Xtream login's `xmltv.php` feed (see [_xtreamXmltvGuide]).
+  /// Xtream login's `xmltv.php` feed (see [_fetchFeedPrograms]).
   final Map<String, _CachedXmltvGuide> _xmltvCache = {};
 
   /// In-flight XMLTV fetches, keyed like [_xmltvCache]: the guide opens
@@ -320,6 +329,10 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// stops (the listener bumps the guide version) and by
   /// [clearEpgCache].
   final Set<String> _deferredEpgChannels = {};
+
+  /// The quiet-hour boundary this support instance already refreshed for
+  /// (§3.3) — a refresh is once per boundary, not once per guide open.
+  DateTime? _quietHourRefreshedFor;
 
   /// D1b: when playback stops, channels deferred by the gate must
   /// reload. The guide watches [epgVersion] and re-fetches visible rows
@@ -440,12 +453,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
     _noteEpgAttempt(now);
     List<LiveTvProgram> programs;
     IptvEpgSource source;
+    String? fetchedSourceId;
+    String? fetchedMatchedXmltvId;
+    String? fetchedMatchMethod;
     try {
       final fetched = _isXtream
           ? await _fetchXtreamEpg(channelKey, settings, fetchFrom, fetchTo, ttl, force: force)
           : await _fetchM3uEpg(channelKey, settings, fetchFrom, fetchTo, ttl, force: force);
       programs = fetched.programs;
       source = fetched.source;
+      fetchedSourceId = fetched.sourceId;
+      fetchedMatchedXmltvId = fetched.matchedXmltvId;
+      fetchedMatchMethod = fetched.matchMethod;
       if (fetched.feedDeferred) {
         // D1b: the feed was deferred by the playback gate — not a
         // failure and not a genuine empty. Return [] WITHOUT caching,
@@ -465,7 +484,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       rethrow;
     }
 
-    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo, source: source);
+    final entry = _CachedChannelEpg(programs: programs, fetchedAt: now, windowFrom: fetchFrom, windowTo: fetchTo, source: source, sourceId: fetchedSourceId, matchedXmltvId: fetchedMatchedXmltvId, matchMethod: fetchedMatchMethod);
     _epgCache[channelKey] = entry;
     // Best-effort and fire-and-forget: a failed write never breaks the
     // guide — the in-memory entry above still serves this launch — and
@@ -652,7 +671,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// `get_short_epg` answers FIRST for the visible channel. If it has
   /// nothing for the channel, the login's big `xmltv.php` feed is fetched
   /// (one shared fetch for the whole catalog, deduped by
-  /// [_xtreamXmltvGuide]) and matched by tvg-id — build #26 (R3): the
+  /// [_fetchFeedPrograms]) and matched by tvg-id — build #26 (R3): the
   /// feed used to start loading in the background on EVERY channel fetch,
   /// even when short-EPG answered, which downloaded + parsed ~150 MB for
   /// nobody. The old order — xmltv first — made every visible row wait on
@@ -664,7 +683,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// as "answering" — only a feed that LOADS but has nothing for the
   /// channel answers empty. A playback-gate deferral is neither a
   /// failure nor an answer (see [_fetchXtreamEpgWithAbort]).
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamEpg(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchXtreamEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -690,7 +709,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamEpgWithAbort(
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchXtreamEpgWithAbort(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -718,7 +737,7 @@ class IptvLiveTvSupport implements LiveTvSupport {
       appLogger.w('IPTV: get_short_epg failed for channel $channelKey; using xmltv.php', error: e);
     }
     if (shortEpg != null && shortEpg.isNotEmpty) {
-      return (programs: shortEpg, source: IptvEpgSource.shortEpg, feedDeferred: false);
+      return (programs: shortEpg, source: IptvEpgSource.shortEpg, feedDeferred: false, sourceId: null, matchedXmltvId: null, matchMethod: null);
     }
     // get_short_epg had nothing (or failed): use the feed, starting it
     // now. A feed that loads but has nothing for the channel returns
@@ -731,18 +750,30 @@ class IptvLiveTvSupport implements LiveTvSupport {
     // or the app backgrounded, and the feed is a download nobody watches.
     abort.throwIfAborted();
     try {
-      return await _fetchXtreamXmltvPrograms(channelKey, settings, from, to, ttl, force: force);
-    } on _EpgFeedDeferred {
-      // D1b: the feed was deferred by the playback gate — not a failure
-      // and not a genuine empty. Return empty without caching (the
-      // caller skips the cache write for deferred results) and record
-      // the deferral, so the idle listener bumps the guide version and
-      // the channel reloads when playback stops. The old comment
-      // claimed "it retries when playback stops" — nothing listened
-      // for playback stopping, so the deferred fetch was recorded as
-      // loaded-empty for the whole interval instead.
-      _recordFeedDeferral(channelKey);
-      return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: true);
+      final feed = await _fetchFeedPrograms(channelKey, settings, from, to, ttl, force: force);
+      if (feed.feedDeferred) {
+        // D1b (now inside the multi-source fetch): every source deferred
+        // by the playback gate — not a failure and not a genuine empty.
+        // Return empty without caching; the deferral is already recorded
+        // by _fetchFeedPrograms, so the idle listener bumps the guide
+        // version and the channel reloads when playback stops.
+        return (
+          programs: const <LiveTvProgram>[],
+          source: IptvEpgSource.none,
+          feedDeferred: true,
+          sourceId: null,
+          matchedXmltvId: null,
+          matchMethod: null,
+        );
+      }
+      return (
+        programs: feed.programs,
+        source: feed.source,
+        feedDeferred: false,
+        sourceId: feed.sourceId,
+        matchedXmltvId: feed.matchedXmltvId,
+        matchMethod: feed.matchMethod,
+      );
     } catch (e) {
       // A cancellation is not a failure (build #28): the app
       // backgrounded mid-download. The gate test pins the old
@@ -750,7 +781,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
       // a throw — so keep returning [] for cancellations; only a
       // genuine feed FAILURE takes the D1a rethrow below.
       if (MediaServerHttpException.from(e).isCancellation) {
-        return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
+        return (
+          programs: const <LiveTvProgram>[],
+          source: IptvEpgSource.none,
+          feedDeferred: false,
+          sourceId: null,
+          matchedXmltvId: null,
+          matchMethod: null,
+        );
       }
       if (shortEpg != null) {
         // D1a: get_short_epg ANSWERED (empty) and the feed FAILED. A
@@ -773,19 +811,19 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  /// Programmes for one channel out of the login's `xmltv.php` feed, plus
-  /// which match served them (build #17, §10).
-  /// The feed is fetched lazily (only when a channel's cached entry is
-  /// stale or missing) and the parsed file is shared by every channel in
-  /// the guide — never one fetch per channel. Matching is by the channel's
-  /// tvg-id (`epg_channel_id`); some panels use the stream id as the XMLTV
-  /// channel id, so that matches too. When neither hits, the channel's
-  /// normalized name is tried against the feed's normalized channel ids —
-  /// a feed whose ids are plain names matches a playlist whose names carry
-  /// region prefixes. The source names what actually served programmes
-  /// (after window filtering): a match whose programmes all fall outside
-  /// the window still counts as `none` — the guide shows nothing for it.
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchXtreamXmltvPrograms(
+  /// Programmes for one channel out of the connection's XMLTV feeds —
+  /// the provider feed plus any enabled third-party sources, in priority
+  /// order (PlezTV 1.2.0, §3.1). Per source: a manual assignment is
+  /// tried first, then the channel's tvg-id, then its normalized name.
+  /// The first source with data wins (TiviMate Premium model); the
+  /// "added sources take precedence" toggle puts the added sources
+  /// first. A source that fails is recorded in its status and skipped —
+  /// a failed source never blocks the next one. A feed that loads but
+  /// has nothing for the channel is a genuine empty; a feed that FAILS
+  /// (and no source loaded) throws, like the single-feed path did
+  /// (1.1.2 D1a). A playback-gate deferral on every source is neither:
+  /// it returns [feedDeferred] and nothing is cached (D1b).
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchFeedPrograms(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -793,23 +831,294 @@ class IptvLiveTvSupport implements LiveTvSupport {
     Duration? ttl, {
     bool force = false,
   }) async {
-    final guide = await _xtreamXmltvGuide(ttl: ttl, force: force);
-    _lastXmltvFeedChannelIds = guide.byChannel.length;
-    final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
-    final byId = <XmltvProgram>[];
-    if (epgChannelId != null) byId.addAll(guide.byChannel[epgChannelId] ?? const []);
-    if (epgChannelId != channelKey) byId.addAll(guide.byChannel[channelKey] ?? const []);
-    var programs = _mapXmltvPrograms(byId, channelKey, settings, from, to, keyPrefix: 'xtream');
-    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById, feedDeferred: false);
-    final channelName = _client.channelNameForChannelKey(channelKey);
-    if (channelName != null && channelName.isNotEmpty) {
-      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
-      programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'xtream');
-      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName, feedDeferred: false);
+    final attempts = await _epgSourceAttempts();
+    if (attempts.isEmpty) {
+      return (
+        programs: const <LiveTvProgram>[],
+        source: IptvEpgSource.none,
+        feedDeferred: false,
+        sourceId: null,
+        matchedXmltvId: null,
+        matchMethod: null,
+      );
     }
-    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
+    final mappings = await _epgStore.loadMappings();
+    final mapping = mappings[channelKey];
+    final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
+    final tvgId = _client.tvgIdForChannelKey(channelKey);
+    final channelName = _client.channelNameForChannelKey(channelKey);
+    var sawDeferred = false;
+    var anyLoaded = false;
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    for (final attempt in attempts) {
+      _CachedXmltvGuide guide;
+      try {
+        final started = DateTime.now();
+        final (loaded, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchStream, ttl, force: force);
+        guide = loaded;
+        anyLoaded = true;
+        if (loadedFresh) {
+          await _recordSourceSuccess(attempt.config, attempt.cacheKey, guide, started);
+        }
+      } on _EpgFeedDeferred {
+        sawDeferred = true;
+        continue;
+      } catch (e, st) {
+        // A cancellation is not a failure (build #28): the row scrolled
+        // away or the app backgrounded — the fetch is over, not a reason
+        // to try the next source's download.
+        if (MediaServerHttpException.from(e).isCancellation) rethrow;
+        lastError = e;
+        lastStackTrace = st;
+        await _recordSourceFailure(attempt.config, e);
+        continue;
+      }
+      if (guide.byChannel.length > _lastXmltvFeedChannelIds) {
+        _lastXmltvFeedChannelIds = guide.byChannel.length;
+      }
+      final match = _matchInGuide(
+        guide,
+        channelKey,
+        mapping,
+        attempt.config.id,
+        epgChannelId,
+        tvgId,
+        channelName,
+        settings,
+        from,
+        to,
+        keyPrefix: attempt.keyPrefix,
+        offsetMinutes: attempt.config.timeShiftMinutes,
+      );
+      if (match == null) continue;
+      return (
+        programs: match.programs,
+        source: match.matchMethod == 'name' ? IptvEpgSource.feedByName : IptvEpgSource.feedById,
+        feedDeferred: false,
+        sourceId: attempt.config.id,
+        matchedXmltvId: match.matchedXmltvId,
+        matchMethod: match.matchMethod,
+      );
+    }
+    if (!anyLoaded) {
+      if (sawDeferred) {
+        // Every source deferred — the caller returns an uncached empty
+        // (D1b), and the deferral is recorded so the idle listener bumps
+        // the guide version and the row re-fetches when playback stops.
+        _recordFeedDeferral(channelKey);
+        return (
+          programs: const <LiveTvProgram>[],
+          source: IptvEpgSource.none,
+          feedDeferred: true,
+          sourceId: null,
+          matchedXmltvId: null,
+          matchMethod: null,
+        );
+      }
+      if (lastError != null) Error.throwWithStackTrace(lastError, lastStackTrace ?? StackTrace.empty);
+    }
+    return (
+      programs: const <LiveTvProgram>[],
+      source: IptvEpgSource.none,
+      feedDeferred: false,
+      sourceId: null,
+      matchedXmltvId: null,
+      matchMethod: null,
+    );
   }
 
+  /// The match chain for one loaded guide (shared by the fetch path, the
+  /// local details probe, and the without-guide computation): a manual
+  /// assignment for this source first, then the tvg-id, then the
+  /// normalized name. Null when nothing in this guide serves the channel
+  /// in the window.
+  ({List<LiveTvProgram> programs, String matchedXmltvId, String matchMethod})? _matchInGuide(
+    _CachedXmltvGuide guide,
+    String channelKey,
+    IptvEpgMapping? mapping,
+    String? sourceId,
+    String? epgChannelId,
+    String? tvgId,
+    String? channelName,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to, {
+    required String keyPrefix,
+    int? offsetMinutes,
+  }) {
+    if (mapping != null && mapping.sourceId == sourceId) {
+      final mapped = _mapXmltvPrograms(
+        guide.byChannel[mapping.xmltvId] ?? const [],
+        channelKey,
+        settings,
+        from,
+        to,
+        keyPrefix: keyPrefix,
+        offsetMinutes: offsetMinutes,
+      );
+      if (mapped.isNotEmpty) {
+        return (programs: mapped, matchedXmltvId: mapping.xmltvId, matchMethod: 'manual');
+      }
+    }
+    // The tvg-id candidates, in the old order: Xtream tries its
+    // `epg_channel_id` then the stream id (the key); M3U tries its
+    // tvg-id, which IS the key when present. One list covers both.
+    final candidates = <String>{?epgChannelId, ?tvgId, channelKey}.toList(growable: false);
+    for (final id in candidates) {
+      final programs = _mapXmltvPrograms(
+        guide.byChannel[id] ?? const [],
+        channelKey,
+        settings,
+        from,
+        to,
+        keyPrefix: keyPrefix,
+        offsetMinutes: offsetMinutes,
+      );
+      if (programs.isNotEmpty) {
+        return (programs: programs, matchedXmltvId: id, matchMethod: 'tvg-id');
+      }
+    }
+    if (channelName != null && channelName.isNotEmpty) {
+      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
+      final programs = _mapXmltvPrograms(
+        byName,
+        channelKey,
+        settings,
+        from,
+        to,
+        keyPrefix: keyPrefix,
+        offsetMinutes: offsetMinutes,
+      );
+      if (programs.isNotEmpty) {
+        return (programs: programs, matchedXmltvId: byName.first.channelId, matchMethod: 'name');
+      }
+    }
+    return null;
+  }
+
+  /// One feed fetch per enabled source, in priority order (PlezTV 1.2.0,
+  /// §3.1): the provider feed plus every enabled user-added source.
+  /// [keyPrefix] names the source in programme keys (`xtream` for the
+  /// provider feed, `m3u` for a playlist guide, `user` for added ones)
+  /// so a programme served by an added source never collides with the
+  /// provider's key for the same channel+start.
+  Future<List<_EpgSourceAttempt>> _epgSourceAttempts() async {
+    final userSources = await _epgStore.loadUserSources();
+    final enabled = userSources.where((s) => s.enabled).toList(growable: false);
+    final provider = _providerSourceAttempt();
+    final added = enabled
+        .map(
+          (s) => _EpgSourceAttempt(
+            config: s,
+            cacheKey: 'user:${s.id}',
+            keyPrefix: 'user',
+            fetchStream: (abortTrigger) => _m3uFeedStream(s.url!, abortTrigger),
+          ),
+        )
+        .toList(growable: false);
+    final addedFirst = await _epgStore.loadAddedSourcesFirst();
+    if (addedFirst) return [...added, ?provider];
+    return [?provider, ...added];
+  }
+
+  /// The provider feed's fetch (Xtream: the login's `xmltv.php`; M3U:
+  /// the playlist's declared EPG URL). Null when the connection has no
+  /// provider feed (an M3U playlist without a declared URL).
+  _EpgSourceAttempt? _providerSourceAttempt() {
+    if (_isXtream) {
+      return _EpgSourceAttempt(
+        config: _providerConfig(),
+        cacheKey: 'xtream:${_client.connection.id}',
+        keyPrefix: 'xtream',
+        fetchStream: (abortTrigger) => _client.xtreamApi.getXmltvStream(abortTrigger: abortTrigger),
+      );
+    }
+    final connection = _client.connection;
+    if (connection is M3uConnection && connection.epgUrl != null && connection.epgUrl!.isNotEmpty) {
+      final url = connection.epgUrl!;
+      return _EpgSourceAttempt(
+        config: _providerConfig(),
+        cacheKey: url,
+        keyPrefix: 'm3u',
+        fetchStream: (abortTrigger) => _m3uFeedStream(url, abortTrigger),
+      );
+    }
+    return null;
+  }
+
+  IptvEpgSourceConfig _providerConfig() => const IptvEpgSourceConfig(
+    id: IptvEpgSourceConfig.providerId,
+    kind: IptvEpgSourceConfig.kindProvider,
+    name: 'Provider guide',
+  );
+
+  /// Load one source's guide, saying whether it loaded fresh (a download
+  /// or a persisted-file parse — the status-worthy event) or was served
+  /// from the fresh in-memory cache. The stale-while-revalidate path
+  /// returns the stale guide while the refresh runs in the background,
+  /// so a serve is not a fresh load.
+  Future<(_CachedXmltvGuide guide, bool loadedFresh)> _loadSourceGuide(
+    String cacheKey,
+    Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream,
+    Duration? ttl, {
+    bool force = false,
+  }) async {
+    final before = _xmltvCache[cacheKey]?.fetchedAt;
+    final guide = await _xmltvGuideForKey(cacheKey, fetchStream, ttl, force: force);
+    return (guide, before == null || guide.fetchedAt != before);
+  }
+
+  /// Record a fresh source load in the per-source status (§3.1): last
+  /// success, programmes + channels stored, feed size, fetch duration.
+  /// A success clears a previous failure — the chip goes green again.
+  Future<void> _recordSourceSuccess(
+    IptvEpgSourceConfig config,
+    String cacheKey,
+    _CachedXmltvGuide guide,
+    DateTime started,
+  ) async {
+    final size = await _xmltvFeedFileSize(cacheKey);
+    final statuses = await _epgStore.loadStatuses();
+    final status = statuses[config.id] ?? IptvEpgSourceStatus.empty;
+    await _epgStore.saveStatus(
+      config.id,
+      status.copyWith(
+        lastSuccess: DateTime.now(),
+        clearFailure: true,
+        programs: guide.programs.length,
+        channels: guide.byChannel.length,
+        sizeBytes: size,
+        durationMs: DateTime.now().difference(started).inMilliseconds,
+      ),
+    );
+  }
+
+  /// Record a failed source load in the per-source status (§3.1): last
+  /// failure + reason. The previous success (if any) stays, so the chip
+  /// can say "failed since ...".
+  Future<void> _recordSourceFailure(IptvEpgSourceConfig config, Object error) async {
+    final statuses = await _epgStore.loadStatuses();
+    final status = statuses[config.id] ?? IptvEpgSourceStatus.empty;
+    await _epgStore.saveStatus(
+      config.id,
+      status.copyWith(lastFailure: DateTime.now(), lastFailureReason: error.toString()),
+    );
+  }
+
+  /// The persisted feed file's size in bytes (0 when the feed is not
+  /// persisted — tests disable the persisted side, and a memory-only
+  /// guide has no file). Best-effort, never throws.
+  Future<int> _xmltvFeedFileSize(String cacheKey) async {
+    if (debugDisablePersistedEpg) return 0;
+    try {
+      final file = await _xmltvFeedFile(cacheKey);
+      if (!file.existsSync()) return 0;
+      return file.lengthSync();
+    } catch (_) {
+      return 0;
+    }
+  }
   /// One channel's `get_short_epg` listings — the fallback when the
   /// `xmltv.php` feed has nothing for the channel (or cannot be fetched).
   /// Limit 500 covers ~10 days of half-hour slots; anything past the limit
@@ -898,7 +1207,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     if (_shortEpgWaiters.isNotEmpty) _shortEpgWaiters.removeAt(0).complete();
   }
 
-  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred})> _fetchM3uEpg(
+  /// Programmes for one channel out of the playlist's XMLTV guide —
+  /// the provider feed plus any enabled third-party sources, in
+  /// priority order (PlezTV 1.2.0, §3.1). A manual assignment fixes an
+  /// id-less channel; without one, an M3U channel with no tvg-id never
+  /// tried the name fallback (1.1.3 defect D2) and still doesn't — the
+  /// assignment is the answer for those.
+  Future<({List<LiveTvProgram> programs, IptvEpgSource source, bool feedDeferred, String? sourceId, String? matchedXmltvId, String? matchMethod})> _fetchM3uEpg(
     String channelKey,
     _EpgSettings settings,
     DateTime from,
@@ -907,35 +1222,46 @@ class IptvLiveTvSupport implements LiveTvSupport {
     bool force = false,
   }) async {
     final connection = _client.connection;
-    if (connection is! M3uConnection) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
-    final epgUrl = connection.epgUrl;
-    if (epgUrl == null || epgUrl.isEmpty) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
-    // The XMLTV `channel` attribute matches the entry's tvg-id, which is
-    // also the M3U channel key when present. When it misses, the entry's
-    // normalized name is tried (build #17, §10) — same fallback as Xtream.
-    final tvgId = _client.tvgIdForChannelKey(channelKey);
-    if (tvgId == null) return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
-    // D1b: the M3U feed defers the same way the Xtream feed does — a
-    // deferred feed is not a failure and not a genuine empty.
-    _CachedXmltvGuide guide;
-    try {
-      guide = await _xmltvGuide(epgUrl, ttl: ttl, force: force);
-    } on _EpgFeedDeferred {
-      _recordFeedDeferral(channelKey);
-      return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: true);
+    if (connection is! M3uConnection) {
+      return (
+        programs: const <LiveTvProgram>[],
+        source: IptvEpgSource.none,
+        feedDeferred: false,
+        sourceId: null,
+        matchedXmltvId: null,
+        matchMethod: null,
+      );
     }
-    _lastXmltvFeedChannelIds = guide.byChannel.length;
-    var programs = _mapXmltvPrograms(guide.byChannel[tvgId] ?? const [], channelKey, settings, from, to, keyPrefix: 'm3u');
-    if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedById, feedDeferred: false);
-    final channelName = _client.channelNameForChannelKey(channelKey);
-    if (channelName != null && channelName.isNotEmpty) {
-      final byName = guide.byNormalizedName[normalizeEpgChannelName(channelName)] ?? const [];
-      programs = _mapXmltvPrograms(byName, channelKey, settings, from, to, keyPrefix: 'm3u');
-      if (programs.isNotEmpty) return (programs: programs, source: IptvEpgSource.feedByName, feedDeferred: false);
+    final attempts = await _epgSourceAttempts();
+    if (attempts.isEmpty) {
+      return (
+        programs: const <LiveTvProgram>[],
+        source: IptvEpgSource.none,
+        feedDeferred: false,
+        sourceId: null,
+        matchedXmltvId: null,
+        matchMethod: null,
+      );
     }
-    return (programs: const <LiveTvProgram>[], source: IptvEpgSource.none, feedDeferred: false);
+    final mappings = await _epgStore.loadMappings();
+    if (mappings[channelKey] == null) {
+      // No manual assignment: an M3U channel with no tvg-id never tried
+      // the name fallback (defect D2, queued for 1.1.3) — the
+      // assignment is the answer for those.
+      final tvgId = _client.tvgIdForChannelKey(channelKey);
+      if (tvgId == null) {
+        return (
+          programs: const <LiveTvProgram>[],
+          source: IptvEpgSource.none,
+          feedDeferred: false,
+          sourceId: null,
+          matchedXmltvId: null,
+          matchMethod: null,
+        );
+      }
+    }
+    return _fetchFeedPrograms(channelKey, settings, from, to, ttl, force: force);
   }
-
   /// Map parsed XMLTV programmes for one channel to guide programs,
   /// window-filtered and sorted. Shared by the M3U (user EPG URL) and
   /// Xtream (`xmltv.php`) paths.
@@ -946,10 +1272,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
     DateTime from,
     DateTime to, {
     required String keyPrefix,
+    int? offsetMinutes,
   }) {
     final fromEpoch = from.millisecondsSinceEpoch ~/ 1000;
     final toEpoch = to.millisecondsSinceEpoch ~/ 1000;
-    final offsetSeconds = settings.timeOffsetMinutes * 60;
+    final offsetSeconds = (offsetMinutes ?? settings.timeOffsetMinutes) * 60;
     final programs = <LiveTvProgram>[];
     for (final entry in entries) {
       final beginsAt = entry.startEpoch + offsetSeconds;
@@ -1275,11 +1602,6 @@ class IptvLiveTvSupport implements LiveTvSupport {
     }
   }
 
-  /// The M3U connection's user-supplied EPG URL, as a parsed guide.
-  Future<_CachedXmltvGuide> _xmltvGuide(String epgUrl, {Duration? ttl, bool force = false}) {
-    return _xmltvGuideForKey(epgUrl, (abortTrigger) => _m3uFeedStream(epgUrl, abortTrigger), ttl, force: force);
-  }
-
   /// The M3U feed as a byte stream (build #26): the old bare `http.get`
   /// buffered the whole body, and its abort only raced the get — the
   /// socket could finish in the background. An [AbortableRequest] aborts
@@ -1298,18 +1620,6 @@ class IptvLiveTvSupport implements LiveTvSupport {
     } finally {
       client.close();
     }
-  }
-
-  /// The Xtream login's `xmltv.php` feed, as a parsed guide. One guide per
-  /// connection (the support is per-client), fetched lazily on the first
-  /// channel that needs it and shared by the rest of the guide.
-  Future<_CachedXmltvGuide> _xtreamXmltvGuide({Duration? ttl, bool force = false}) {
-    return _xmltvGuideForKey(
-      'xtream:${_client.connection.id}',
-      (abortTrigger) => _client.xtreamApi.getXmltvStream(abortTrigger: abortTrigger),
-      ttl,
-      force: force,
-    );
   }
 
   /// Bump on every cache clear so the guide can tell its per-channel state
@@ -1340,12 +1650,16 @@ class IptvLiveTvSupport implements LiveTvSupport {
     var fromShortEpg = 0;
     var none = 0;
     var unknown = 0;
+    final bySourceId = <String, int>{};
     for (final entry in _epgCache.values) {
       if (entry.programs.isEmpty) {
         none++;
         continue;
       }
       withPrograms++;
+      if (entry.sourceId != null) {
+        bySourceId[entry.sourceId!] = (bySourceId[entry.sourceId!] ?? 0) + 1;
+      }
       switch (entry.source) {
         case IptvEpgSource.feedById:
           fromFeedById++;
@@ -1370,7 +1684,526 @@ class IptvLiveTvSupport implements LiveTvSupport {
       none: none,
       unknown: unknown,
       feedChannelIds: _lastXmltvFeedChannelIds,
+      bySourceId: bySourceId,
     );
+  }
+
+  /// Per-connection EPG sources store (§3.1/§3.2): user-added sources,
+  /// the precedence toggle, manual mappings, per-source status, and the
+  /// channel-list fingerprint. SharedPreferences-backed, keyed by
+  /// connection id.
+  IptvEpgSourcesStore get _epgStore => IptvEpgSourcesStore(_client.connection.id);
+
+  /// The connection's sources in stored order: the provider feed first
+  /// (when one exists — Xtream always, M3U only with a declared EPG
+  /// URL), then added sources in the order the user arranged them. The
+  /// provider cannot be removed, disabled, or moved.
+  Future<List<IptvEpgSourceConfig>> epgSources() async {
+    final user = await _epgStore.loadUserSources();
+    final provider = _providerSourceAttempt();
+    return [if (provider != null) _providerConfig(), ...user];
+  }
+
+  /// Add a third-party EPG source (§3.1): validate the URL first (fetch
+  /// the first bytes and confirm it parses as XMLTV — user-initiated, so
+  /// the SEARCH/STARTUP rules don't apply), then store it. Returns the
+  /// stored config. Throws [StateError] with the reason when validation
+  /// fails. The same URL may be added twice (different names — the
+  /// reorder test does exactly that); each entry is its own source.
+  Future<IptvEpgSourceConfig> addEpgSource(String url, {String? name, int? timeShiftMinutes}) async {
+    final trimmed = url.trim();
+    await validateEpgSourceUrl(trimmed);
+    final uri = Uri.parse(trimmed);
+    // A growable copy: the store returns an unmodifiable list.
+    final sources = (await _epgStore.loadUserSources()).toList();
+    final config = IptvEpgSourceConfig(
+      id: IptvEpgSourceConfig.newUserId(),
+      kind: IptvEpgSourceConfig.kindXmltv,
+      url: trimmed,
+      name: (name ?? '').trim().isEmpty ? uri.host : name!.trim(),
+      timeShiftMinutes: timeShiftMinutes,
+    );
+    sources.add(config);
+    await _epgStore.saveUserSources(sources);
+    return config;
+  }
+
+  /// Change an added source (enable/disable, rename, time shift). The
+  /// provider guide cannot be changed.
+  Future<void> updateEpgSource(IptvEpgSourceConfig source) async {
+    if (source.isProvider) throw ArgumentError('The provider guide cannot be changed');
+    final sources = (await _epgStore.loadUserSources()).toList();
+    final index = sources.indexWhere((s) => s.id == source.id);
+    if (index < 0) throw ArgumentError('Unknown EPG source ${source.id}');
+    sources[index] = source;
+    await _epgStore.saveUserSources(sources);
+  }
+
+  /// Remove an added source. The provider guide cannot be removed. A
+  /// removed source stays removed (IPTVnator rule), and its mappings go
+  /// with it — a deleted source must not keep matching channels.
+  Future<void> deleteEpgSource(String sourceId) async {
+    if (sourceId == IptvEpgSourceConfig.providerId) {
+      throw ArgumentError('The provider guide cannot be removed');
+    }
+    final sources = (await _epgStore.loadUserSources()).toList();
+    sources.removeWhere((s) => s.id == sourceId);
+    await _epgStore.saveUserSources(sources);
+    final mappings = await _epgStore.loadMappings();
+    mappings.removeWhere((_, mapping) => mapping.sourceId == sourceId);
+    await _epgStore.saveMappings(mappings);
+    final statuses = await _epgStore.loadStatuses();
+    statuses.remove(sourceId);
+    await _epgStore.saveStatuses(statuses);
+  }
+
+  /// Move an added source up ([delta] -1) or down (+1) in the priority
+  /// order. No-op at the ends and for unknown ids. The provider feed
+  /// never moves — the precedence toggle is what flips it below the
+  /// added sources.
+  Future<void> moveEpgSource(String sourceId, int delta) async {
+    final sources = (await _epgStore.loadUserSources()).toList();
+    final index = sources.indexWhere((s) => s.id == sourceId);
+    if (index < 0) return;
+    final target = (index + delta).clamp(0, sources.length - 1);
+    if (target == index) return;
+    final source = sources.removeAt(index);
+    sources.insert(target, source);
+    await _epgStore.saveUserSources(sources);
+  }
+
+  /// "Added sources take precedence over the provider guide" (IPTVnator
+  /// toggle, §3.1). Default off — the provider feed first, added sources
+  /// fill gaps (TiviMate Premium model).
+  Future<bool> addedSourcesTakePrecedence() => _epgStore.loadAddedSourcesFirst();
+
+  Future<void> setAddedSourcesTakePrecedence(bool value) => _epgStore.saveAddedSourcesFirst(value);
+
+  /// Per-source status (§3.1): every known source has an entry (missing
+  /// = never fetched). The UI reads the display state from each status
+  /// with the update interval as the freshness bar.
+  Future<Map<String, IptvEpgSourceStatus>> epgSourceStatuses() async {
+    final stored = await _epgStore.loadStatuses();
+    final sources = await epgSources();
+    final out = <String, IptvEpgSourceStatus>{};
+    for (final source in sources) {
+      out[source.id] = stored[source.id] ?? IptvEpgSourceStatus.empty;
+    }
+    return out;
+  }
+
+  /// Validate an EPG source URL before adding it (§3.1): it must be an
+  /// http(s) URL that answers 200 with bytes that parse as XMLTV. Only
+  /// the first 256 KB are read — a multi-megabyte feed is never
+  /// downloaded for validation. Throws [StateError] with the reason.
+  Future<void> validateEpgSourceUrl(String url) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https')) || uri.host.isEmpty) {
+      throw StateError('Not a valid http(s) URL');
+    }
+    final client = http.Client();
+    try {
+      final response = await client.send(http.Request('GET', uri)).timeout(const Duration(seconds: 15));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('EPG source returned HTTP ${response.statusCode}');
+      }
+      const cap = 256 * 1024;
+      final bytes = <int>[];
+      await for (final chunk in response.stream.timeout(const Duration(seconds: 15))) {
+        bytes.addAll(chunk);
+        if (bytes.length >= cap) break;
+      }
+      _checkXmltvPrefix(bytes);
+    } on StateError {
+      rethrow;
+    } catch (e) {
+      throw StateError('Could not fetch the EPG source: $e');
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Confirm the first bytes of a would-be source parse as XMLTV. A
+  /// complete small file must parse with a `<tv>` root; a truncated
+  /// prefix (the file is bigger than the validation cap) is accepted
+  /// when the cut is the only problem — the bytes so far parsed as XML
+  /// up to the cut.
+  static void _checkXmltvPrefix(List<int> bytes) {
+    final text = utf8.decode(bytes, allowMalformed: true);
+    if (!text.contains('<tv')) throw StateError('Not an XMLTV file (no <tv> element)');
+    try {
+      final doc = XmlDocument.parse(text);
+      if (doc.rootElement.name.local != 'tv') {
+        throw StateError('Not an XMLTV file (root is not <tv>)');
+      }
+    } on XmlParserException catch (e) {
+      final message = e.message.toLowerCase();
+      if (!message.contains('end of input') && !message.contains('unexpected end')) rethrow;
+      // The prefix parsed as XML up to the cut: accept.
+    }
+  }
+
+  /// Assign an EPG to a channel by hand (§3.2, TiviMate's Assign EPG):
+  /// this channel always uses this XMLTV channel id from this source.
+  /// The mapping is consulted before the byId/byName chain and survives
+  /// refreshes and catalog syncs. Throws [ArgumentError] for an empty id
+  /// or an unknown source.
+  Future<void> assignEpg(String channelKey, {required String xmltvId, required String sourceId}) async {
+    if (xmltvId.trim().isEmpty) throw ArgumentError('An XMLTV channel id is required');
+    final sources = await epgSources();
+    if (sources.every((s) => s.id != sourceId)) throw ArgumentError('Unknown EPG source $sourceId');
+    await _epgStore.saveMapping(channelKey, IptvEpgMapping(xmltvId: xmltvId.trim(), sourceId: sourceId));
+  }
+
+  /// Clear a manual assignment: the channel goes back to auto-matching.
+  Future<void> clearEpgAssignment(String channelKey) => _epgStore.clearMapping(channelKey);
+
+  /// The manual assignment for [channelKey], if one exists.
+  Future<IptvEpgMapping?> epgAssignmentFor(String channelKey) async {
+    final mappings = await _epgStore.loadMappings();
+    return mappings[channelKey];
+  }
+
+  /// One channel's EPG assignment state (§3.2, the "see my assigned EPG"
+  /// view): which source serves it, which XMLTV id matched, how it
+  /// matched, programmes in the requested window, when it was fetched
+  /// and when it expires — or, when it has nothing, why. A cached entry
+  /// with programmes answers from the cache; otherwise the loaded feeds
+  /// are probed locally (no network) — the channel may have guide that
+  /// simply hasn't been fetched yet.
+  Future<IptvChannelEpgDetail> channelEpgDetail(String channelKey, {DateTime? from, DateTime? to}) async {
+    final settings = await _readEpgSettings();
+    // Default window: the settings window, like the guide itself — callers
+    // that already have a window (tests) pass it explicitly.
+    final now = DateTime.now();
+    from ??= now.subtract(Duration(days: settings.pastDays));
+    to ??= now.add(Duration(days: settings.daysToLoad));
+    final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
+    final cached = _epgCache[channelKey] ?? await _readPersistedEpg(channelKey);
+    if (cached != null) _epgCache[channelKey] = cached;
+    if (cached != null && cached.programs.isNotEmpty) {
+      final slice = _slice(cached.programs, from, to);
+      return IptvChannelEpgDetail(
+        channelKey: channelKey,
+        channelName: _client.channelNameForChannelKey(channelKey),
+        sourceId: cached.sourceId,
+        sourceName: await _sourceName(cached.sourceId),
+        matchedXmltvId: cached.matchedXmltvId,
+        matchMethod: cached.matchMethod,
+        programCount: slice.length,
+        lastFetch: cached.fetchedAt,
+        nextFetch: ttl == null ? null : cached.fetchedAt.add(ttl),
+      );
+    }
+    final probe = await _probeLocalMatch(channelKey, settings, from, to);
+    if (probe != null) return probe;
+    return IptvChannelEpgDetail(
+      channelKey: channelKey,
+      channelName: _client.channelNameForChannelKey(channelKey),
+      programCount: 0,
+      lastFetch: cached?.fetchedAt,
+      noGuideReason: await _noGuideReason(ttl),
+    );
+  }
+
+  /// The local match probe for [channelEpgDetail]: the match chain
+  /// against the feeds already loaded in memory (no network). Null when
+  /// no loaded feed serves the channel in the window.
+  Future<IptvChannelEpgDetail?> _probeLocalMatch(
+    String channelKey,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to,
+  ) async {
+    final attempts = await _epgSourceAttempts();
+    final mappings = await _epgStore.loadMappings();
+    final mapping = mappings[channelKey];
+    final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
+    final tvgId = _client.tvgIdForChannelKey(channelKey);
+    final channelName = _client.channelNameForChannelKey(channelKey);
+    for (final attempt in attempts) {
+      final guide = _xmltvCache[attempt.cacheKey];
+      if (guide == null) continue;
+      final match = _matchInGuide(
+        guide,
+        channelKey,
+        mapping,
+        attempt.config.id,
+        epgChannelId,
+        tvgId,
+        channelName,
+        settings,
+        from,
+        to,
+        keyPrefix: attempt.keyPrefix,
+        offsetMinutes: attempt.config.timeShiftMinutes,
+      );
+      if (match == null) continue;
+      return IptvChannelEpgDetail(
+        channelKey: channelKey,
+        channelName: channelName,
+        sourceId: attempt.config.id,
+        sourceName: attempt.config.name,
+        matchedXmltvId: match.matchedXmltvId,
+        matchMethod: match.matchMethod,
+        programCount: match.programs.length,
+      );
+    }
+    return null;
+  }
+
+  /// The no-guide reason for a channel, derived from the feeds' state
+  /// (shared by the details view and the without-guide overview): no
+  /// enabled sources at all, nothing loaded (failed vs never tried), or
+  /// feeds loaded but nothing matched.
+  Future<IptvEpgNoGuideReason> _noGuideReason(Duration? ttl) async {
+    final attempts = await _epgSourceAttempts();
+    if (attempts.isEmpty) return IptvEpgNoGuideReason.noSource;
+    final statuses = await _epgStore.loadStatuses();
+    final loadedKeys = attempts
+        .where((a) => _xmltvCache.containsKey(a.cacheKey))
+        .map((a) => a.cacheKey)
+        .toSet();
+    return _reasonFor(attempts: attempts, loadedCacheKeys: loadedKeys, statuses: statuses, ttl: ttl);
+  }
+
+  IptvEpgNoGuideReason _reasonFor({
+    required List<_EpgSourceAttempt> attempts,
+    required Set<String> loadedCacheKeys,
+    required Map<String, IptvEpgSourceStatus> statuses,
+    required Duration? ttl,
+  }) {
+    if (attempts.isEmpty) return IptvEpgNoGuideReason.noSource;
+    if (loadedCacheKeys.isEmpty) {
+      final anyFailed = attempts.any((attempt) {
+        final status = statuses[attempt.config.id];
+        return status != null && status.state(enabled: attempt.config.enabled, ttl: ttl) == IptvEpgSourceState.failed;
+      });
+      return anyFailed ? IptvEpgNoGuideReason.sourceFailed : IptvEpgNoGuideReason.notLoaded;
+    }
+    return IptvEpgNoGuideReason.noMatch;
+  }
+
+  /// The display name for a source id ('Provider guide' for the
+  /// provider feed, the stored name for an added one, the id itself
+  /// when the source is gone — a deleted source's stale references
+  /// still read).
+  Future<String?> _sourceName(String? sourceId) async {
+    if (sourceId == null) return null;
+    if (sourceId == IptvEpgSourceConfig.providerId) return 'Provider guide';
+    final sources = await _epgStore.loadUserSources();
+    for (final source in sources) {
+      if (source.id == sourceId) return source.name;
+    }
+    return sourceId;
+  }
+
+  /// Every XMLTV channel id in every enabled source's feed, for the
+  /// Assign EPG picker (§3.2). The feeds load lazily on first need
+  /// (user-initiated — opening Assign), exactly like the guide's lazy
+  /// feed; a source that defers (playback gate) or fails contributes
+  /// nothing. Search over the result is local, in the picker.
+  Future<List<IptvEpgFeedChannel>> epgFeedChannels({bool forceRefresh = false}) async {
+    final settings = await _readEpgSettings();
+    final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
+    final attempts = await _epgSourceAttempts();
+    final loaded = await _loadEnabledFeeds(attempts, ttl, force: forceRefresh);
+    final out = <IptvEpgFeedChannel>[];
+    for (final entry in loaded) {
+      for (final channel in entry.guide.byChannel.entries) {
+        out.add(
+          IptvEpgFeedChannel(
+            sourceId: entry.attempt.config.id,
+            sourceName: entry.attempt.config.name,
+            xmltvId: channel.key,
+            programCount: channel.value.length,
+          ),
+        );
+      }
+    }
+    out.sort((a, b) => a.xmltvId.toLowerCase().compareTo(b.xmltvId.toLowerCase()));
+    return out;
+  }
+
+  /// Every channel with no EPG (§3.2, the "see my assigned EPGs per
+  /// channel" overview), grouped by reason by the caller. A channel
+  /// counts as having guide when its per-channel cache holds programmes
+  /// or any loaded feed matches it — the feeds load lazily on first
+  /// need (user-initiated — opening the overview). Channels whose guide
+  /// comes only from the provider's per-channel lookup are not listed
+  /// until browsed; the overview says so.
+  Future<List<IptvChannelWithoutGuide>> channelsWithoutGuide() async {
+    final settings = await _readEpgSettings();
+    final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
+    final channels = await _client.iptvChannels();
+    final attempts = await _epgSourceAttempts();
+    final loaded = await _loadEnabledFeeds(attempts, ttl);
+    final mappings = await _epgStore.loadMappings();
+    final statuses = await _epgStore.loadStatuses();
+    final reason = _reasonFor(
+      attempts: attempts,
+      loadedCacheKeys: loaded.map((e) => e.attempt.cacheKey).toSet(),
+      statuses: statuses,
+      ttl: ttl,
+    );
+    final now = DateTime.now();
+    final from = now.subtract(Duration(days: settings.pastDays));
+    final to = now.add(Duration(days: settings.daysToLoad));
+    // Persisted per-channel entries, from one directory listing (not
+    // one stat per channel — the catalog runs to tens of thousands).
+    final persistedKeys = await _persistedEpgChannelKeys();
+    final out = <IptvChannelWithoutGuide>[];
+    for (final channel in channels) {
+      final cached =
+          _epgCache[channel.key] ??
+          (persistedKeys.contains(channel.key) ? await _readPersistedEpg(channel.key) : null);
+      if (cached != null) _epgCache[channel.key] = cached;
+      if (cached != null && cached.programs.isNotEmpty) continue;
+      if (_channelHasFeedMatch(channel.key, loaded, mappings, settings, from, to)) continue;
+      out.add(
+        IptvChannelWithoutGuide(channelKey: channel.key, channelName: channel.title ?? channel.key, reason: reason),
+      );
+    }
+    return out;
+  }
+
+  /// True when any loaded feed serves [channelKey] in the window (by
+  /// assignment, tvg-id, or name). Local only — no network.
+  bool _channelHasFeedMatch(
+    String channelKey,
+    List<({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })> loaded,
+    Map<String, IptvEpgMapping> mappings,
+    _EpgSettings settings,
+    DateTime from,
+    DateTime to,
+  ) {
+    final mapping = mappings[channelKey];
+    final epgChannelId = _client.epgChannelIdForChannelKey(channelKey);
+    final tvgId = _client.tvgIdForChannelKey(channelKey);
+    final channelName = _client.channelNameForChannelKey(channelKey);
+    for (final entry in loaded) {
+      final match = _matchInGuide(
+        entry.guide,
+        channelKey,
+        mapping,
+        entry.attempt.config.id,
+        epgChannelId,
+        tvgId,
+        channelName,
+        settings,
+        from,
+        to,
+        keyPrefix: entry.attempt.keyPrefix,
+        offsetMinutes: entry.attempt.config.timeShiftMinutes,
+      );
+      if (match != null) return true;
+    }
+    return false;
+  }
+
+  /// The enabled sources' guides, loaded lazily (user-initiated callers
+  /// only — Assign, Channels without guide, Reload TV details). A source
+  /// that defers (playback gate) or fails contributes nothing; a fresh
+  /// load records the source's status, a failure records its reason.
+  Future<List<({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })>> _loadEnabledFeeds(
+    List<_EpgSourceAttempt> attempts,
+    Duration? ttl, {
+    bool force = false,
+  }) async {
+    final loaded = <({ _EpgSourceAttempt attempt, _CachedXmltvGuide guide })>[];
+    for (final attempt in attempts) {
+      try {
+        final started = DateTime.now();
+        final (guide, loadedFresh) = await _loadSourceGuide(attempt.cacheKey, attempt.fetchStream, ttl, force: force);
+        if (loadedFresh) {
+          await _recordSourceSuccess(attempt.config, attempt.cacheKey, guide, started);
+        }
+        loaded.add((attempt: attempt, guide: guide));
+      } on _EpgFeedDeferred {
+        continue;
+      } catch (e) {
+        // A cancellation aborts the whole bulk load (the app
+        // backgrounded); a failed source is recorded and skipped.
+        if (MediaServerHttpException.from(e).isCancellation) rethrow;
+        await _recordSourceFailure(attempt.config, e);
+        continue;
+      }
+    }
+    return loaded;
+  }
+
+  /// Channel keys with a persisted per-channel EPG file, from one
+  /// directory listing. Best-effort — a failure reads as "none
+  /// persisted", and the overview still works from memory + feeds.
+  /// Skipped entirely when the persisted side is disabled for tests.
+  Future<Set<String>> _persistedEpgChannelKeys() async {
+    final out = <String>{};
+    if (debugDisablePersistedEpg) return out;
+    try {
+      final dir = await _epgCacheDir();
+      if (!await dir.exists()) return out;
+      await for (final entity in dir.list()) {
+        if (entity is! File || !entity.path.endsWith('.json')) continue;
+        final key = _channelKeyFromFileName(entity.path.split('/').last);
+        if (key != null) out.add(key);
+      }
+    } catch (_) {
+      // Best-effort: the overview still works from memory + feeds.
+    }
+    return out;
+  }
+
+  /// Reload TV details (§3.2, Matt's original wording): re-fetch the
+  /// channel list from the provider (not a full catalog sync — movies
+  /// and series are untouched) and refresh the EPG for this connection,
+  /// then report counts. The recovery action for D1-poisoned entries:
+  /// it busts the per-channel cache the way Update now does.
+  Future<IptvReloadTvDetailsResult> reloadTvDetails() async {
+    final channels = await _client.refreshLiveChannelsFromNetwork();
+    await refreshEpgCache();
+    final settings = await _readEpgSettings();
+    final ttl = settings.updateIntervalHours <= 0 ? null : Duration(hours: settings.updateIntervalHours);
+    final attempts = await _epgSourceAttempts();
+    final loaded = await _loadEnabledFeeds(attempts, ttl);
+    final mappings = await _epgStore.loadMappings();
+    final now = DateTime.now();
+    final from = now.subtract(Duration(days: settings.pastDays));
+    final to = now.add(Duration(days: settings.daysToLoad));
+    var withGuide = 0;
+    for (final channel in channels) {
+      if (_channelHasFeedMatch(channel.key, loaded, mappings, settings, from, to)) withGuide++;
+    }
+    final feedChannelIds = loaded.expand((e) => e.guide.byChannel.keys).toSet().length;
+    return IptvReloadTvDetailsResult(
+      channelsLoaded: channels.length,
+      withGuide: withGuide,
+      withoutGuide: channels.length - withGuide,
+      feedChannelIds: feedChannelIds,
+    );
+  }
+
+  /// Refresh the guide when the quiet hour passed since the last data
+  /// landed (§3.3, TiviMate's ~04:00 update time). An in-app interval
+  /// check on guide open — never a background-job promise. Returns true
+  /// when a refresh was triggered.
+  Future<bool> maybeRefreshForQuietHour() async {
+    final settings = await SettingsService.getInstance();
+    final updateTime = settings.read(SettingsService.iptvEpgUpdateTimeMinutes);
+    if (updateTime < 0) return false;
+    final intervalHours = settings.read(SettingsService.iptvEpgUpdateIntervalHours);
+    if (intervalHours <= 0) return false; // Manual only: never auto-refresh.
+    final now = DateTime.now();
+    var boundary = DateTime(now.year, now.month, now.day, updateTime ~/ 60, updateTime % 60);
+    if (now.isBefore(boundary)) boundary = boundary.subtract(const Duration(days: 1));
+    if (_quietHourRefreshedFor == boundary) return false;
+    // Last data landed: this support's in-memory stamp, else the stored
+    // pref (a relaunch clears the memory but not the pref).
+    final stored = settings.read(SettingsService.iptvEpgLastUpdated);
+    final lastData = _lastEpgUpdatedAt ?? DateTime.tryParse(stored);
+    if (lastData != null && !lastData.isBefore(boundary)) return false;
+    _quietHourRefreshedFor = boundary;
+    await refreshEpgCache();
+    return true;
   }
 
   /// Empty the EPG caches (Update now / Clear guide). The next guide visit
@@ -1624,12 +2457,27 @@ class _CachedChannelEpg {
   /// the field and read back as [IptvEpgSource.unknown].
   final IptvEpgSource source;
 
+  /// Which configured source served these programmes (PlezTV 1.2.0):
+  /// the provider feed (`'provider'`) or a user-added source id. Null
+  /// for entries written before this build. Drives the EPG details view
+  /// ("assigned source") and the per-source coverage breakdown.
+  final String? sourceId;
+
+  /// The XMLTV channel id that matched (or was manually assigned), and
+  /// how it matched (`'tvg-id'`, `'name'`, `'manual'`). Null when nothing
+  /// matched — the details view reads these, not a fresh fetch.
+  final String? matchedXmltvId;
+  final String? matchMethod;
+
   const _CachedChannelEpg({
     required this.programs,
     required this.fetchedAt,
     required this.windowFrom,
     required this.windowTo,
     this.source = IptvEpgSource.unknown,
+    this.sourceId,
+    this.matchedXmltvId,
+    this.matchMethod,
   });
 
   Map<String, dynamic> toJson() => {
@@ -1637,6 +2485,9 @@ class _CachedChannelEpg {
     'windowFrom': windowFrom.toIso8601String(),
     'windowTo': windowTo.toIso8601String(),
     'source': source.name,
+    if (sourceId != null) 'sourceId': sourceId,
+    if (matchedXmltvId != null) 'matchedXmltvId': matchedXmltvId,
+    if (matchMethod != null) 'matchMethod': matchMethod,
     'programs': programs.map((p) => p.toJson()).toList(),
   };
 
@@ -1663,7 +2514,16 @@ class _CachedChannelEpg {
         }
       }
     }
-    return _CachedChannelEpg(programs: programs, fetchedAt: fetchedAt, windowFrom: windowFrom, windowTo: windowTo, source: source);
+    return _CachedChannelEpg(
+      programs: programs,
+      fetchedAt: fetchedAt,
+      windowFrom: windowFrom,
+      windowTo: windowTo,
+      source: source,
+      sourceId: json['sourceId'] as String?,
+      matchedXmltvId: json['matchedXmltvId'] as String?,
+      matchMethod: json['matchMethod'] as String?,
+    );
   }
 
   bool covers(DateTime from, DateTime to) => !windowFrom.isAfter(from) && !windowTo.isBefore(to);
@@ -1674,6 +2534,25 @@ class _CachedChannelEpg {
 /// One parsed XMLTV file, with its fetch time and an index of programmes
 /// by channel id (the `<programme channel="...">` attribute), so serving
 /// one channel out of a whole-catalog file is a lookup, not a scan.
+/// One source's fetch, in priority order (PlezTV 1.2.0, §3.1): the
+/// provider feed or an added source. [cacheKey] is the guide's key in
+/// [_xmltvCache] (`xtream:<id>` for the provider feed, the EPG URL for
+/// a playlist guide, `user:<id>` for an added source); [keyPrefix]
+/// names the source in programme keys.
+class _EpgSourceAttempt {
+  final IptvEpgSourceConfig config;
+  final String cacheKey;
+  final String keyPrefix;
+  final Stream<List<int>> Function(Future<void>? abortTrigger) fetchStream;
+
+  const _EpgSourceAttempt({
+    required this.config,
+    required this.cacheKey,
+    required this.keyPrefix,
+    required this.fetchStream,
+  });
+}
+
 class _CachedXmltvGuide {
   final List<XmltvProgram> programs;
   final DateTime fetchedAt;

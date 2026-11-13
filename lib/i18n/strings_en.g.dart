@@ -3897,6 +3897,13 @@ class Translations$about$en {
 		'The guide no longer gets stuck empty after you watch TV — it reloads once playback stops',
 		'Last updated in the guide settings now only changes when guide data actually arrived, and a new Last attempt line shows when it last tried',
 	];
+	List<String> get changelog2286 => [
+		'You can now add your own guide sources in Settings → IPTV → EPG sources — any XMLTV web address, checked when you add it',
+		'Long-press a channel in the guide and pick EPG details to see which guide serves it, or assign a guide to it by hand when nothing matches automatically',
+		'Channels with no guide are listed in one place, grouped by why — no source, no match, source failed, or not loaded yet — with an Assign button on each',
+		'Reload TV details re-fetches the channel list and the guide and reports what loaded',
+		'The guide can refresh itself at a time you pick (04:00 by default) and when the channel list changes',
+	];
 	List<String> get changelog2276 => [
 		'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 		'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
@@ -6853,6 +6860,186 @@ class Translations$iptv$en {
 
 	/// en: 'Guide cleared'
 	String get epgCleared => 'Guide cleared';
+
+	/// en: 'EPG sources'
+	String get epgSourcesTitle => 'EPG sources';
+
+	/// en: 'External guide sources for this connection. The provider guide comes first; added sources fill the gaps.'
+	String get epgSourcesDescription => 'External guide sources for this connection. The provider guide comes first; added sources fill the gaps.';
+
+	/// en: 'Two sources is usually enough — every source is downloaded and parsed in full.'
+	String get epgSourcesHint => 'Two sources is usually enough — every source is downloaded and parsed in full.';
+
+	/// en: 'Provider guide'
+	String get epgProviderSource => 'Provider guide';
+
+	/// en: 'Add source'
+	String get epgAddSource => 'Add source';
+
+	/// en: 'Add EPG source'
+	String get epgAddSourceTitle => 'Add EPG source';
+
+	/// en: 'XMLTV URL'
+	String get epgAddSourceUrlLabel => 'XMLTV URL';
+
+	/// en: 'https://example.com/epg.xml'
+	String get epgAddSourceUrlHint => 'https://example.com/epg.xml';
+
+	/// en: 'Name'
+	String get epgAddSourceNameLabel => 'Name';
+
+	/// en: 'My EPG'
+	String get epgAddSourceNameHint => 'My EPG';
+
+	/// en: 'Delete source'
+	String get epgSourceDelete => 'Delete source';
+
+	/// en: 'Delete ${name}? Channels assigned to it go back to automatic matching.'
+	String epgSourceDeleteConfirm({required Object name}) => 'Delete ${name}? Channels assigned to it go back to automatic matching.';
+
+	/// en: 'Move up'
+	String get epgSourceMoveUp => 'Move up';
+
+	/// en: 'Move down'
+	String get epgSourceMoveDown => 'Move down';
+
+	/// en: 'Up to date'
+	String get epgSourceStatusUpToDate => 'Up to date';
+
+	/// en: 'Needs refresh'
+	String get epgSourceStatusNeedsRefresh => 'Needs refresh';
+
+	/// en: 'Failed'
+	String get epgSourceStatusFailed => 'Failed';
+
+	/// en: 'Disabled'
+	String get epgSourceStatusDisabled => 'Disabled';
+
+	/// en: 'Never fetched'
+	String get epgSourceStatusNeverFetched => 'Never fetched';
+
+	/// en: '${programs} programmes · ${channels} channels'
+	String epgSourceStatusDetail({required Object programs, required Object channels}) => '${programs} programmes · ${channels} channels';
+
+	/// en: 'Added sources take precedence'
+	String get epgAddedSourcesFirst => 'Added sources take precedence';
+
+	/// en: 'Added sources are tried before the provider guide'
+	String get epgAddedSourcesFirstDescription => 'Added sources are tried before the provider guide';
+
+	/// en: 'Time shift'
+	String get epgTimeShift => 'Time shift';
+
+	/// en: 'Reload TV details'
+	String get epgReloadTvDetails => 'Reload TV details';
+
+	/// en: 'Re-fetch the channel list and the guide, and report what loaded'
+	String get epgReloadTvDetailsDescription => 'Re-fetch the channel list and the guide, and report what loaded';
+
+	/// en: '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide'
+	String epgReloadTvDetailsResult({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide';
+
+	/// en: 'Channels without guide'
+	String get epgNoGuideTitle => 'Channels without guide';
+
+	/// en: 'Channels with no guide data. Tap Assign to pick a guide for a channel by hand.'
+	String get epgNoGuideDescription => 'Channels with no guide data. Tap Assign to pick a guide for a channel by hand.';
+
+	/// en: 'Every channel has guide data'
+	String get epgNoGuideEmpty => 'Every channel has guide data';
+
+	/// en: 'No guide source'
+	String get epgNoGuideReasonNoSource => 'No guide source';
+
+	/// en: 'No matching guide'
+	String get epgNoGuideReasonNoMatch => 'No matching guide';
+
+	/// en: 'Guide source failed'
+	String get epgNoGuideReasonSourceFailed => 'Guide source failed';
+
+	/// en: 'Guide not loaded yet'
+	String get epgNoGuideReasonNotLoaded => 'Guide not loaded yet';
+
+	/// en: 'Assign EPG'
+	String get epgAssignTitle => 'Assign EPG';
+
+	/// en: 'Search guide channels'
+	String get epgAssignSearchHint => 'Search guide channels';
+
+	/// en: 'No guide channels match'
+	String get epgAssignEmpty => 'No guide channels match';
+
+	/// en: 'Clear assignment'
+	String get epgClearAssignment => 'Clear assignment';
+
+	/// en: 'EPG details'
+	String get epgDetailsTitle => 'EPG details';
+
+	/// en: 'Guide source'
+	String get epgDetailsSource => 'Guide source';
+
+	/// en: 'Matched guide channel'
+	String get epgDetailsMatchedId => 'Matched guide channel';
+
+	/// en: 'Matched by'
+	String get epgDetailsMatchMethod => 'Matched by';
+
+	/// en: 'Programmes'
+	String get epgDetailsPrograms => 'Programmes';
+
+	/// en: '(one) {${n} programme} (other) {${n} programmes}'
+	String epgDetailsProgramsCount({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n,
+		one: '${n} programme',
+		other: '${n} programmes',
+	);
+
+	/// en: 'Last fetched'
+	String get epgDetailsLastFetch => 'Last fetched';
+
+	/// en: 'Next refresh'
+	String get epgDetailsNextFetch => 'Next refresh';
+
+	/// en: 'Why no guide'
+	String get epgDetailsWhyNoMatch => 'Why no guide';
+
+	/// en: 'Refresh this channel'
+	String get epgDetailsRefresh => 'Refresh this channel';
+
+	/// en: 'Channel ID'
+	String get epgMatchMethodTvgId => 'Channel ID';
+
+	/// en: 'Channel name'
+	String get epgMatchMethodName => 'Channel name';
+
+	/// en: 'Assigned by hand'
+	String get epgMatchMethodManual => 'Assigned by hand';
+
+	/// en: 'Update time'
+	String get epgUpdateTime => 'Update time';
+
+	/// en: 'Time of day the guide refreshes'
+	String get epgUpdateTimeDescription => 'Time of day the guide refreshes';
+
+	/// en: 'Off'
+	String get epgUpdateTimeOff => 'Off';
+
+	/// en: 'Update when the channel list changes'
+	String get epgUpdateOnPlaylistChange => 'Update when the channel list changes';
+
+	/// en: 'Refresh the guide when the provider adds or removes channels'
+	String get epgUpdateOnPlaylistChangeDescription => 'Refresh the guide when the provider adds or removes channels';
+
+	/// en: 'EPG source added'
+	String get epgSourceAdded => 'EPG source added';
+
+	/// en: 'EPG source deleted'
+	String get epgSourceDeleted => 'EPG source deleted';
+
+	/// en: 'Guide assigned'
+	String get epgAssigned => 'Guide assigned';
+
+	/// en: 'Assignment cleared'
+	String get epgAssignmentCleared => 'Assignment cleared';
 
 	/// en: 'Xtream Codes'
 	String get xtreamSection => 'Xtream Codes';
@@ -10573,6 +10760,11 @@ extension on Translations {
 			'about.changelog2285.1' => 'Tapping retry on a failed guide row now actually tries again instead of failing instantly for five minutes',
 			'about.changelog2285.2' => 'The guide no longer gets stuck empty after you watch TV — it reloads once playback stops',
 			'about.changelog2285.3' => 'Last updated in the guide settings now only changes when guide data actually arrived, and a new Last attempt line shows when it last tried',
+			'about.changelog2286.0' => 'You can now add your own guide sources in Settings → IPTV → EPG sources — any XMLTV web address, checked when you add it',
+			'about.changelog2286.1' => 'Long-press a channel in the guide and pick EPG details to see which guide serves it, or assign a guide to it by hand when nothing matches automatically',
+			'about.changelog2286.2' => 'Channels with no guide are listed in one place, grouped by why — no source, no match, source failed, or not loaded yet — with an Assign button on each',
+			'about.changelog2286.3' => 'Reload TV details re-fetches the channel list and the guide and reports what loaded',
+			'about.changelog2286.4' => 'The guide can refresh itself at a time you pick (04:00 by default) and when the channel list changes',
 			'about.changelog2276.0' => 'The app no longer waits more than 15 seconds on the startup screen for a slow server to answer — it opens and keeps connecting in the background instead of sitting on the logo',
 			'about.changelog2276.1' => 'Downloads now show their titles a moment after the app opens, instead of holding the startup screen while each one is looked up',
 			'serverSelection.noServersFoundForAccount' => ({required Object username, required Object email}) => 'No servers found for ${username} (${email})',
@@ -10660,13 +10852,13 @@ extension on Translations {
 			'explore.emptyTitle' => 'Nothing here yet',
 			'explore.emptyMessage' => ({required Object source}) => 'Rows from ${source} will appear here once they have content.',
 			'explore.searchHint' => ({required Object source}) => 'Search ${source}',
+			_ => null,
+		} ?? switch (path) {
 			'explore.searchEmpty' => ({required Object query}) => 'No results for "${query}"',
 			'explore.searchPrompt' => ({required Object source}) => 'Search for movies and shows on ${source}.',
 			'explore.searchFailed' => 'Search failed. Check your connection and try again.',
 			'explore.badge.rankPopular' => ({required Object n}) => '#${n} popular',
 			'explore.badge.rankAiring' => ({required Object n}) => '#${n} airing',
-			_ => null,
-		} ?? switch (path) {
 			'explore.badge.rankRated' => ({required Object n}) => '#${n} rated',
 			'explore.badge.rankTrending' => ({required Object n}) => '#${n} trending',
 			'explore.badge.rankSeasonal' => ({required Object n, required Object season}) => '#${n} in ${season}',
@@ -11174,13 +11366,13 @@ extension on Translations {
 			'downloads.syncRuleUpdated' => 'Sync rule updated',
 			'downloads.syncRuleRemoved' => 'Sync rule removed',
 			'downloads.syncRuleAndDownloadsRemoved' => 'Sync rule and associated downloads removed',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.syncRuleCleanupBusy' => 'Sync rules are currently updating. Try again in a moment.',
 			'downloads.syncRuleCleanupUnavailable' => 'Associated downloads could not be identified safely. Reconnect the server and try again, or remove the rule without deleting downloads.',
 			'downloads.syncedNewEpisodes' => ({required Object count, required Object title}) => 'Synced ${count} new episodes for ${title}',
 			'downloads.activeSyncRules' => 'Sync rules',
 			'downloads.noSyncRules' => 'No sync rules',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.manageSyncRule' => 'Manage sync',
 			'downloads.editEpisodeCount' => 'Episode count',
 			'downloads.editSyncFilter' => 'Sync filter',
@@ -11688,13 +11880,13 @@ extension on Translations {
 			'iptv.favorites.title' => 'IPTV favourites',
 			'iptv.favorites.liveTv' => 'Live TV',
 			'iptv.favorites.movies' => 'Movies',
+			_ => null,
+		} ?? switch (path) {
 			'iptv.favorites.tvSeries' => 'TV / Series',
 			'iptv.favorites.empty' => 'Nothing favourited yet',
 			'iptv.favorites.emptyHint' => 'Tap the heart on a channel, movie or show to keep it here.',
 			'iptv.favorites.channelUnavailable' => 'That channel is no longer available',
 			'iptv.settingsDescription' => 'Playlists, channel groups, guide and catch-up',
-			_ => null,
-		} ?? switch (path) {
 			'iptv.intro' => 'IPTV live TV lives in the Live TV tab. Movies and series live in the Library. Xtream guide data comes from the provider; for M3U, set the EPG URL when you add the playlist.',
 			'iptv.connections' => 'Connections',
 			'iptv.addConnection' => 'Add IPTV connection',
@@ -11765,6 +11957,65 @@ extension on Translations {
 			'iptv.epgLastAttemptLine' => ({required Object stamp}) => 'Last attempt: ${stamp}',
 			'iptv.epgUpdated' => 'Guide updated',
 			'iptv.epgCleared' => 'Guide cleared',
+			'iptv.epgSourcesTitle' => 'EPG sources',
+			'iptv.epgSourcesDescription' => 'External guide sources for this connection. The provider guide comes first; added sources fill the gaps.',
+			'iptv.epgSourcesHint' => 'Two sources is usually enough — every source is downloaded and parsed in full.',
+			'iptv.epgProviderSource' => 'Provider guide',
+			'iptv.epgAddSource' => 'Add source',
+			'iptv.epgAddSourceTitle' => 'Add EPG source',
+			'iptv.epgAddSourceUrlLabel' => 'XMLTV URL',
+			'iptv.epgAddSourceUrlHint' => 'https://example.com/epg.xml',
+			'iptv.epgAddSourceNameLabel' => 'Name',
+			'iptv.epgAddSourceNameHint' => 'My EPG',
+			'iptv.epgSourceDelete' => 'Delete source',
+			'iptv.epgSourceDeleteConfirm' => ({required Object name}) => 'Delete ${name}? Channels assigned to it go back to automatic matching.',
+			'iptv.epgSourceMoveUp' => 'Move up',
+			'iptv.epgSourceMoveDown' => 'Move down',
+			'iptv.epgSourceStatusUpToDate' => 'Up to date',
+			'iptv.epgSourceStatusNeedsRefresh' => 'Needs refresh',
+			'iptv.epgSourceStatusFailed' => 'Failed',
+			'iptv.epgSourceStatusDisabled' => 'Disabled',
+			'iptv.epgSourceStatusNeverFetched' => 'Never fetched',
+			'iptv.epgSourceStatusDetail' => ({required Object programs, required Object channels}) => '${programs} programmes · ${channels} channels',
+			'iptv.epgAddedSourcesFirst' => 'Added sources take precedence',
+			'iptv.epgAddedSourcesFirstDescription' => 'Added sources are tried before the provider guide',
+			'iptv.epgTimeShift' => 'Time shift',
+			'iptv.epgReloadTvDetails' => 'Reload TV details',
+			'iptv.epgReloadTvDetailsDescription' => 'Re-fetch the channel list and the guide, and report what loaded',
+			'iptv.epgReloadTvDetailsResult' => ({required Object channels, required Object withGuide, required Object withoutGuide}) => '${channels} channels · ${withGuide} with guide · ${withoutGuide} without guide',
+			'iptv.epgNoGuideTitle' => 'Channels without guide',
+			'iptv.epgNoGuideDescription' => 'Channels with no guide data. Tap Assign to pick a guide for a channel by hand.',
+			'iptv.epgNoGuideEmpty' => 'Every channel has guide data',
+			'iptv.epgNoGuideReasonNoSource' => 'No guide source',
+			'iptv.epgNoGuideReasonNoMatch' => 'No matching guide',
+			'iptv.epgNoGuideReasonSourceFailed' => 'Guide source failed',
+			'iptv.epgNoGuideReasonNotLoaded' => 'Guide not loaded yet',
+			'iptv.epgAssignTitle' => 'Assign EPG',
+			'iptv.epgAssignSearchHint' => 'Search guide channels',
+			'iptv.epgAssignEmpty' => 'No guide channels match',
+			'iptv.epgClearAssignment' => 'Clear assignment',
+			'iptv.epgDetailsTitle' => 'EPG details',
+			'iptv.epgDetailsSource' => 'Guide source',
+			'iptv.epgDetailsMatchedId' => 'Matched guide channel',
+			'iptv.epgDetailsMatchMethod' => 'Matched by',
+			'iptv.epgDetailsPrograms' => 'Programmes',
+			'iptv.epgDetailsProgramsCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} programme', other: '${n} programmes', ), 
+			'iptv.epgDetailsLastFetch' => 'Last fetched',
+			'iptv.epgDetailsNextFetch' => 'Next refresh',
+			'iptv.epgDetailsWhyNoMatch' => 'Why no guide',
+			'iptv.epgDetailsRefresh' => 'Refresh this channel',
+			'iptv.epgMatchMethodTvgId' => 'Channel ID',
+			'iptv.epgMatchMethodName' => 'Channel name',
+			'iptv.epgMatchMethodManual' => 'Assigned by hand',
+			'iptv.epgUpdateTime' => 'Update time',
+			'iptv.epgUpdateTimeDescription' => 'Time of day the guide refreshes',
+			'iptv.epgUpdateTimeOff' => 'Off',
+			'iptv.epgUpdateOnPlaylistChange' => 'Update when the channel list changes',
+			'iptv.epgUpdateOnPlaylistChangeDescription' => 'Refresh the guide when the provider adds or removes channels',
+			'iptv.epgSourceAdded' => 'EPG source added',
+			'iptv.epgSourceDeleted' => 'EPG source deleted',
+			'iptv.epgAssigned' => 'Guide assigned',
+			'iptv.epgAssignmentCleared' => 'Assignment cleared',
 			'iptv.xtreamSection' => 'Xtream Codes',
 			'iptv.xtreamUserAgent' => 'Xtream User-Agent',
 			'iptv.xtreamUserAgentVlc' => 'VLC',

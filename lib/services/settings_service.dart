@@ -962,6 +962,20 @@ class SettingsService extends BaseSharedPreferencesService {
   /// not data: an attempt that failed or returned empty still stamps it.
   static const iptvEpgLastAttempt = StringPref('iptv_epg_last_attempt', defaultValue: '');
 
+  /// Quiet-hour update time (PlezTV 1.2.0, TiviMate model): the guide
+  /// refreshes once a day around this time, so it never competes with
+  /// evening viewing. Minutes since midnight; default 240 (04:00). -1
+  /// means off. The refresh is an in-app interval check on guide open,
+  /// not a background-job promise — the background job reports "Never
+  /// run / Blocked by system settings" on Matt's phone.
+  static const iptvEpgUpdateTimeMinutes = IntPref('iptv_epg_update_time_minutes', defaultValue: 240);
+
+  /// Re-fetch the EPG when the channel list changes (PlezTV 1.2.0,
+  /// TiviMate's "Update on playlist change"). Default on: a refreshed
+  /// playlist gets a fresh guide with it. Only a genuine list change
+  /// triggers it — hiding a group does not.
+  static const iptvEpgUpdateOnPlaylistChange = BoolPref('iptv_epg_update_on_playlist_change', defaultValue: true);
+
   /// Xtream User-Agent (build #20): the User-Agent sent on every Xtream
   /// panel request. Trex 403s the app's default Dart UA while TiviMate
   /// works — panels enforce per-user allowed-UA lists, so the name the app

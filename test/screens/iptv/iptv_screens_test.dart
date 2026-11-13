@@ -997,6 +997,11 @@ void main() {
       expect(find.text('Version 1.1.2-2.25.0'), findsOneWidget);
       final newest112 = tester.getTopLeft(find.text('Version 1.1.2-2.25.0')).dy;
       expect(newest112, lessThan(newest111));
+      // EPG area (v1.2.0): same guard for the new version — it must be
+      // present and sit above 1.1.2.
+      expect(find.text('Version 1.2.0-2.25.0'), findsOneWidget);
+      final newest120 = tester.getTopLeft(find.text('Version 1.2.0-2.25.0')).dy;
+      expect(newest120, lessThan(newest112));
     });
   });
 }

@@ -30,6 +30,7 @@ import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/focused_scroll_scaffold.dart';
 import '../../widgets/setting_tile.dart';
 import '../../widgets/settings_section.dart';
+import 'iptv_epg_sources_screen.dart';
 import 'add_connection_screen.dart';
 import 'iptv_categories_screen.dart';
 import 'iptv_refusals_screen.dart';
@@ -46,6 +47,13 @@ import 'settings_utils.dart';
 /// behaviour — nothing is a dead toggle.
 /// Things TiviMate has that PlezTV cannot do yet (recording, multi-view,
 /// a parental PIN) are deliberately left out; see IPTV_FIXES_NOTES.md.
+/// The EPG update-time label (PlezTV 1.2.0, §3.3): minutes after
+/// midnight as HH:MM, or Off for -1.
+String _updateTimeLabel(int minutes) {
+  if (minutes < 0) return t.iptv.epgUpdateTimeOff;
+  return '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+}
+
 class IptvSettingsScreen extends StatelessWidget {
   const IptvSettingsScreen({super.key, this.backgroundWorkDiagnosticsService});
 
@@ -282,6 +290,21 @@ class IptvSettingsScreen extends StatelessWidget {
                       )
                       .toList(),
                 ),
+                SettingSelectionTile<int>(
+                  pref: settings.SettingsService.iptvEpgUpdateTimeMinutes,
+                  icon: Symbols.schedule_rounded,
+                  title: t.iptv.epgUpdateTime,
+                  subtitleBuilder: _updateTimeLabel,
+                  options: [-1, 0, 120, 240, 360]
+                      .map((minutes) => DialogOption(value: minutes, title: _updateTimeLabel(minutes)))
+                      .toList(),
+                ),
+                SettingSwitchTile(
+                  pref: settings.SettingsService.iptvEpgUpdateOnPlaylistChange,
+                  icon: Symbols.sync_rounded,
+                  title: t.iptv.epgUpdateOnPlaylistChange,
+                  subtitle: t.iptv.epgUpdateOnPlaylistChangeDescription,
+                ),
                 SettingNavigationTile(
                   icon: Symbols.refresh_rounded,
                   title: t.iptv.epgUpdateNow,
@@ -298,6 +321,11 @@ class IptvSettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: 24)),
+        const SliverPadding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          sliver: SliverToBoxAdapter(child: _EpgSourcesGroup()),
         ),
         const SliverPadding(padding: EdgeInsets.only(top: 24)),
         SliverPadding(
@@ -965,6 +993,44 @@ class _IptvConnectionsList extends StatelessWidget {
               if (connection is XtreamConnection)
                 _IptvCatalogDiagnostics(connection: connection),
             ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// EPG sources, one row per IPTV connection (PlezTV 1.2.0, §3.1): each
+/// row opens the sources screen for that connection (provider guide +
+/// added XMLTV sources, Reload TV details, Channels without guide).
+/// Hidden entirely when there are no IPTV connections.
+class _EpgSourcesGroup extends StatelessWidget {
+  const _EpgSourcesGroup();
+
+  @override
+  Widget build(BuildContext context) {
+    final registry = context.read<ConnectionRegistry>();
+    return StreamBuilder<List<Connection>>(
+      stream: registry.watchConnections(),
+      builder: (context, snapshot) {
+        final connections = (snapshot.data ?? const <Connection>[])
+            .where((c) => c is M3uConnection || c is XtreamConnection)
+            .toList(growable: false);
+        if (connections.isEmpty) return const SizedBox.shrink();
+        return SettingsGroup(
+          title: t.iptv.epgSourcesTitle,
+          children: [
+            for (final connection in connections)
+              SettingNavigationTile(
+                icon: Symbols.rss_feed_rounded,
+                title: connection.displayName,
+                subtitle: t.iptv.epgSourcesDescription,
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => IptvEpgSourcesScreen(connection: connection)),
+                  );
+                },
+              ),
           ],
         );
       },

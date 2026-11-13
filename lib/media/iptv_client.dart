@@ -33,6 +33,7 @@ import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
 import '../services/base_shared_preferences_service.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
+import '../services/iptv/iptv_epg_sources.dart';
 import '../services/iptv/iptv_playback_activity.dart';
 import '../services/iptv/iptv_search_index.dart';
 import '../services/settings_service.dart';
@@ -4917,6 +4918,9 @@ class IptvClient implements MediaServerClient {
   /// callers page it — this method itself does not slice.
   Future<List<LiveTvChannel>> iptvChannels() async {
     if (_isXtream) {
+      // The fingerprint check needs to know whether this load was fresh
+      // (a memo miss) — a memo hit is not a new playlist.
+      final wasFresh = _liveStreamsFuture == null;
       final streams = await _liveStreams();
       final liveCategoryNames = await _liveCategoryNames();
       final channels = <LiveTvChannel>[];
@@ -4938,8 +4942,14 @@ class IptvClient implements MediaServerClient {
           ),
         );
       }
+      if (wasFresh) {
+        await _maybeRefreshEpgForPlaylistChange(
+          Object.hashAll(streams.map((s) => Object.hash(s.streamId, s.name, s.epgChannelId))),
+        );
+      }
       return channels;
     }
+    final wasFresh = _m3uEntriesFuture == null;
     final entries = await _m3uEntries();
     final channels = <LiveTvChannel>[];
     for (final entry in entries) {
@@ -4962,6 +4972,71 @@ class IptvClient implements MediaServerClient {
         ),
       );
     }
+    if (wasFresh) {
+      await _maybeRefreshEpgForPlaylistChange(
+        Object.hashAll(entries.map((e) => Object.hash(e.tvgId, e.url, e.name))),
+      );
+    }
+    return channels;
+  }
+
+  /// Update-on-playlist-change (§3.3, PlezTV 1.2.0): after a FRESH live
+  /// list load, compare the channel-list fingerprint against the stored
+  /// one. A stored fingerprint that differs means the provider changed
+  /// the playlist (added/removed/reordered channels) — refresh the EPG
+  /// so the new channels get guide data. The first load stores the
+  /// fingerprint without refreshing. The fingerprint is over the RAW
+  /// rows, before the hidden-category filter — hiding a group never
+  /// triggers a refresh. Skipped entirely when Settings isn't ready
+  /// (background warm-ups) or the setting is off; the new fingerprint
+  /// is always stored.
+  Future<void> _maybeRefreshEpgForPlaylistChange(int fingerprint) async {
+    final store = IptvEpgSourcesStore(connection.id);
+    final stored = await store.loadChannelFingerprint();
+    final settings = SettingsService.instanceOrNull;
+    if (stored != null &&
+        stored != fingerprint &&
+        settings != null &&
+        settings.read(SettingsService.iptvEpgUpdateOnPlaylistChange)) {
+      await _liveTv.refreshEpgCache();
+    }
+    await store.saveChannelFingerprint(fingerprint);
+  }
+
+  /// Re-fetch the live channel list from the provider (PlezTV 1.2.0,
+  /// §3.2 — Reload TV details): Xtream re-fetches get_live_streams and
+  /// rewrites the disk catalog; M3U drops its playlist cache and
+  /// re-downloads. Movies and series are untouched — this is not a full
+  /// catalog sync. Returns the fresh channel list and tells the library
+  /// views the catalog changed. The channel-list fingerprint is stored
+  /// with the fresh rows, so the next fresh load does not re-trigger an
+  /// update-on-playlist-change refresh for a change already handled.
+  Future<List<LiveTvChannel>> refreshLiveChannelsFromNetwork() async {
+    if (_isXtream) {
+      _liveStreamsFuture = null;
+      _liveCategoriesFuture = null;
+      _liveCategoryNamesFuture = null;
+      _xtreamChannelByKey.clear();
+      final rows = await _xtreamApi.getLiveStreams();
+      _writeCatalogRows(
+        IptvCatalogDiskCache.liveDataset,
+        rows,
+        (r) => r.toJson(),
+        _xtreamApi.lastLiveStreamsBody,
+      );
+      _liveStreamsFuture = Future.value(rows);
+      _liveStreamsLoaded = true;
+      await IptvEpgSourcesStore(
+        connection.id,
+      ).saveChannelFingerprint(
+        Object.hashAll(rows.map((r) => Object.hash(r.streamId, r.name, r.epgChannelId))),
+      );
+    } else {
+      _m3uEntriesFuture = null;
+      await _catalogCache.delete(connection.id, IptvCatalogDiskCache.m3uDataset);
+    }
+    final channels = await iptvChannels();
+    notifyCatalogRefreshed(userInitiated: true);
     return channels;
   }
 

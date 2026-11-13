@@ -27,6 +27,7 @@ import '../../../media/iptv_live_tv.dart';
 import '../../../media/media_server_client.dart';
 import '../../../theme/mono_tokens.dart';
 import '../../../utils/app_logger.dart';
+import '../epg_channel_detail_sheet.dart';
 import '../live_tv_actions_mixin.dart';
 import '../live_tv_mini_player.dart';
 import '../live_tv_refresh_mixin.dart';
@@ -496,8 +497,25 @@ class GuideTabState extends State<GuideTab>
     _initTimeRange();
     _loadPrograms();
 
+    // PlezTV 1.2.0 (§3.3): the quiet-hour guide refresh — an in-app
+    // interval check on guide open, never a background-job promise.
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_maybeRefreshForQuietHour()));
+
     _gridHorizontalController.addListener(_syncGridToHeader);
     _headerHorizontalController.addListener(_syncHeaderToGrid);
+  }
+
+  /// The quiet-hour check (§3.3): the first IPTV support in the guide
+  /// refreshes when the update time passed since the last data landed.
+  /// Once per boundary, never twice, never on manual-only.
+  Future<void> _maybeRefreshForQuietHour() async {
+    if (!mounted) return;
+    for (final channel in widget.channels) {
+      final support = _iptvSupportFor(channel);
+      if (support == null) continue;
+      await support.maybeRefreshForQuietHour();
+      return;
+    }
   }
 
   @override
@@ -1315,6 +1333,19 @@ class GuideTabState extends State<GuideTab>
         ),
       );
     }
+    // EPG details (PlezTV 1.2.0, §3.2): the channel's assigned source,
+    // matched id, match method and why-no-match. IPTV-only — the
+    // details live on IptvLiveTvSupport.
+    if (_iptvSupportFor(channel) != null) {
+      items.add(
+        ChannelMenuItem(
+          id: 'epg-details',
+          label: t.iptv.epgDetailsTitle,
+          icon: Symbols.info_rounded,
+          onPressed: () => unawaited(_showEpgDetails(channel)),
+        ),
+      );
+    }
     // Whole-category row (v1.0.16): the channel's category with a
     // chevron; tapping it opens the submenu to show or hide the WHOLE
     // category. Live TV only — a channel with no IPTV category resolves
@@ -1392,6 +1423,13 @@ class GuideTabState extends State<GuideTab>
       ],
     );
     selected?.onPressed();
+  }
+
+  /// The EPG details sheet (PlezTV 1.2.0, §3.2) for one channel.
+  Future<void> _showEpgDetails(LiveTvChannel channel) async {
+    final support = _iptvSupportFor(channel);
+    if (support == null || !mounted) return;
+    await showEpgChannelDetailSheet(context, support: support, channel: channel);
   }
 
   /// The guide channel long-press menu (build #17, §9): a dropdown
