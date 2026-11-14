@@ -743,6 +743,85 @@ void main() {
     expect(find.text('failed'), findsWidgets);
   });
 
+  testWidgets('catalog mode row offers Low RAM / Instant search and switching flips the switch (1.2.7)', (
+    tester,
+  ) async {
+    // The mode row is wiring, not mechanism (the unit test proves the
+    // switch both directions): the row renders the Low RAM default, the
+    // picker shows both options with the Instant search disclaimer, and
+    // picking Instant search persists the mode, flips the prune switch
+    // and opens the catalog re-sync dialog. The file-level setUp keeps
+    // the disk cache off, so the sync itself fails fast here — the
+    // dialog reporting the failure is the proof the handler ran it.
+    IptvClient.pruneHiddenCatalogRows = true;
+    addTearDown(() => IptvClient.pruneHiddenCatalogRows = true);
+
+    CredentialVault.resetKeyForTesting();
+    await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(() async => db.close());
+    final registry = _FakeConnectionRegistry(db);
+    await registry.upsert(_trexConnection());
+
+    final manager = MultiServerManager();
+    manager.debugRegisterClientForTesting(_trexClient());
+    final provider = testMultiServerProvider(manager);
+    addTearDown(() {
+      provider.dispose();
+      manager.dispose();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<MultiServerProvider>.value(value: provider),
+          Provider<ConnectionRegistry>.value(value: registry),
+        ],
+        child: InputModeTracker(
+          child: MaterialApp(theme: monoTheme(MonoPalette.dark), home: const IptvSettingsScreen()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Default mode is Low RAM: the row shows its description.
+    await tester.scrollUntilVisible(find.text(t.iptv.catalogMode), 200);
+    await tester.pump();
+    expect(find.text(t.iptv.catalogMode), findsOneWidget);
+    expect(find.text(t.iptv.catalogModeLowRamDescription), findsOneWidget);
+
+    // The picker offers both modes, and the Instant search option
+    // carries the disclaimer (more memory + a larger cache file).
+    await tester.tap(find.text(t.iptv.catalogMode));
+    await tester.pumpAndSettle();
+    expect(find.text(t.iptv.catalogModeLowRam), findsOneWidget);
+    expect(find.text(t.iptv.catalogModeInstantSearch), findsOneWidget);
+    expect(find.text(t.iptv.catalogModeInstantSearchDescription), findsOneWidget);
+
+    // Pick Instant search: the pref persists, the prune switch flips
+    // off, and the catalog re-sync dialog opens.
+    await tester.tap(find.text(t.iptv.catalogModeInstantSearch));
+    await tester.pump();
+    expect(
+      SettingsService.instance.read(SettingsService.iptvCatalogMode),
+      IptvClient.catalogModeInstantSearch,
+    );
+    expect(IptvClient.pruneHiddenCatalogRows, isFalse);
+    expect(find.text(t.iptv.catalogSyncTitle), findsOneWidget);
+
+    // The sync runs real sqlite + panel work on the real event loop —
+    // yield to it, then pump, until the dialog reports the outcome.
+    // (Disk off in this file, so the sync fails fast — the failure
+    // line is still the proof the handler ran the re-sync.)
+    for (var i = 0; i < 40 && find.text(t.iptv.catalogSyncFailed).evaluate().isEmpty; i++) {
+      await tester.runAsync(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
+    }
+    expect(find.text(t.iptv.catalogSyncFailed), findsOneWidget);
+  });
+
   testWidgets('Last search shows while the series probe is still running', (tester) async {
     CredentialVault.resetKeyForTesting();
     await tester.runAsync(() => CredentialVault.protect('opaque-vault-warmup'));

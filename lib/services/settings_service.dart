@@ -1002,6 +1002,16 @@ class SettingsService extends BaseSharedPreferencesService {
   /// settings export/import like the other IPTV settings.
   static const iptvCatalogSyncIntervalHours = IntPref('iptv_catalog_sync_interval_hours', defaultValue: 168);
 
+  /// Catalog storage mode (1.2.7, two modes — Matt, 2026-11-13 ~14:19
+  /// EST): 'lowRam' (default, first install — only the categories turned
+  /// on are stored) or 'instantSearch' (opt-in — the whole catalog is
+  /// stored, more RAM + a larger cache file). The value is the same as
+  /// [IptvClient.catalogModeLowRam] / [IptvClient.catalogModeInstantSearch];
+  /// settings_service cannot import the client (import cycle), so the
+  /// literal is duplicated here. In `_portableOnlyPrefs`, so it rides
+  /// settings export/import like the other IPTV settings.
+  static const iptvCatalogMode = StringPref('iptv_catalog_mode', defaultValue: 'lowRam');
+
   static const matchRefreshRate = BoolPref('match_refresh_rate');
   static const matchDynamicRange = BoolPref('match_dynamic_range');
   static const appLocale = _AppLocalePref();
@@ -1692,6 +1702,7 @@ class SettingsService extends BaseSharedPreferencesService {
     iptvXtreamUserAgent,
     iptvXtreamUserAgentCustom,
     iptvCatalogSyncIntervalHours,
+    iptvCatalogMode,
     matchRefreshRate,
     matchDynamicRange,
     displaySwitchDelay,

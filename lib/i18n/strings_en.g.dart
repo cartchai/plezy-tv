@@ -3932,6 +3932,11 @@ class Translations$about$en {
 		'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 		'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
 	];
+	List<String> get changelog2293 => [
+		'Settings → IPTV has a Catalog mode: Low RAM (the default — only the categories you have turned on are stored) or Instant search (the whole catalog is stored, so search is instant — it uses more memory and a larger cache file)',
+		'Switching modes re-syncs the catalog so the lists, the saved cache and search all agree under the new mode',
+		'The debug log export also withholds web addresses that appear inside a list of settings, not just on their own',
+	];
 	List<String> get changelog2292 => [
 		'At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks',
 		'When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed',
@@ -6783,6 +6788,24 @@ class Translations$iptv$en {
 
 	/// en: 'Catalog sync failed'
 	String get catalogSyncFailed => 'Catalog sync failed';
+
+	/// en: 'Catalog mode'
+	String get catalogMode => 'Catalog mode';
+
+	/// en: 'Low RAM'
+	String get catalogModeLowRam => 'Low RAM';
+
+	/// en: 'Uses less memory and a smaller cache file. Only the categories you have turned on are stored.'
+	String get catalogModeLowRamDescription => 'Uses less memory and a smaller cache file. Only the categories you have turned on are stored.';
+
+	/// en: 'Instant search'
+	String get catalogModeInstantSearch => 'Instant search';
+
+	/// en: 'Uses more memory and a larger cache file. The whole catalog is stored, so search is instant and un-hiding a category needs no refresh.'
+	String get catalogModeInstantSearchDescription => 'Uses more memory and a larger cache file. The whole catalog is stored, so search is instant and un-hiding a category needs no refresh.';
+
+	/// en: 'Mode saved. It will apply the next time a catalog syncs.'
+	String get catalogModeNoConnections => 'Mode saved. It will apply the next time a catalog syncs.';
 
 	/// en: 'IPTV cache size'
 	String get catalogCacheSize => 'IPTV cache size';
@@ -10926,6 +10949,9 @@ extension on Translations {
 			'about.changelog2290.1' => 'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
 			'about.changelog2290.2' => 'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 			'about.changelog2290.3' => 'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
+			'about.changelog2293.0' => 'Settings → IPTV has a Catalog mode: Low RAM (the default — only the categories you have turned on are stored) or Instant search (the whole catalog is stored, so search is instant — it uses more memory and a larger cache file)',
+			'about.changelog2293.1' => 'Switching modes re-syncs the catalog so the lists, the saved cache and search all agree under the new mode',
+			'about.changelog2293.2' => 'The debug log export also withholds web addresses that appear inside a list of settings, not just on their own',
 			'about.changelog2292.0' => 'At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks',
 			'about.changelog2292.1' => 'When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed',
 			'about.changelog2292.2' => 'Settings → Logs has an Export debug file button: one file with all settings, logs, errors and app info, with server addresses and passwords kept out of it',
@@ -10994,11 +11020,11 @@ extension on Translations {
 			'explore.rows.recommendedShows' => 'Recommended Shows',
 			'explore.rows.trendingMovies' => 'Trending Movies',
 			'explore.rows.trendingShows' => 'Trending Shows',
+			_ => null,
+		} ?? switch (path) {
 			'explore.rows.popularMovies' => 'Popular Movies',
 			'explore.rows.popularShows' => 'Popular Shows',
 			'explore.rows.trendingAnime' => 'Trending Anime',
-			_ => null,
-		} ?? switch (path) {
 			'explore.rows.suggestedAnime' => 'Suggested Anime',
 			'explore.rows.airingAnime' => 'Top Airing Anime',
 			'explore.rows.popularAnime' => 'Most Popular Anime',
@@ -11508,11 +11534,11 @@ extension on Translations {
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
 			'downloads.queuedTooltip' => 'Queued',
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'Queued ${files}',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
@@ -12022,11 +12048,11 @@ extension on Translations {
 			'addServer.connectToXtreamCardSubtitle' => 'Enter your server URL, username, and password.',
 			'addServer.libraryName' => 'Library name',
 			'addServer.libraryNameHelper' => 'This name becomes the library\'s name.',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.playlistUrl' => 'Playlist URL',
 			'addServer.epgUrl' => 'EPG URL (optional)',
 			'addServer.serverUrl' => 'Server URL',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.m3uProbeFailed' => 'Could not load that playlist. Check the URL and try again.',
 			'addServer.m3uPlaylistEmpty' => 'That playlist has no channels.',
 			'addServer.m3uInvalidUrl' => 'Enter a valid playlist URL starting with http:// or https://.',
@@ -12090,6 +12116,12 @@ extension on Translations {
 			'iptv.catalogSyncSeries' => 'TV / Series',
 			'iptv.catalogSyncDone' => 'Catalog synced',
 			'iptv.catalogSyncFailed' => 'Catalog sync failed',
+			'iptv.catalogMode' => 'Catalog mode',
+			'iptv.catalogModeLowRam' => 'Low RAM',
+			'iptv.catalogModeLowRamDescription' => 'Uses less memory and a smaller cache file. Only the categories you have turned on are stored.',
+			'iptv.catalogModeInstantSearch' => 'Instant search',
+			'iptv.catalogModeInstantSearchDescription' => 'Uses more memory and a larger cache file. The whole catalog is stored, so search is instant and un-hiding a category needs no refresh.',
+			'iptv.catalogModeNoConnections' => 'Mode saved. It will apply the next time a catalog syncs.',
 			'iptv.catalogCacheSize' => 'IPTV cache size',
 			'iptv.catalogCacheEmpty' => 'No catalog downloaded yet',
 			'iptv.catalogNotSynced' => 'Catalog not synced yet — syncing in background',

@@ -74,7 +74,14 @@ class DebugLogExportService {
       return type == null ? inner : '$inner ($type)';
     }
     if (value is String && value.contains('://')) return '[URL withheld]';
-    if (value is List) return jsonEncode(value);
+    // 1.2.7 (T4b): a URL-looking element inside a List value is
+    // withheld the same way — a list of server addresses is still a
+    // list of server addresses.
+    if (value is List) {
+      return jsonEncode(
+        value.map((e) => e is String && e.contains('://') ? '[URL withheld]' : e).toList(),
+      );
+    }
     return '$value';
   }
 

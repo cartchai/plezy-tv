@@ -1677,15 +1677,16 @@ class IptvClient implements MediaServerClient {
   /// search index) and "Instant search" (opt-in, with a disclaimer that
   /// it uses more RAM and a larger cache file — full disk cache,
   /// instant search/un-hide/guide). The mode setting itself is a
-  /// SEPARATE small build after 1.2.4 — do NOT build it here. Until
-  /// then this is always on: 1.2.4 ships Low RAM behaviour.
-  ///
-  /// The mode build makes this conditional on the mode setting and
-  /// restores the full cache via a re-sync when Instant search is
-  /// picked — a re-sync with the switch off lands the full rows again,
-  /// so the prune is reversible by sync, never baked in as irreversible
-  /// scattered logic. Every STORAGE filter (memos, disk file, search
-  /// index) reads the hidden sets through [_pruneHiddenCategoryIds] /
+  /// Catalog storage mode (1.2.7, two modes — Matt, 2026-11-13 ~14:19
+  /// EST): "Low RAM" (default, first install) prunes hidden rows from
+  /// the memos, disk cache and search index; "Instant search" (opt-in)
+  /// keeps the full catalog. The mode flips the ONE prune switch below;
+  /// a mode switch restores/prunes the full cache via a forced re-sync
+  /// (the sync publish + disk write filter through the switch — see
+  /// FORK §45 and the 1.2.4 T5 test), so the prune is reversible by
+  /// sync, never baked in as irreversible scattered logic. Every
+  /// STORAGE filter (memos, disk file, search index) reads the hidden
+  /// sets through [_pruneHiddenCategoryIds] /
   /// [_pruneHiddenCategoryInitials] below — never the raw hidden sets —
   /// so the mode build flips one flag, not six call sites.
   ///
@@ -1693,6 +1694,16 @@ class IptvClient implements MediaServerClient {
   /// read-time filters) deliberately stays on the raw hidden sets:
   /// hidden categories stay hidden on screen in BOTH modes; the switch
   /// only decides what is STORED.
+  static const String catalogModeLowRam = 'lowRam';
+  static const String catalogModeInstantSearch = 'instantSearch';
+
+  /// Apply a stored mode value to the prune switch. Unknown values fall
+  /// back to Low RAM (pruning on) — a corrupt or future value must never
+  /// silently switch the app to the full catalog.
+  static void applyCatalogMode(String mode) {
+    pruneHiddenCatalogRows = mode != catalogModeInstantSearch;
+  }
+
   static bool pruneHiddenCatalogRows = true;
 
   /// The hidden sets the storage prune actually applies: the user's

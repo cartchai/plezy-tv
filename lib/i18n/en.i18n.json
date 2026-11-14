@@ -1667,6 +1667,11 @@
       "Favourites and Continue Watching still open for shows in a category you've since switched off",
       "When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed"
     ],
+    "changelog2293": [
+      "Settings → IPTV has a Catalog mode: Low RAM (the default — only the categories you have turned on are stored) or Instant search (the whole catalog is stored, so search is instant — it uses more memory and a larger cache file)",
+      "Switching modes re-syncs the catalog so the lists, the saved cache and search all agree under the new mode",
+      "The debug log export also withholds web addresses that appear inside a list of settings, not just on their own"
+    ],
     "changelog2292": [
       "At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks",
       "When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed",
@@ -2962,6 +2967,12 @@
     "catalogSyncSeries": "TV / Series",
     "catalogSyncDone": "Catalog synced",
     "catalogSyncFailed": "Catalog sync failed",
+    "catalogMode": "Catalog mode",
+    "catalogModeLowRam": "Low RAM",
+    "catalogModeLowRamDescription": "Uses less memory and a smaller cache file. Only the categories you have turned on are stored.",
+    "catalogModeInstantSearch": "Instant search",
+    "catalogModeInstantSearchDescription": "Uses more memory and a larger cache file. The whole catalog is stored, so search is instant and un-hiding a category needs no refresh.",
+    "catalogModeNoConnections": "Mode saved. It will apply the next time a catalog syncs.",
     "catalogCacheSize": "IPTV cache size",
     "catalogCacheEmpty": "No catalog downloaded yet",
     "catalogNotSynced": "Catalog not synced yet — syncing in background",

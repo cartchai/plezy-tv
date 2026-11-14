@@ -141,6 +141,35 @@ class IptvSettingsScreen extends StatelessWidget {
                   subtitle: t.iptv.catalogSyncNowDescription,
                   onTap: () => _syncCatalogNow(context),
                 ),
+                // 1.2.7 (two modes, Matt 2026-11-13 ~14:19 EST): "Low RAM"
+                // (default, first install — only the categories turned on
+                // are stored) or "Instant search" (opt-in — the whole
+                // catalog is stored, more RAM + a larger cache file).
+                // Picking a mode flips the prune switch and re-syncs
+                // every Xtream catalog in the same progress dialog
+                // "Sync catalog now" uses, so the memos, disk cache and
+                // search index agree under the new mode.
+                SettingSelectionTile<String>(
+                  pref: settings.SettingsService.iptvCatalogMode,
+                  onAfterWrite: (mode) => _applyCatalogMode(context, mode),
+                  icon: Symbols.memory_rounded,
+                  title: t.iptv.catalogMode,
+                  subtitleBuilder: (mode) => mode == IptvClient.catalogModeInstantSearch
+                      ? t.iptv.catalogModeInstantSearchDescription
+                      : t.iptv.catalogModeLowRamDescription,
+                  options: [
+                    DialogOption(
+                      value: IptvClient.catalogModeLowRam,
+                      title: t.iptv.catalogModeLowRam,
+                      subtitle: t.iptv.catalogModeLowRamDescription,
+                    ),
+                    DialogOption(
+                      value: IptvClient.catalogModeInstantSearch,
+                      title: t.iptv.catalogModeInstantSearch,
+                      subtitle: t.iptv.catalogModeInstantSearchDescription,
+                    ),
+                  ],
+                ),
                 const _CatalogCacheSizeTile(),
                 _BackgroundSyncTile(
                   diagnostics: backgroundWorkDiagnosticsService,
@@ -398,6 +427,42 @@ class IptvSettingsScreen extends StatelessWidget {
     if (!context.mounted) return;
     if (clients.isEmpty) {
       showSuccessSnackBar(context, t.iptv.noConnections);
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => _CatalogSyncDialog(clients: clients),
+    );
+  }
+
+  /// Apply a picked catalog mode (1.2.7, two modes): flip the prune
+  /// switch, then re-sync every Xtream catalog so the memos, disk cache
+  /// and search index agree under the new mode — the same forced sync
+  /// "Sync catalog now" runs, in the same progress dialog (per-type
+  /// progress, Cancel stops it, dismissing leaves it running in the
+  /// background). Picking the mode that is already active changes
+  /// nothing, so it skips the re-sync. A switch with no IPTV
+  /// connections just saves the mode; it applies on the next sync. M3U
+  /// playlists keep their raw cached text in both modes (the prune
+  /// governs the Xtream catalog stores).
+  Future<void> _applyCatalogMode(BuildContext context, String mode) async {
+    // Already on this mode: the switch already matches, so a re-sync
+    // would re-download the whole catalog for nothing.
+    if ((mode == IptvClient.catalogModeInstantSearch) == !IptvClient.pruneHiddenCatalogRows) return;
+    IptvClient.applyCatalogMode(mode);
+    final registry = context.read<ConnectionRegistry>();
+    final multiServer = context.read<MultiServerProvider>();
+    final connections = await registry.list();
+    final clients = <IptvClient>[];
+    for (final connection in connections) {
+      if (connection is! XtreamConnection) continue;
+      final client = multiServer.getClientForServer(ServerId(connection.id));
+      if (client is IptvClient) clients.add(client);
+    }
+    if (!context.mounted) return;
+    if (clients.isEmpty) {
+      showSuccessSnackBar(context, t.iptv.catalogModeNoConnections);
       return;
     }
     await showDialog<void>(

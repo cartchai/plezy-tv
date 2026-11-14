@@ -69,6 +69,7 @@ import 'providers/offline_watch_provider.dart';
 import 'providers/shader_provider.dart';
 import 'utils/snackbar_helper.dart';
 import 'services/iptv/iptv_background_sync.dart';
+import 'media/iptv_client.dart';
 import 'services/multi_server_manager.dart';
 import 'services/library_events/library_event_service.dart';
 import 'services/offline_watch_sync_service.dart';
@@ -968,6 +969,13 @@ Future<AppDatabaseBootstrap> openAppDatabaseWithDownloadRecovery({
 }
 
 Future<_StartupDependencies> _initializeStartup(SettingsService settings) async {
+  // 1.2.7 (two modes): apply the stored catalog mode before any IPTV
+  // client can bind — the prune switch defaults to Low RAM, so only a
+  // stored Instant search install flips it off. An existing install
+  // with no stored mode reads the Low RAM default, matching the 1.2.4
+  // behaviour it already has.
+  IptvClient.applyCatalogMode(settings.read(SettingsService.iptvCatalogMode));
+
   final startupWatch = Stopwatch()..start();
   var lastStartupMarkMs = 0;
   void markStartupPhase(String phase) {

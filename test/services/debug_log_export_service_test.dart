@@ -64,6 +64,25 @@ void main() {
       expect(section, contains('theme: dark (string)'));
     });
 
+    test('renderSettingsSection withholds URL-looking elements inside List values (T4b)', () {
+      // 1.2.6 tester probe T4b: a url_list holding a panel URL plus a
+      // plain element — the URL must be withheld like a scalar URL, the
+      // plain element stays.
+      final section = DebugLogExportService.renderSettingsSection({
+        'prefs': {
+          'url_list': {
+            'type': 'stringList',
+            'value': ['https://panel.example.com:8080', 'EN'],
+          },
+          'theme': {'type': 'string', 'value': 'dark'},
+        },
+      });
+      expect(section, isNot(contains('panel.example.com')));
+      expect(section, contains('[URL withheld]'));
+      expect(section, contains('"EN"'));
+      expect(section, contains('theme: dark (string)'));
+    });
+
     test('debugFileName has the pleztv-debug-YYYYMMDD-HHMMSS.txt shape', () {
       expect(
         DebugLogExportService.debugFileName(DateTime(2026, 11, 13, 20, 45, 30)),
