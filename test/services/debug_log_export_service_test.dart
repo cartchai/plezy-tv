@@ -2,8 +2,11 @@
 // all settings, logs, errors and app info, saved from Settings → Logs.
 // The privacy tests are the point: no panel URL or credential-like
 // string may ever appear in the file (standing Trex ban).
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:plezy/services/debug_log_export_service.dart';
+import 'package:plezy/services/last_crash_store.dart';
 import 'package:plezy/utils/log_redaction_manager.dart';
 
 import '../test_helpers/prefs.dart';
@@ -114,6 +117,68 @@ void main() {
       expect(text, isNot(contains('panel.example.com')));
       expect(text, isNot(contains('hunter2')));
       expect(text, contains('[REDACTED_URL]'));
+    });
+  });
+
+  group('summary block (1.2.9)', () {
+    // Matt (2026-11-14 ~02:14 EST): the file opens with a short summary
+    // — the facts someone opens the file to find — then the full log,
+    // then the existing sections, unchanged.
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('plezy_debug_summary_test_');
+      LastCrashStore.debugDirectoryOverride = tempDir;
+    });
+
+    tearDown(() async {
+      LastCrashStore.debugDirectoryOverride = null;
+      LastCrashStore.resetForTesting();
+      if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+    });
+
+    test('the summary is first and carries RSS max and the last-crash one-liner under a long log', () async {
+      LastCrashStore.record(
+        StateError('boom on startup'),
+        source: 'uncaught',
+        timestamp: DateTime.utc(2026, 11, 14, 2, 10, 0),
+      );
+      final base = StringBuffer();
+      for (var i = 0; i < 2000; i++) {
+        base.writeln('[02:00:00] [I] filler log line $i');
+      }
+      final text = await DebugLogExportService.buildDebugText(baseLogsText: base.toString());
+      expect(text, startsWith('== Summary =='));
+      expect(text, contains('App: PlezTV'));
+      expect(text, contains('RSS max:'));
+      expect(
+        text,
+        contains('Last crash: 2026-11-14T02:10:00.000Z [uncaught] StateError: Bad state: boom on startup'),
+      );
+      expect(text.indexOf('== Summary =='), lessThan(text.indexOf('filler log line 0')));
+      expect(text.indexOf('filler log line 0'), lessThan(text.indexOf('== Settings ==')));
+    });
+
+    test('memory-pressure events are counted with the worst RSS from the log', () async {
+      const base =
+          '[02:00:00] [W] RSS high (700MB > 460MB), dropped IPTV catalogs + EPG from memory\n'
+          '[02:01:00] [W] System memory pressure, evicting image caches + IPTV catalogs/EPG\n'
+          '[02:02:00] [W] RSS high (900MB > 460MB), dropped IPTV catalogs + EPG from memory\n';
+      final text = await DebugLogExportService.buildDebugText(baseLogsText: base);
+      expect(text, contains('Memory pressure: 3 events, worst RSS 900 MB'));
+    });
+
+    test('the previous exit reason is picked up from the log', () async {
+      const base =
+          '[02:00:00] [I] Previous Android application exit: reason=low_memory (startupPhase=binding_settled, rss=579MB, importance=foreground)\n';
+      final text = await DebugLogExportService.buildDebugText(baseLogsText: base);
+      expect(text, contains('Previous exit: reason=low_memory'));
+    });
+
+    test('a manual export says so and shows the live failed-start count', () async {
+      final text = await DebugLogExportService.buildDebugText(baseLogsText: 'some log\n');
+      expect(text, contains('Failed starts: 0'));
+      expect(text, contains('manual export from Settings → Logs'));
     });
   });
 }

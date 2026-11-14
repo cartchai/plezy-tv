@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -128,14 +129,134 @@ class DebugLogExportService {
     return record?.describe() ?? 'none recorded';
   }
 
-  /// The full debug file text: the base logs text (device + app info +
-  /// startup record + logs, errors and stack traces) plus the settings,
-  /// memory and last-crash sections. The whole file is redacted before
-  /// it is returned, so a panel URL, token or password-like value that
-  /// somehow reached the logs or the settings never lands in the file.
-  static Future<String> buildDebugText({required String baseLogsText}) async {
-    final buffer = StringBuffer(baseLogsText);
+  /// One line identifying the app + device for the summary block.
+  /// Best-effort: on a platform without the device-info channel (and in
+  /// unit tests) it falls back to 'unknown' rather than throwing.
+  static Future<String> buildDeviceLine() async {
+    String appVersion = 'unknown';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      appVersion = '${info.version}+${info.buildNumber}';
+    } catch (_) {
+      // Best-effort metadata.
+    }
+    String device = 'unknown device';
+    try {
+      final plugin = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final android = await plugin.androidInfo;
+        device = '${android.manufacturer} ${android.model} — Android ${android.version.release} (API ${android.version.sdkInt})';
+      } else if (Platform.isIOS) {
+        final ios = await plugin.iosInfo;
+        device = '${ios.model} — iOS ${ios.systemVersion}';
+      } else {
+        device = Platform.operatingSystem;
+      }
+    } catch (_) {
+      // Best-effort metadata.
+    }
+    return 'App: PlezTV $appVersion — $device';
+  }
+
+  /// One-line memory numbers for the summary block (the full numbers
+  /// stay in [buildMemorySection] below, unchanged).
+  static String buildMemorySummaryLine() {
+    final rss = ProcessInfo.currentRss;
+    final maxRss = ProcessInfo.maxRss;
+    final totalMem = DevicePerformance.totalMemBytes;
+    return 'Memory: RSS now: ${rss >> 20} MB / max: ${maxRss >> 20} MB — device total RAM: ${totalMem == null ? 'unknown' : '${totalMem >> 20} MB'} — low-end: ${DevicePerformance.isLowEndHardware}';
+  }
+
+  /// Memory-pressure events in the log: the watchdog's 'RSS high'
+  /// drop line (one per trip — the image-cache line from the same trip
+  /// is not a second event) plus the OS pressure line. The worst RSS
+  /// comes from the watchdog lines.
+  static String buildPressureSummaryLine(String baseLogsText) {
+    var events = 0;
+    var worstRssMb = 0;
+    for (final line in baseLogsText.split('\n')) {
+      if (line.contains('System memory pressure')) {
+        events++;
+      } else if (line.contains('RSS high (') && line.contains('dropped IPTV catalogs')) {
+        events++;
+        final match = RegExp(r'RSS high \((\d+)MB').firstMatch(line);
+        if (match != null) {
+          final rss = int.tryParse(match.group(1)!) ?? 0;
+          if (rss > worstRssMb) worstRssMb = rss;
+        }
+      }
+    }
+    if (events == 0) return 'Memory pressure: none recorded';
+    return 'Memory pressure: $events events, worst RSS $worstRssMb MB';
+  }
+
+  /// The previous exit reason, from the last 'Previous Android
+  /// application exit' line in the log (the whole line — it already
+  /// carries the startup phase and RSS).
+  static String buildPreviousExitSummaryLine(String baseLogsText) {
+    const prefix = 'Previous Android application exit: ';
+    String? last;
+    for (final line in baseLogsText.split('\n')) {
+      final index = line.indexOf(prefix);
+      if (index != -1) last = line.substring(index + prefix.length).trim();
+    }
+    if (last == null || last.isEmpty) return 'Previous exit: none recorded';
+    return 'Previous exit: $last';
+  }
+
+  /// The last recorded crash, one line: when + error type + short message.
+  static Future<String> buildLastCrashSummaryLine() async {
+    final record = await LastCrashStore.read();
+    if (record == null) return 'Last crash: none recorded';
+    final firstLine = record.message.split('\n').first;
+    final short = firstLine.length > 120 ? '${firstLine.substring(0, 120)}…' : firstLine;
+    return 'Last crash: ${record.timestamp.toUtc().toIso8601String()} [${record.source}] ${record.errorType}: $short';
+  }
+
+  /// The summary block (1.2.9, Matt ~2026-11-14 02:14 EST): the facts
+  /// someone opens the file to find, at the very top, before the log —
+  /// so the file is easy to access without scrolling through hundreds
+  /// of lines. One line each; the sections below stay unchanged.
+  static Future<String> buildSummarySection({
+    required String baseLogsText,
+    required String dumpReason,
+    required int failedStarts,
+  }) async {
+    final lines = <String>[
+      '== Summary ==',
+      await buildDeviceLine(),
+      buildMemorySummaryLine(),
+      buildPressureSummaryLine(baseLogsText),
+      buildPreviousExitSummaryLine(baseLogsText),
+      await buildLastCrashSummaryLine(),
+      'Failed starts: $failedStarts — $dumpReason',
+    ];
+    return lines.join('\n');
+  }
+
+  /// The full debug file text: a summary block first, then the base logs
+  /// text (device + app info + startup record + logs, errors and stack
+  /// traces — the FULL log, nothing trimmed), plus the settings, memory
+  /// and last-crash sections. The whole file is redacted before it is
+  /// returned, so a panel URL, token or password-like value that somehow
+  /// reached the logs or the settings never lands in the file.
+  ///
+  /// [dumpReason] says why this file was written ('auto-dump after 3
+  /// failed starts', or the manual-export default); [failedStarts]
+  /// defaults to the live counter.
+  static Future<String> buildDebugText({
+    required String baseLogsText,
+    String? dumpReason,
+    int? failedStarts,
+  }) async {
+    final reason = dumpReason ?? 'manual export from Settings → Logs';
+    final count = failedStarts ?? await LastCrashStore.readFailedStartCount();
+    final buffer = StringBuffer(
+      await buildSummarySection(baseLogsText: baseLogsText, dumpReason: reason, failedStarts: count),
+    );
     buffer.writeln();
+    buffer.writeln();
+    buffer.writeln(baseLogsText);
     buffer.writeln();
     buffer.writeln('== Settings ==');
     buffer.writeln(await buildSettingsSection());

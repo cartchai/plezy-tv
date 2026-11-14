@@ -20,29 +20,29 @@ import '../test_helpers/prefs.dart';
 void main() {
   group('ordinary preferences', () {
     test('a wrong stored type falls back to the declared default', () async {
-      // `enable_debug_logging` is a BoolPref read by the very first gate step.
-      resetSharedPreferencesForTest(initialAsync: {'enable_debug_logging': 'yes'});
+      // `show_server_name_on_hubs` is an ordinary BoolPref.
+      resetSharedPreferencesForTest(initialAsync: {'show_server_name_on_hubs': 'yes'});
       final settings = await SettingsService.getInstance();
 
-      expect(settings.read(SettingsService.enableDebugLogging), isFalse);
+      expect(settings.read(SettingsService.showServerNameOnHubs), isFalse);
     });
 
     test('the unreadable key is dropped so the next launch starts clean', () async {
-      resetSharedPreferencesForTest(initialAsync: {'enable_debug_logging': 'yes'});
+      resetSharedPreferencesForTest(initialAsync: {'show_server_name_on_hubs': 'yes'});
       final settings = await SettingsService.getInstance();
 
-      settings.read(SettingsService.enableDebugLogging);
+      settings.read(SettingsService.showServerNameOnHubs);
       // The removal is deliberately fire-and-forget; let it land.
       await Future<void>.delayed(Duration.zero);
 
-      expect(settings.prefs.containsKey('enable_debug_logging'), isFalse);
+      expect(settings.prefs.containsKey('show_server_name_on_hubs'), isFalse);
     });
 
     test('a readable value is returned unchanged', () async {
-      resetSharedPreferencesForTest(initialAsync: {'enable_debug_logging': true});
+      resetSharedPreferencesForTest(initialAsync: {'show_server_name_on_hubs': true});
       final settings = await SettingsService.getInstance();
 
-      expect(settings.read(SettingsService.enableDebugLogging), isTrue);
+      expect(settings.read(SettingsService.showServerNameOnHubs), isTrue);
     });
   });
 

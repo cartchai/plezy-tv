@@ -1,7 +1,7 @@
 name: plezy
 description: "PlezTV — a Plex, Jellyfin and Emby client for Flutter with IPTV: M3U and Xtream Codes, live TV, movies and series."
 publish_to: "none"
-version: 1.2.8-2.25.0+202
+version: 1.2.9-2.25.0+203
 
 environment:
   # Dart floor stays 3.12: freezed 3.x emits `final` constructor parameters,
@@ -101,6 +101,7 @@ dependencies:
   in_app_purchase_storekit: ^0.4.13+3
   openwatchparty: ^1.1.0
   workmanager: ^0.10.10
+  share_plus: ^12.0.2
 
 dev_dependencies:
   archive: ^4.0.9
@@ -118,6 +119,7 @@ dev_dependencies:
   dart_code_linter: ^4.1.8
   drift_dev: ^2.28.3
   shared_preferences_platform_interface: ^2.4.0
+  share_plus_platform_interface: ^6.1.0
   path_provider_platform_interface: ^2.1.0
   connectivity_plus_platform_interface: ^2.1.0
   # Exercise vendored desktop preference stores against real file I/O,

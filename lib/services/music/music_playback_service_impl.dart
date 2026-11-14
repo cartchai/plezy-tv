@@ -745,10 +745,10 @@ class MusicPlaybackServiceImpl extends MusicPlaybackService with WidgetsBindingO
       _wirePlayerStreams(player);
     }
     if (Platform.isAndroid) {
-      // Configure logging before volume/focus/open can create the native core,
-      // and refresh it on later opens if the debug preference changed.
-      final debugLogging = SettingsService.instanceOrNull?.read(SettingsService.enableDebugLogging) ?? false;
-      await player.setLogLevel(debugLogging ? 'v' : 'warn');
+      // Configure logging before volume/focus/open can create the native core.
+      // 1.2.9: the debug-logging setting was removed; the music player's own
+      // verbose logging stays off (the app's own logging is always on, to file).
+      await player.setLogLevel('warn');
     }
     if (isNew && _player == player && !player.disposed && _volume != 100.0) {
       unawaited(player.setVolume(_volume));

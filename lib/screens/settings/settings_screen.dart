@@ -117,7 +117,6 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
   static const _kCompanionRemoteServer = 'companion_remote_server';
   static const _kCrashReporting = 'crash_reporting';
   static const _kLastCrash = 'last_crash';
-  static const _kDebugLogging = 'debug_logging';
   static const _kAutoHidePerformanceOverlay = 'auto_hide_performance_overlay';
   static const _kViewLogs = 'view_logs';
   static const _kClearImageCache = 'clear_image_cache';
@@ -588,13 +587,6 @@ class _SettingsScreenState extends State<SettingsScreen> with FocusableTab, Moun
           icon: Symbols.monitoring_rounded,
           title: t.settings.crashReporting,
           subtitle: t.settings.crashReportingDescription,
-        ),
-        SettingSwitchTile(
-          focusNode: _focusTracker.get(_kDebugLogging),
-          pref: settings.SettingsService.enableDebugLogging,
-          icon: Symbols.bug_report_rounded,
-          title: t.settings.debugLogging,
-          subtitle: t.settings.debugLoggingDescription,
         ),
         SettingSwitchTile(
           focusNode: _focusTracker.get(_kAutoHidePerformanceOverlay),

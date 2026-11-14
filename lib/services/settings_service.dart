@@ -630,7 +630,6 @@ class SettingsService extends BaseSharedPreferencesService {
   static const String defaultIntroPattern = PlaybackExtras.defaultIntroPattern;
   static const String defaultCreditsPattern = PlaybackExtras.defaultCreditsPattern;
 
-  static const enableDebugLogging = BoolPref('enable_debug_logging', onWrite: setLoggerLevel);
   static const crashReporting = BoolPref('crash_reporting', defaultValue: true);
   static const enableHardwareDecoding = BoolPref('enable_hardware_decoding', defaultValue: true);
   static const enableHDR = BoolPref('enable_hdr', defaultValue: true);
@@ -1569,7 +1568,6 @@ class SettingsService extends BaseSharedPreferencesService {
   ///
   /// Group one: reset *and* exported — the ordinary case.
   static final List<Pref<Object?>> _resetAndPortablePrefs = [
-    enableDebugLogging,
     enableHardwareDecoding,
     enableHDR,
     hdrToneMapping,

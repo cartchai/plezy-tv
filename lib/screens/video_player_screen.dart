@@ -1756,7 +1756,6 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       _rewindOnResume = settingsService.read(SettingsService.rewindOnResume);
       final playbackBufferTier = settingsService.read(SettingsService.playbackBufferTier);
       final enableHardwareDecoding = settingsService.read(SettingsService.enableHardwareDecoding);
-      final debugLoggingEnabled = settingsService.read(SettingsService.enableDebugLogging);
       final useExoPlayer = settingsService.read(SettingsService.useExoPlayer);
 
       // Kick off getPlaybackData() before the Windows display-mode sync, the
@@ -1866,7 +1865,10 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
       attemptPlayer = currentPlayer;
       if (!mounted || generation != _playerInitializationGeneration) return;
       if (Platform.isAndroid) {
-        await currentPlayer.setLogLevel(debugLoggingEnabled ? 'v' : 'warn');
+        // 1.2.9: the debug-logging setting was removed — the app's own
+        // logging is always on and goes to the rolling file; the player's
+        // own verbose logging stays off by default.
+        await currentPlayer.setLogLevel('warn');
         if (!mounted || generation != _playerInitializationGeneration) return;
       }
 
@@ -1896,7 +1898,7 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
         await currentPlayer.setProperty('dolby-vision-output', disableDolbyVision ? 'no' : 'yes');
       }
       if (Platform.isIOS || Platform.isMacOS) {
-        await currentPlayer.setProperty('dv-conversion-log', debugLoggingEnabled ? 'yes' : 'no');
+        await currentPlayer.setProperty('dv-conversion-log', 'no');
       }
       // Android demuxer memory is owned natively: MpvPlayerCore caps its
       // demuxer cache off the device heap class at init (DemuxerBudget), and
@@ -1907,9 +1909,9 @@ class VideoPlayerScreenState extends State<VideoPlayerScreen>
         _audioFocusFuture = currentPlayer.requestAudioFocus();
         _audioFocusFuture!.ignore();
       }
-      await currentPlayer.setProperty('msg-level', debugLoggingEnabled ? 'all=debug,ffmpeg/video=warn' : 'all=error');
+      await currentPlayer.setProperty('msg-level', 'all=error');
       if (!Platform.isAndroid) {
-        await currentPlayer.setLogLevel(debugLoggingEnabled ? 'v' : 'warn');
+        await currentPlayer.setLogLevel('warn');
       }
       await currentPlayer.setProperty('hwdec', _getHwdecValue(enableHardwareDecoding));
 

@@ -946,12 +946,6 @@ class Translations$settings$en {
 	/// en: 'Crash history'
 	String get lastCrashHistory => 'Crash history';
 
-	/// en: 'Debug Logging'
-	String get debugLogging => 'Debug Logging';
-
-	/// en: 'Enable detailed logging for troubleshooting'
-	String get debugLoggingDescription => 'Enable detailed logging for troubleshooting';
-
 	/// en: 'View Logs'
 	String get viewLogs => 'View Logs';
 
@@ -2840,6 +2834,12 @@ class Translations$messages$en {
 
 	/// en: 'No server is available for the active profile'
 	String get serverUnavailableForProfile => 'No server is available for the active profile';
+
+	/// en: 'Auto-dump path copied'
+	String get autoDumpPathCopied => 'Auto-dump path copied';
+
+	/// en: 'Could not share the auto-dump'
+	String get autoDumpShareFailed => 'Could not share the auto-dump';
 }
 
 // Path: subtitlingStyling
@@ -3664,6 +3664,12 @@ class Translations$about$en {
 	final Translations _root; // ignore: unused_field
 
 	// Translations
+	List<String> get changelog2295 => [
+		'Debug logging now always saves to a file on the device — there is no logging switch any more',
+		'After three starts in a row that never finish loading, the app saves a debug file by itself, in the app\'s folder on the device\'s storage, so a crashing TV leaves evidence behind',
+		'Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon',
+		'The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed',
+	];
 
 	/// en: 'About'
 	String get title => 'About';
@@ -4021,11 +4027,35 @@ class Translations$logs$en {
 	/// en: 'Upload Logs'
 	String get uploadLogs => 'Upload Logs';
 
-	/// en: 'Export debug file'
-	String get exportDebugFile => 'Export debug file';
-
 	/// en: 'Save debug file'
 	String get exportDebugDialogTitle => 'Save debug file';
+
+	/// en: 'Last auto-dump'
+	String get lastAutoDump => 'Last auto-dump';
+
+	/// en: 'Copy auto-dump path'
+	String get copyAutoDumpPath => 'Copy auto-dump path';
+
+	/// en: 'Export debug log'
+	String get exportDebugLog => 'Export debug log';
+
+	/// en: 'Saves the full log file with settings, memory and last crash'
+	String get exportDebugLogDescription => 'Saves the full log file with settings, memory and last crash';
+
+	/// en: 'Sends the newest log lines to the support server and shows a shareable link'
+	String get uploadLogsDescription => 'Sends the newest log lines to the support server and shows a shareable link';
+
+	/// en: 'Copies the newest log lines to the clipboard'
+	String get copyLogsDescription => 'Copies the newest log lines to the clipboard';
+
+	/// en: 'Clears the on-screen log buffer'
+	String get clearLogsDescription => 'Clears the on-screen log buffer';
+
+	/// en: 'Share'
+	String get shareAutoDump => 'Share';
+
+	/// en: 'Tap to share the saved file'
+	String get autoDumpTapToShare => 'Tap to share the saved file';
 }
 
 // Path: startup
@@ -9824,8 +9854,6 @@ extension on Translations {
 			'settings.lastCrashLoading' => 'Checking for a recorded crash…',
 			'settings.lastCrashClear' => 'Clear',
 			'settings.lastCrashHistory' => 'Crash history',
-			'settings.debugLogging' => 'Debug Logging',
-			'settings.debugLoggingDescription' => 'Enable detailed logging for troubleshooting',
 			'settings.viewLogs' => 'View Logs',
 			'settings.viewLogsDescription' => 'View application logs',
 			'settings.clearImageCache' => 'Clear Image Cache',
@@ -10026,10 +10054,10 @@ extension on Translations {
 			'settings.scopeAspectRatio' => 'Aspect Ratio',
 			'settings.scopeSyncOffsets' => 'Audio & Subtitle Sync',
 			'settings.playerScopeOff' => 'Don\'t save',
-			_ => null,
-		} ?? switch (path) {
 			'settings.playerScopeGlobal' => 'Everywhere',
 			'settings.playerScopeLibrary' => 'Per library',
+			_ => null,
+		} ?? switch (path) {
 			'settings.playerScopeTitle' => 'Per show or movie',
 			'settings.exportDialogTitle' => 'Export PlezTV settings',
 			'themeEditor.builtIn' => 'Built-in',
@@ -10461,6 +10489,8 @@ extension on Translations {
 			'messages.streamSelectionFailed' => 'Could not apply the selected streams',
 			'messages.trackSelectionNotRemembered' => 'This track choice applies to the current playback only.',
 			'messages.serverUnavailableForProfile' => 'No server is available for the active profile',
+			'messages.autoDumpPathCopied' => 'Auto-dump path copied',
+			'messages.autoDumpShareFailed' => 'Could not share the auto-dump',
 			'subtitlingStyling.text' => 'Text',
 			'subtitlingStyling.border' => 'Border',
 			'subtitlingStyling.background' => 'Background',
@@ -10806,6 +10836,10 @@ extension on Translations {
 			'libraries.noCategories' => 'No categories in this library',
 			'libraries.categoryItemCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} item', other: '${n} items', ), 
 			'libraries.noFavorites' => 'No favourites yet — long-press a movie or show to add it here.',
+			'about.changelog2295.0' => 'Debug logging now always saves to a file on the device — there is no logging switch any more',
+			'about.changelog2295.1' => 'After three starts in a row that never finish loading, the app saves a debug file by itself, in the app\'s folder on the device\'s storage, so a crashing TV leaves evidence behind',
+			'about.changelog2295.2' => 'Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon',
+			'about.changelog2295.3' => 'The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed',
 			'about.title' => 'About',
 			'about.openSourceLicenses' => 'Open Source Licenses',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -11012,8 +11046,16 @@ extension on Translations {
 			'logs.clearLogs' => 'Clear Logs',
 			'logs.copyLogs' => 'Copy Logs',
 			'logs.uploadLogs' => 'Upload Logs',
-			'logs.exportDebugFile' => 'Export debug file',
 			'logs.exportDebugDialogTitle' => 'Save debug file',
+			'logs.lastAutoDump' => 'Last auto-dump',
+			'logs.copyAutoDumpPath' => 'Copy auto-dump path',
+			'logs.exportDebugLog' => 'Export debug log',
+			'logs.exportDebugLogDescription' => 'Saves the full log file with settings, memory and last crash',
+			'logs.uploadLogsDescription' => 'Sends the newest log lines to the support server and shows a shareable link',
+			'logs.copyLogsDescription' => 'Copies the newest log lines to the clipboard',
+			'logs.clearLogsDescription' => 'Clears the on-screen log buffer',
+			'logs.shareAutoDump' => 'Share',
+			'logs.autoDumpTapToShare' => 'Tap to share the saved file',
 			'startup.failedTitle' => 'PlezTV could not start',
 			'startup.failedBody' => 'Something went wrong during startup. The details below identify what failed.',
 			'startup.failedBodyRepairable' => 'PlezTV\'s saved settings file is damaged and has to be rebuilt before PlezTV can start. Retrying will not help — choose Repair storage.',
@@ -11042,6 +11084,8 @@ extension on Translations {
 			'startup.backupTitle' => 'A copy of the damaged file was kept',
 			'startup.backupWarning' => 'It contains your sign-in credentials. Do not upload or share it.',
 			'startup.deleteBackup' => 'Delete copy',
+			_ => null,
+		} ?? switch (path) {
 			'startup.backupDeleted' => 'Copy deleted.',
 			'startup.previousFailureTitle' => 'PlezTV failed to start last time',
 			'licenses.relatedPackages' => 'Related Packages',
@@ -11054,8 +11098,6 @@ extension on Translations {
 			'navigation.explore' => 'Explore',
 			'explore.title' => 'Explore',
 			'explore.selectSource' => 'Select source',
-			_ => null,
-		} ?? switch (path) {
 			'explore.rows.watchlist' => 'Watchlist',
 			'explore.rows.recommendedMovies' => 'Recommended Movies',
 			'explore.rows.recommendedShows' => 'Recommended Shows',
@@ -11556,6 +11598,8 @@ extension on Translations {
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
@@ -11568,8 +11612,6 @@ extension on Translations {
 			'downloads.cancelledDownload' => 'Canceled download',
 			'downloads.syncingFile' => ({required Object file, required Object status}) => '${file} (syncing ${status})',
 			'downloads.downloadedFileClickToComplete' => ({required Object file}) => 'Downloaded ${file} - Click to complete',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.partialDownloadClickToComplete' => 'Partially downloaded - Click to complete',
 			'downloads.deleting' => 'Deleting...',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
@@ -12070,6 +12112,8 @@ extension on Translations {
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
 			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',
@@ -12082,8 +12126,6 @@ extension on Translations {
 			'addServer.addM3uTitle' => 'Add M3U playlist',
 			'addServer.addXtreamTitle' => 'Add Xtream Codes',
 			'addServer.connectToM3uCard' => 'Connect to M3U',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.connectToM3uCardSubtitle' => 'Import a playlist URL.',
 			'addServer.connectToXtreamCard' => 'Connect to Xtream Codes',
 			'addServer.connectToXtreamCardSubtitle' => 'Enter your server URL, username, and password.',

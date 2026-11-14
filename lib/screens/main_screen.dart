@@ -49,6 +49,7 @@ import '../providers/seerr_account_provider.dart';
 import '../widgets/settings_builder.dart';
 import '../widgets/tv_virtual_keyboard.dart';
 import '../services/api_cache.dart';
+import '../services/last_crash_store.dart';
 import '../services/multi_server_manager.dart';
 import '../services/offline_watch_sync_service.dart';
 import '../services/settings_service.dart';
@@ -568,6 +569,39 @@ class _MainScreenState extends State<MainScreen>
         });
       });
     }
+
+    // Auto-dump (1.2.9): the good-start marker — written only once the
+    // launch is STABLE: the first frame is up AND the first catalog bind
+    // has settled. The first frame alone is not enough (Matt, 2026-11-14
+    // ~02:12 EST: the TV runs for a bit, then dies WHILE loading the
+    // Trex catalog) — a first-frame marker would call that death a good
+    // start and never dump. The binder settles before the Trex load ends
+    // (the bind chain is fire-and-forget), so the wait is two-step: the
+    // binder first, then the bind chains. The binds snapshot is chained
+    // off the binder future on purpose — the rebind pass is what
+    // registers the bind futures, so snapshotting before it ends would
+    // miss a bind that had not started yet. A failed bind still ends
+    // the wait (the load is over, even if the panel denied it). A
+    // profile switch remounts MainScreen and re-runs this — harmless,
+    // the marker only says "a launch reached a stable state".
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ActiveProfileProvider? activeProfile;
+      try {
+        activeProfile = context.read<ActiveProfileProvider>();
+        final manager = context.read<MultiServerProvider>().serverManager;
+        final binderSettled = activeProfile.awaitBindingSettle();
+        final catalogBinds = binderSettled.then<void>((_) => manager.awaitIptvCatalogBinds());
+        unawaited(
+          LastCrashStore.markGoodStartWhenStable(binderSettled: binderSettled, catalogBinds: catalogBinds),
+        );
+      } catch (_) {
+        // No binder to wait on (offline shell without providers, or a
+        // context that is already gone) — the launch is already as
+        // stable as it gets.
+        LastCrashStore.markGoodStart();
+      }
+    });
 
     // Set up Watch Together callbacks immediately (must be synchronous to catch early messages)
     if (!_isOffline) {

@@ -230,6 +230,190 @@ abstract final class LastCrashStore {
     );
   }
 
+  /// Consecutive launches that never reached a stable state (1.2.9,
+  /// auto-dump). [updateFailedStartCounter] runs at startup, from the
+  /// previous launch's marker + exit state; [markGoodStart] writes the
+  /// marker once the launch is stable (first MainScreen frame AND the
+  /// first catalog bind settled — the TV dies WHILE loading the Trex
+  /// catalog, after the first frame is up, so a first-frame marker alone
+  /// would call that death a good start and never dump; see
+  /// [markGoodStartWhenStable]). Both files live next to the exit-state
+  /// file and are written synchronously with flush — the counter must
+  /// survive a kill in the ~100 ms window a startup crash lives in,
+  /// which SharedPreferences `apply()` cannot promise.
+  static const String startupCounterFileName = 'startup_counter.txt';
+  static const String goodStartMarkerFileName = 'good_start_marker.txt';
+
+  static int _readCounterSync(Directory directory) {
+    try {
+      final file = File(p.join(directory.path, startupCounterFileName));
+      if (!file.existsSync()) return 0;
+      return int.tryParse(file.readAsStringSync().trim()) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static void _writeCounterSync(Directory directory, int count) {
+    try {
+      final file = File(p.join(directory.path, startupCounterFileName));
+      if (!file.parent.existsSync()) file.parent.createSync(recursive: true);
+      file.writeAsStringSync('$count', flush: true);
+    } catch (error, stackTrace) {
+      appLogger.d('Could not write the failed-start counter', error: error, stackTrace: stackTrace);
+    }
+  }
+
+  static int _updateFailedStartCounterSync(Directory directory, {required bool previousAbnormal}) {
+    try {
+      final markerFile = File(p.join(directory.path, goodStartMarkerFileName));
+      final hadMarker = markerFile.existsSync();
+      if (hadMarker) {
+        try {
+          markerFile.deleteSync();
+        } catch (_) {
+          // Best effort: a stale marker is consumed on the next launch.
+        }
+      }
+      // A marker means the previous launch reached a stable state (first
+      // frame + first catalog bind settled) — the startup window was over,
+      // so a later death is not a startup failure. Without a marker, an
+      // abnormal exit counts; a clean exit without a marker (backed out
+      // during the splash) does not.
+      final count = hadMarker ? 0 : (previousAbnormal ? _readCounterSync(directory) + 1 : 0);
+      _writeCounterSync(directory, count);
+      return count;
+    } catch (error, stackTrace) {
+      appLogger.d('Could not update the failed-start counter', error: error, stackTrace: stackTrace);
+      return 0;
+    }
+  }
+
+  /// Update the consecutive failed-start counter from the previous
+  /// launch's state and return the new value. Call once at startup, after
+  /// [markLaunched] (its return value is [previousAbnormal]). Never throws.
+  /// Synchronous when the directory is already known (primed at startup or
+  /// the test override); otherwise resolves it first.
+  static Future<int> updateFailedStartCounter({required bool previousAbnormal}) async {
+    final directory = debugDirectoryOverride ?? _cachedDirectory;
+    if (directory != null) {
+      return _updateFailedStartCounterSync(directory, previousAbnormal: previousAbnormal);
+    }
+    try {
+      final file = await _file(startupCounterFileName);
+      if (file == null) return 0;
+      return _updateFailedStartCounterSync(file.parent, previousAbnormal: previousAbnormal);
+    } catch (error, stackTrace) {
+      appLogger.d('Could not update the failed-start counter', error: error, stackTrace: stackTrace);
+      return 0;
+    }
+  }
+
+  /// The current counter value, without changing it. Never throws.
+  static Future<int> readFailedStartCount() async {
+    final directory = debugDirectoryOverride ?? _cachedDirectory;
+    if (directory != null) return _readCounterSync(directory);
+    try {
+      final file = await _file(startupCounterFileName);
+      if (file == null) return 0;
+      return _readCounterSync(file.parent);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Reset the counter to 0 (after the auto-dump is written, so a
+  /// persistently crashing app produces a fresh dump every 3 failed starts
+  /// rather than one per launch). Never throws.
+  static Future<void> resetFailedStartCounter() async {
+    final directory = debugDirectoryOverride ?? _cachedDirectory;
+    if (directory != null) {
+      _writeCounterSync(directory, 0);
+      return;
+    }
+    try {
+      final file = await _file(startupCounterFileName);
+      if (file == null) return;
+      _writeCounterSync(file.parent, 0);
+    } catch (error, stackTrace) {
+      appLogger.d('Could not reset the failed-start counter', error: error, stackTrace: stackTrace);
+    }
+  }
+
+  static void _writeMarkerSync(Directory directory) {
+    try {
+      final file = File(p.join(directory.path, goodStartMarkerFileName));
+      if (!file.parent.existsSync()) file.parent.createSync(recursive: true);
+      file.writeAsStringSync('good', flush: true);
+    } catch (error, stackTrace) {
+      appLogger.d('Could not write the good-start marker', error: error, stackTrace: stackTrace);
+    }
+  }
+
+  /// Mark this launch as having reached a stable state: the startup
+  /// crash window is over. Called from MainScreen's first post-frame
+  /// callback, via [markGoodStartWhenStable] — the marker lands only
+  /// after the first frame AND the first catalog bind have settled, so
+  /// a launch that dies while loading the Trex catalog still counts as
+  /// a failed start. Synchronous when the directory is known so it
+  /// lands even if the process dies a frame later; otherwise resolves it
+  /// first. Never throws.
+  static void markGoodStart() {
+    final directory = debugDirectoryOverride ?? _cachedDirectory;
+    if (directory != null) {
+      _writeMarkerSync(directory);
+      return;
+    }
+    unawaited(
+      _file(goodStartMarkerFileName)
+          .then((file) async {
+            if (file == null) return;
+            try {
+              if (!await file.parent.exists()) await file.parent.create(recursive: true);
+              await file.writeAsString('good', flush: true);
+            } catch (_) {
+              // Best effort.
+            }
+          })
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// Write the good-start marker once the launch is stable: the first
+  /// MainScreen frame is up (the caller runs this from a post-frame
+  /// callback) AND the startup Trex load has ended. [binderSettled] is
+  /// the profile binder's settle — it completes when the rebind pass
+  /// finishes, which is also when every bind future for this cycle has
+  /// been registered. [catalogBinds] is the wait for those bind chains
+  /// themselves: the binder settles BEFORE the Trex load finishes (the
+  /// chain is fire-and-forget inside `addIptvConnection`, so the binder
+  /// alone would mark a mid-load death as good). The caller must chain
+  /// [catalogBinds] off [binderSettled] (a `.then` on it) so the binds
+  /// snapshot is taken AFTER the binder settles — snapshotting earlier
+  /// would miss a bind that had not registered yet.
+  ///
+  /// A failed bind still ends the wait — the marker records that the
+  /// startup load is OVER, not that it succeeded: a panel denial leaves
+  /// the app up and stable, so a later death is not a startup failure.
+  /// Never throws; the marker is per-launch, so an unmounted caller is
+  /// fine — the wait runs to its end regardless.
+  static Future<void> markGoodStartWhenStable({
+    required Future<bool> binderSettled,
+    required Future<void> catalogBinds,
+  }) async {
+    try {
+      await binderSettled;
+    } catch (_) {
+      // A settle failure still ends the wait.
+    }
+    try {
+      await catalogBinds;
+    } catch (_) {
+      // A bind failure still ends the startup load.
+    }
+    markGoodStart();
+  }
+
   /// Best-effort record of a fatal error. Never throws.
   static void record(Object error, {StackTrace? stackTrace, String source = 'uncaught', DateTime? timestamp}) {
     final record = LastCrashRecord(

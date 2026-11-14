@@ -196,6 +196,16 @@ class MultiServerManager {
   final Map<String, IptvClient> _iptvByConnectionId = {};
   final Map<String, HealthStatus> _iptvHealthByConnectionId = {};
 
+  /// IPTV catalog bind chains currently in flight, by connection id
+  /// (1.2.9, auto-dump): `_bindIptvCatalogs` is fire-and-forget inside
+  /// `addIptvConnection`, so the profile binder settles before the Trex
+  /// load finishes — the good-start marker waits on these futures
+  /// instead (see [awaitIptvCatalogBinds]). A replace overwrites the
+  /// entry; the old chain's completion only removes it when it is still
+  /// the registered one, so a newer bind is never dropped by an older
+  /// chain finishing.
+  final Map<String, Future<void>> _iptvCatalogBindFutures = {};
+
   /// Debounce timers for endpoint-exhaustion-triggered reconnection (per server)
   final Map<String, Timer> _reconnectDebounce = {};
 
@@ -984,6 +994,35 @@ class MultiServerManager {
     await client.ensureSearchIndexSynced();
   }
 
+  /// Drop a finished bind chain from [_iptvCatalogBindFutures] (1.2.9).
+  /// The chain logs its own failures; a failure still ends the chain, so
+  /// the wait only cares that it ended. Only removes the entry when it
+  /// still holds THIS chain — a replace starts a newer bind for the same
+  /// connection, and the older chain finishing must not drop it.
+  /// Never throws.
+  Future<void> _trackIptvCatalogBind(String connectionId, Future<void> bind) async {
+    try {
+      await bind;
+    } catch (_) {
+      // The chain logs its own failures; the marker only cares that it ended.
+    }
+    _iptvCatalogBindFutures.removeWhere((key, value) => key == connectionId && value == bind);
+  }
+
+  /// Completes when every IPTV catalog bind chain in flight RIGHT NOW
+  /// has finished — success or failure. Returns immediately when no bind
+  /// is in flight (no IPTV connections, or the binds already settled).
+  /// The snapshot is deliberate: a bind that starts while waiting belongs
+  /// to a later cycle (a profile switch or a connection change), not to
+  /// the startup load this waits for. Never throws.
+  Future<void> awaitIptvCatalogBinds() {
+    final pending = _iptvCatalogBindFutures.values.toList();
+    if (pending.isEmpty) return Future.value();
+    return Future.wait(
+      pending.map((future) => future.then<void>((_) {}, onError: (_) {})),
+    ).then<void>((_) {});
+  }
+
   /// Add an IPTV connection (M3U playlist or Xtream Codes account) backed
   /// by an [IptvClient]. Returns true when the health probe reports online.
   ///
@@ -1054,7 +1093,13 @@ class MultiServerManager {
       // from the warm-ups and the sync (no VOD/series catalog to
       // index). Started BEFORE the health probe so the probe's round
       // trip doesn't delay the warm-up.
-      unawaited(_bindIptvCatalogs(client));
+      //
+      // 1.2.9 (auto-dump): the chain is still fire-and-forget for the
+      // bind, but its future is tracked so the good-start marker can
+      // wait for the Trex load to actually end.
+      final bindFuture = _bindIptvCatalogs(client);
+      _iptvCatalogBindFutures[connection.id] = bindFuture;
+      unawaited(_trackIptvCatalogBind(connection.id, bindFuture));
 
       final health = await client.checkHealth();
       final healthy = health == HealthStatus.online;

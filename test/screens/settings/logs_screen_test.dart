@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -9,17 +10,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:logger/logger.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:plezy/focus/focusable_action_bar.dart';
 import 'package:plezy/focus/input_mode_tracker.dart';
 import 'package:plezy/i18n/strings.g.dart';
 import 'package:plezy/screens/settings/logs_screen.dart';
+import 'package:plezy/services/auto_dump_service.dart';
 import 'package:plezy/services/log_upload_service.dart';
 import 'package:plezy/services/startup_diagnostics.dart';
 import 'package:plezy/utils/app_logger.dart';
 import 'package:plezy/utils/media_server_http_client.dart';
 import 'package:plezy/utils/platform_detector.dart';
 import 'package:plezy/widgets/app_bar_back_button.dart';
+import 'package:plezy/widgets/focusable_list_tile.dart';
+import 'package:share_plus_platform_interface/share_plus_platform_interface.dart';
+
+/// Records share calls instead of opening a real share sheet. The real
+/// Linux share_plus plugin throws UnimplementedError for files, so the
+/// test swaps [SharePlatform.instance] for this fake (see the Share test).
+class _FakeSharePlatform extends SharePlatform {
+  ShareParams? lastParams;
+
+  @override
+  Future<ShareResult> share(ShareParams params) async {
+    lastParams = params;
+    return ShareResult.unavailable;
+  }
+}
 
 void main() {
   setUpAll(() {
@@ -134,7 +152,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip(t.logs.uploadLogs));
+    // The upload action is a labelled row now (1.2.9), not a bare icon.
+    await tester.tap(find.text(t.logs.uploadLogs));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -222,13 +241,33 @@ void main() {
 
       await pumpLogs(tester);
 
-      // Gating these on the log buffer alone would show the record and then
-      // refuse to let the user do anything with it.
-      final bar = tester.widget<FocusableActionBar>(find.byType(FocusableActionBar));
-      for (final tooltip in [t.logs.uploadLogs, t.logs.copyLogs, t.logs.clearLogs, t.logs.exportDebugFile]) {
-        final action = bar.actions.singleWhere((candidate) => candidate.tooltip == tooltip);
-        expect(action.onPressed, isNotNull, reason: tooltip);
+      // The actions are labelled rows with words, not bare icons (Matt,
+      // 2026-11-14 ~02:17 EST: nobody could tell the bare download icon
+      // was the debug log). Gating these on the log buffer alone would
+      // show the record and then refuse to let the user do anything with
+      // it — and the export works even with an empty buffer, since it
+      // still carries Settings + Memory + Last crash.
+      FocusableListTile tileFor(String title) {
+        final tile = find.ancestor(of: find.text(title), matching: find.byType(FocusableListTile));
+        expect(tile, findsOneWidget, reason: title);
+        return tester.widget<FocusableListTile>(tile);
       }
+
+      expect(tileFor(t.logs.exportDebugLog).onTap, isNotNull);
+      expect(tileFor(t.logs.uploadLogs).onTap, isNotNull);
+      expect(tileFor(t.logs.copyLogs).onTap, isNotNull);
+      expect(tileFor(t.logs.clearLogs).onTap, isNotNull);
+    });
+
+    testWidgets('the export is a labelled row with words, not a bare download icon', (tester) async {
+      await pumpLogs(tester);
+
+      expect(find.text(t.logs.exportDebugLog), findsOneWidget);
+      expect(find.text(t.logs.exportDebugLogDescription), findsOneWidget);
+      // No icon-only download action in the app bar: the export lives in
+      // the labelled row above the log list.
+      final bar = tester.widget<FocusableActionBar>(find.byType(FocusableActionBar));
+      expect(bar.actions.any((action) => action.icon == Symbols.download_rounded), isFalse);
     });
   });
 
@@ -400,7 +439,8 @@ void main() {
       seedLogs(['oldest-copy-marker', for (var i = 1; i < 599; i++) 'copy-entry-$i $filler', 'newest-copy-marker']);
 
       await pumpLogs(tester);
-      await tester.tap(find.byTooltip(t.logs.copyLogs));
+      // The copy action is a labelled row now (1.2.9), not a bare icon.
+      await tester.tap(find.text(t.logs.copyLogs));
       await tester.pump();
 
       expect(clipboardText, isNotNull);
@@ -489,6 +529,100 @@ void main() {
       expect(clipboardText, isNot(contains('newer-row')));
       expect(clipboardText, isNot(contains('older-row')));
       expect(clipboardText, isNot(endsWith('\n')));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('last auto-dump row (1.2.9)', () {
+    testWidgets('the row is labelled in words and its Share button shares the saved file', (tester) async {
+      // Sync file I/O: real async disk I/O never completes inside a
+      // testWidgets fake-async zone (the test hung at createTemp before
+      // any widget pumped) — use the sync calls instead.
+      final tempDir = Directory.systemTemp.createTempSync('plezy_logs_share_test_');
+      addTearDown(() {
+        AutoDumpService.debugExternalDirectoryOverride = null;
+        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+      });
+      final dumpPath = '${tempDir.path}/${AutoDumpService.dumpFileName}';
+      File(dumpPath).writeAsStringSync('== Summary ==\ntest dump\n');
+      AutoDumpService.debugExternalDirectoryOverride = tempDir;
+
+      // Share through the platform interface, not a method-channel mock:
+      // on the Linux test host the real share_plus plugin throws
+      // UnimplementedError for files and never reaches the channel, so a
+      // channel mock can never observe the call. Swap the platform
+      // instance before SharePlus.instance is first touched (it binds
+      // lazily) and restore it afterwards.
+      final previousPlatform = SharePlatform.instance;
+      final fakeShare = _FakeSharePlatform();
+      SharePlatform.instance = fakeShare;
+      addTearDown(() => SharePlatform.instance = previousPlatform);
+
+      PackageInfo.setMockInitialValues(
+        appName: 'PlezTV',
+        packageName: 'com.plezy.test',
+        version: '1.2.3',
+        buildNumber: '45',
+        buildSignature: '',
+      );
+      // Same device-info mock as the sibling tests: without it
+      // _loadDeviceInfo hits the unmocked channel and throws.
+      final deviceInfo = DeviceInfoPlugin.setMockInitialValues(
+        linuxDeviceInfo: LinuxDeviceInfo(
+          name: 'Test Linux',
+          id: 'test-linux',
+          prettyName: 'Test Linux',
+          machineId: 'test-machine',
+        ),
+      );
+      const deviceInfoChannel = MethodChannel('dev.fluttercommunity.plus/device_info');
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(deviceInfoChannel, (call) async {
+        return <String, dynamic>{
+          'computerName': 'test-mac',
+          'hostName': 'test-mac.local',
+          'arch': 'arm64',
+          'model': 'Mac15,3',
+          'modelName': 'Mac',
+          'kernelVersion': 'test',
+          'osRelease': '15.0',
+          'majorVersion': 15,
+          'minorVersion': 0,
+          'patchVersion': 0,
+          'activeCPUs': 8,
+          'memorySize': 16 * 1024 * 1024 * 1024,
+          'cpuFrequency': 0,
+          'systemGUID': 'test-guid',
+        };
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(deviceInfoChannel, null));
+
+      await tester.pumpWidget(
+        TranslationProvider(
+          child: InputModeTracker(child: MaterialApp(home: LogsScreen(deviceInfoPlugin: deviceInfo))),
+        ),
+      );
+      // _loadAutoDump reads the dump file with real async I/O; each real
+      // await needs a real-time window plus a pump to advance past it
+      // (exists, then lastModified, then the setState frame).
+      for (var i = 0; i < 3; i++) {
+        await tester.runAsync(() async {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+
+      // Words, not an icon: what it is, where it lives, what tapping does.
+      expect(find.text(t.logs.lastAutoDump), findsOneWidget);
+      expect(find.textContaining(dumpPath), findsOneWidget);
+      expect(find.textContaining(t.logs.autoDumpTapToShare), findsOneWidget);
+
+      await tester.tap(find.text(t.logs.shareAutoDump));
+      await tester.pumpAndSettle();
+
+      expect(fakeShare.lastParams, isNotNull);
+      expect(fakeShare.lastParams!.files?.map((f) => f.path), contains(dumpPath));
       expect(tester.takeException(), isNull);
     });
   });

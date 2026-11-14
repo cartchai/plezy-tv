@@ -75,6 +75,7 @@ import 'services/library_events/library_event_service.dart';
 import 'services/offline_watch_sync_service.dart';
 import 'services/data_aggregation_service.dart';
 import 'services/credential_vault.dart';
+import 'services/auto_dump_service.dart';
 import 'services/last_crash_store.dart';
 import 'services/server_registry.dart';
 import 'services/download_manager_service.dart';
@@ -199,14 +200,16 @@ void _bootstrapApp() {
   // record writes synchronously when the process is dying.
   LastCrashCatcher.install();
   unawaited(LastCrashStore.prime());
+  // Always-on file logging (1.2.9): the rolling file is primed alongside
+  // the crash store so the log survives a kill from the first launch.
+  unawaited(FileLogOutput.prime());
 
-  // Abnormal-exit flag (build #14, D-6): mark this launch 'running' now;
-  // a clean engine detach (see [_AppExitObserver]) marks it 'clean'. A
-  // crash, a force-stop, or the OS killing the process never reaches the
-  // detach, so the next launch finds 'running' and the Settings "Last
-  // crash" row can say the app did not shut down cleanly even when no Dart
-  // error was recorded — the signature of a native (mpv) crash.
-  unawaited(LastCrashStore.markLaunched());
+  // Auto-dump bookkeeping (1.2.9): mark this launch, update the
+  // consecutive failed-start counter from the previous launch's marker +
+  // exit state, and write a debug dump when 3 starts in a row never
+  // reached the main screen — so a crashing TV produces evidence without
+  // anyone opening Settings. Best-effort, never blocks startup.
+  unawaited(_recordLaunchAndMaybeDump());
   WidgetsBinding.instance.addObserver(_AppExitObserver());
 
   // Off the critical path: the version label only decorates a diagnostic.
@@ -234,6 +237,31 @@ void _bootstrapApp() {
       transparentWhileLoading: Platform.isAndroid,
     ),
   );
+}
+
+/// Startup bookkeeping for the auto-dump (1.2.9).
+///
+/// Abnormal-exit flag (build #14, D-6): [LastCrashStore.markLaunched]
+/// marks this launch 'running' now; a clean engine detach (see
+/// [_AppExitObserver]) marks it 'clean'. A crash, a force-stop, or the OS
+/// killing the process never reaches the detach, so the next launch finds
+/// 'running' and the Settings "Last crash" row can say the app did not
+/// shut down cleanly even when no Dart error was recorded — the signature
+/// of a native (mpv) crash. The failed-start counter reads that same
+/// state plus the previous launch's good-start marker: a launch that
+/// reached MainScreen's first frame resets it, a launch that died before
+/// that counts. At 3 consecutive failed starts the dump is written and
+/// the counter resets. Best-effort: diagnostics must never break startup.
+Future<void> _recordLaunchAndMaybeDump() async {
+  try {
+    final abnormal = await LastCrashStore.markLaunched();
+    final failedStarts = await LastCrashStore.updateFailedStartCounter(previousAbnormal: abnormal);
+    if (failedStarts >= AutoDumpService.failedStartThreshold) {
+      await AutoDumpService.writeDump(failedStarts: failedStarts);
+    }
+  } catch (error, stackTrace) {
+    appLogger.d('Failed-start bookkeeping failed', error: error, stackTrace: stackTrace);
+  }
 }
 
 /// Resolves the theme the app will settle on, for the frames that precede it.
@@ -309,7 +337,8 @@ Future<void> _optionalGatePhase(
 
 Future<_StartupDependencies> _initializeApplication() async {
   final settings = await _gatePhase(StartupPhase.preferences, SettingsService.getInstance);
-  setLoggerLevel(settings.read(SettingsService.enableDebugLogging));
+  // 1.2.9: the debug-logging setting was removed (logging is not supposed
+  // to be a setting) — the logger stays at its debug default, always on.
 
   if (_enableSentry) {
     // Crash reporting is observability: it must never veto the launch it

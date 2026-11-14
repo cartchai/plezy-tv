@@ -9,6 +9,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
 import 'package:logger/logger.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../focus/focusable_action_bar.dart';
 import '../../widgets/dialog_action_button.dart';
 import '../../widgets/app_icon.dart';
@@ -18,6 +19,7 @@ import '../../i18n/strings.g.dart';
 import '../../mixins/mounted_set_state_mixin.dart';
 import '../../utils/dialogs.dart';
 import '../../main.dart' show gitCommit;
+import '../../services/auto_dump_service.dart';
 import '../../services/background_work_diagnostics_service.dart';
 import '../../services/debug_log_export_service.dart';
 import '../../services/device_performance.dart';
@@ -29,6 +31,7 @@ import '../../utils/formatters.dart';
 import '../../utils/platform_detector.dart';
 import '../../utils/snackbar_helper.dart';
 import '../../widgets/desktop_app_bar.dart';
+import '../../widgets/focusable_list_tile.dart';
 import '../../widgets/system_bottom_inset.dart';
 
 const previousStartupFailureKey = Key('logs-previous-startup-failure');
@@ -110,6 +113,7 @@ class LogsScreen extends StatefulWidget {
 class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
   List<LogEntry> _logs = [];
   String _deviceInfo = '';
+  ({String path, DateTime modified})? _lastAutoDump;
   final ScrollController _scrollController = ScrollController();
   // skipTraversal: selection is pointer-driven; the region must not become a
   // D-pad/Tab stop between the action bar and the scrollable body.
@@ -123,6 +127,12 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
     super.initState();
     _logs = MemoryLogOutput.getLogs();
     _loadDeviceInfo();
+    _loadAutoDump();
+  }
+
+  Future<void> _loadAutoDump() async {
+    final dump = await AutoDumpService.lastDump();
+    setStateIfMounted(() => _lastAutoDump = dump);
   }
 
   Future<void> _loadDeviceInfo() async {
@@ -188,6 +198,7 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
     setState(() {
       _logs = MemoryLogOutput.getLogs();
     });
+    _loadAutoDump();
   }
 
   String _formatTime(DateTime time) {
@@ -274,6 +285,22 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
     } catch (e) {
       if (!mounted) return;
       showErrorSnackBar(context, t.messages.debugLogExportFailed);
+    }
+  }
+
+  /// Share the last auto-dump file (1.2.9): the system share sheet, so
+  /// Matt can send it to another app instead of hunting for the path.
+  /// A throw (no share targets, or the file is gone) is a real failure.
+  Future<void> _shareAutoDump() async {
+    final dump = _lastAutoDump;
+    if (dump == null) return;
+    try {
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(dump.path)], subject: 'PlezTV auto-dump'),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showErrorSnackBar(context, t.messages.autoDumpShareFailed);
     }
   }
 
@@ -443,6 +470,143 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
     );
   }
 
+  /// Row for the last auto-dump (1.2.9): what it is, where it lives, and
+  /// what tapping it does — all in words. Shown only when a dump exists.
+  /// Tapping the row (or the Share button) opens the system share sheet
+  /// for the saved file; Copy path puts the path on the clipboard, and a
+  /// TV file manager can open the app-specific external files dir
+  /// directly from it.
+  ///
+  /// Returns null when there is none, so the caller can splice it in with a
+  /// null-aware element.
+  Widget? _buildAutoDumpRow(ThemeData theme) {
+    final dump = _lastAutoDump;
+    if (dump == null) return null;
+    final modified = dump.modified.toLocal();
+    final stamp =
+        '${modified.year}-${padNumber(modified.month, 2)}-${padNumber(modified.day, 2)} '
+        '${padNumber(modified.hour, 2)}:${padNumber(modified.minute, 2)}:${padNumber(modified.second, 2)}';
+    return SliverToBoxAdapter(
+      // Chrome, not log content: keep it out of drag-selection (the
+      // select-all copy must start at the device header, like the
+      // app-bar title above). The path is still copyable via its button.
+      child: SelectionContainer.disabled(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          // A Material carries the background, not a DecoratedBox:
+          // ListTile paints its ink on the nearest Material, and a
+          // background-coloured DecoratedBox above it hides the ink
+          // (and trips a framework assertion in checked mode).
+          child: Material(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            clipBehavior: Clip.antiAlias,
+            child: FocusableListTile(
+              leading: const AppIcon(Symbols.bug_report_rounded, size: 18),
+              title: Text(t.logs.lastAutoDump, style: theme.textTheme.titleSmall),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    dump.path,
+                    style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace', fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$stamp — ${t.logs.autoDumpTapToShare}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+                  ),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        icon: const AppIcon(Symbols.share_rounded, size: 18),
+                        label: Text(t.logs.shareAutoDump),
+                        onPressed: _shareAutoDump,
+                      ),
+                      TextButton.icon(
+                        icon: const AppIcon(Symbols.content_copy_rounded, size: 18),
+                        label: Text(t.logs.copyAutoDumpPath),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: dump.path));
+                          showSuccessSnackBar(context, t.messages.autoDumpPathCopied);
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              trailing: const AppIcon(Symbols.share_rounded, size: 20),
+              onTap: _shareAutoDump,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Labelled log actions (1.2.9, Matt ~2026-11-14 02:17 EST): every
+  /// action is a row with WORDS — a title saying what it is and a
+  /// subtitle saying what it does. The debug export used to be a bare
+  /// download icon in the app bar, and nobody could tell it was the
+  /// debug log; no icon-only button for these actions any more (an icon
+  /// sits next to the words, it never replaces them). The export row is
+  /// always enabled — it still carries Settings + Memory + Last crash
+  /// with an empty log buffer. Upload / copy / clear need diagnostics
+  /// to act on (a log, or a recorded startup failure).
+  Widget _buildLogActionsSection(ThemeData theme) {
+    final diagnostics = _hasDiagnostics;
+    return SliverToBoxAdapter(
+      // Chrome, not log content: keep it out of drag-selection (the
+      // select-all copy must start at the device header, like the
+      // app-bar title above).
+      child: SelectionContainer.disabled(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          // A Material carries the background, not a DecoratedBox:
+          // ListTile paints its ink on the nearest Material, and a
+          // background-coloured DecoratedBox above it hides the ink
+          // (and trips a framework assertion in checked mode).
+          child: Material(
+            color: theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                FocusableListTile(
+                  leading: const AppIcon(Symbols.description_rounded, size: 20),
+                  title: Text(t.logs.exportDebugLog, style: theme.textTheme.titleSmall),
+                  subtitle: Text(t.logs.exportDebugLogDescription),
+                  onTap: _exportDebugFile,
+                ),
+                FocusableListTile(
+                  leading: const AppIcon(Symbols.upload_rounded, size: 20),
+                  title: Text(t.logs.uploadLogs, style: theme.textTheme.titleSmall),
+                  subtitle: Text(t.logs.uploadLogsDescription),
+                  enabled: diagnostics,
+                  onTap: diagnostics ? _uploadLogs : null,
+                ),
+                FocusableListTile(
+                  leading: const AppIcon(Symbols.content_copy_rounded, size: 20),
+                  title: Text(t.logs.copyLogs, style: theme.textTheme.titleSmall),
+                  subtitle: Text(t.logs.copyLogsDescription),
+                  enabled: diagnostics,
+                  onTap: diagnostics ? _copyAllLogs : null,
+                ),
+                FocusableListTile(
+                  leading: const AppIcon(Symbols.delete_outline_rounded, size: 20),
+                  title: Text(t.logs.clearLogs, style: theme.textTheme.titleSmall),
+                  subtitle: Text(t.logs.clearLogsDescription),
+                  enabled: diagnostics,
+                  onTap: diagnostics ? _clearLogs : null,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -494,30 +658,16 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
                         actions: [
                           FocusableActionBar(
                             actions: [
+                              // The log actions (upload / export / copy /
+                              // clear) live as labelled rows in the body
+                              // below (1.2.9) — a bare icon never says what
+                              // the action is. Refresh stays here: it is
+                              // the one standard glyph, and the bar needs
+                              // an action for D-pad traversal.
                               FocusableAction(
                                 icon: Symbols.refresh_rounded,
                                 tooltip: t.common.refresh,
                                 onPressed: _loadLogs,
-                              ),
-                              FocusableAction(
-                                icon: Symbols.upload_rounded,
-                                tooltip: t.logs.uploadLogs,
-                                onPressed: _hasDiagnostics ? _uploadLogs : null,
-                              ),
-                              FocusableAction(
-                                icon: Symbols.download_rounded,
-                                tooltip: t.logs.exportDebugFile,
-                                onPressed: _hasDiagnostics ? _exportDebugFile : null,
-                              ),
-                              FocusableAction(
-                                icon: Symbols.content_copy_rounded,
-                                tooltip: t.logs.copyLogs,
-                                onPressed: _hasDiagnostics ? _copyAllLogs : null,
-                              ),
-                              FocusableAction(
-                                icon: Symbols.delete_outline_rounded,
-                                tooltip: t.logs.clearLogs,
-                                onPressed: _hasDiagnostics ? _clearLogs : null,
                               ),
                             ],
                           ),
@@ -527,6 +677,8 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
                       // in-memory buffer — that process is gone. Show its record
                       // here, where the user can actually act on it (#1732).
                       ?_buildPreviousFailureBanner(theme),
+                      _buildLogActionsSection(theme),
+                      ?_buildAutoDumpRow(theme),
                       if (_logs.isEmpty)
                         SliverFillRemaining(child: Center(child: Text(t.messages.noLogsAvailable)))
                       else ...[

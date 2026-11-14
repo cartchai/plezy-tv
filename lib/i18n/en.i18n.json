@@ -332,8 +332,6 @@
     "lastCrashLoading": "Checking for a recorded crash…",
     "lastCrashClear": "Clear",
     "lastCrashHistory": "Crash history",
-    "debugLogging": "Debug Logging",
-    "debugLoggingDescription": "Enable detailed logging for troubleshooting",
     "viewLogs": "View Logs",
     "viewLogsDescription": "View application logs",
     "clearImageCache": "Clear Image Cache",
@@ -1018,7 +1016,9 @@
     "streamSelectionUnavailable": "Stream selection is not available for this source",
     "streamSelectionFailed": "Could not apply the selected streams",
     "trackSelectionNotRemembered": "This track choice applies to the current playback only.",
-    "serverUnavailableForProfile": "No server is available for the active profile"
+    "serverUnavailableForProfile": "No server is available for the active profile",
+    "autoDumpPathCopied": "Auto-dump path copied",
+    "autoDumpShareFailed": "Could not share the auto-dump"
   },
   "subtitlingStyling": {
     "text": "Text",
@@ -1412,6 +1412,12 @@
     "noFavorites": "No favourites yet — long-press a movie or show to add it here."
   },
   "about": {
+    "changelog2295": [
+      "Debug logging now always saves to a file on the device — there is no logging switch any more",
+      "After three starts in a row that never finish loading, the app saves a debug file by itself, in the app's folder on the device's storage, so a crashing TV leaves evidence behind",
+      "Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon",
+      "The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed"
+    ],
     "title": "About",
     "openSourceLicenses": "Open Source Licenses",
     "versionLabel": "Version ${version}",
@@ -1712,8 +1718,16 @@
     "clearLogs": "Clear Logs",
     "copyLogs": "Copy Logs",
     "uploadLogs": "Upload Logs",
-    "exportDebugFile": "Export debug file",
-    "exportDebugDialogTitle": "Save debug file"
+    "exportDebugDialogTitle": "Save debug file",
+    "lastAutoDump": "Last auto-dump",
+    "copyAutoDumpPath": "Copy auto-dump path",
+    "exportDebugLog": "Export debug log",
+    "exportDebugLogDescription": "Saves the full log file with settings, memory and last crash",
+    "uploadLogsDescription": "Sends the newest log lines to the support server and shows a shareable link",
+    "copyLogsDescription": "Copies the newest log lines to the clipboard",
+    "clearLogsDescription": "Clears the on-screen log buffer",
+    "shareAutoDump": "Share",
+    "autoDumpTapToShare": "Tap to share the saved file"
   },
   "startup": {
     "failedTitle": "PlezTV could not start",

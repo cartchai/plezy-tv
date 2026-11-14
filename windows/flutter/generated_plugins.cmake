@@ -8,6 +8,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   os_media_controls
   screen_retriever_windows
   sentry_flutter
+  share_plus
   universal_gamepad
   url_launcher_windows
   window_manager
