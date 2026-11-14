@@ -254,4 +254,34 @@ class _RepairFakeApi extends XtreamApi {
     }
     return rows.where((s) => s.categoryId == categoryId).toList();
   }
+
+  // 1.2.10 (one-parse sync): the sync streams the catalog to a temp
+  // file now, so the fake answers the to-file getters with the same
+  // rows (and the same fail / partial-series behaviour).
+  @override
+  Future<String> getSeriesToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    if (fail) throw Exception('panel down (test)');
+    final rows = partialSeries ? _seriesRows().where((r) => r.categoryId == 'cat1').toList() : _seriesRows();
+    final out = categoryId == null ? rows : rows.where((s) => s.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getVodStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    if (fail) throw Exception('panel down (test)');
+    const rows = [XtreamVodStream(streamId: 1, name: 'EN - Movie 1', categoryId: '1')];
+    final out = categoryId == null ? rows : rows.where((s) => s.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getLiveStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    if (fail) throw Exception('panel down (test)');
+    const rows = [XtreamLiveStream(streamId: 1, name: 'EN - Live Channel 1', categoryId: '1')];
+    final out = categoryId == null ? rows : rows.where((s) => s.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
 }

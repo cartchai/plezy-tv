@@ -1009,6 +1009,8 @@ class IndexWriteParams {
     this.hiddenCategoryInitials = const [],
     this.catalogFilePath,
     this.categoryFilePath,
+    this.visibleIndexed,
+    this.diskFilePath,
   });
 
   final String dbPath;
@@ -1026,6 +1028,25 @@ class IndexWriteParams {
   /// ''). Plain values only, so the params stay isolate-safe.
   final String? catalogFilePath;
   final String? categoryFilePath;
+
+  /// Visible rows the index holds for this connection + type RIGHT NOW
+  /// (1.2.10, one-parse sync): the network sync passes the main
+  /// isolate's [IptvSearchIndex.visibleRowCount] so the isolate can run
+  /// the sync's row-count partial guard itself (visible fetched < half
+  /// the indexed visible rows keeps the old rows — the P5a class).
+  /// Null on the seed path, which never runs that guard (its partial
+  /// rule is the category-coverage one below).
+  final int? visibleIndexed;
+
+  /// Destination for the visible-only disk file (1.2.10, one-parse
+  /// sync): when set, the isolate writes the visible rows (as the
+  /// typed rows' JSON, the same payload the old `encode*BodyVisible`
+  /// round trip produced) to this path after a COMPLETE land — never
+  /// after a partial land, never when a guard refuses. Null on the
+  /// seed path, which never writes the disk file. A write failure is
+  /// reported on the result ([IndexWriteResult.diskWriteFailed]) and
+  /// never fails the sync — the index is the primary store.
+  final String? diskFilePath;
 
   /// Categories turned off by the user (1.2.4 prune — supersedes the
   /// v1.1.0 Option B "disk stays full" split, FORK §45): per-category
@@ -1052,6 +1073,9 @@ class IndexWriteResult {
     this.coveredCategories = 0,
     this.totalCategories = 0,
     this.hiddenSkipped = 0,
+    this.visibleRowsJson = const [],
+    this.fetchedCount = 0,
+    this.diskWriteFailed = false,
   });
 
   final int rowCount;
@@ -1093,6 +1117,26 @@ class IndexWriteResult {
   /// from [droppedRows] so the C1-vs-C3 diagnosis is not polluted by
   /// rows the user asked to exclude.
   final int hiddenSkipped;
+
+  /// The landed VISIBLE rows as plain JSON maps (1.2.10, one-parse
+  /// sync): the typed rows' `toJson`, the same payload the disk file
+  /// holds. The caller rebuilds the typed rows from these for the
+  /// memo publish — the main isolate never held the body or the full
+  /// parsed list. Empty when a guard refused the write, when the land
+  /// was partial (the caller never publishes a partial land), and on
+  /// the seed path (which never publishes).
+  final List<Map<String, dynamic>> visibleRowsJson;
+
+  /// Rows the panel returned, before the hidden prune (1.2.10): the
+  /// sync's `fetchedCount`, for the landed log line. 0 on the seed
+  /// path (the seed never reports it).
+  final int fetchedCount;
+
+  /// True when the isolate was asked to write the visible disk file
+  /// ([IndexWriteParams.diskFilePath]) and that write failed (1.2.10).
+  /// The index land still stands — the caller logs it and carries on,
+  /// exactly as the old main-isolate disk write never failed the sync.
+  final bool diskWriteFailed;
 }
 
 /// True when the category with [categoryId] and display [categoryName]
@@ -1113,6 +1157,14 @@ bool isHiddenIptvCategory(String? categoryId, String? categoryName, Set<String> 
 /// trigram build is seconds of synchronous SQLite work. Returns the
 /// written row count. Throws on a corrupt body (the caller keeps the old
 /// index rows — a failed sync never wipes good data).
+///
+/// 1.2.10 (one-parse sync): the same job also runs the sync's row-count
+/// partial guard ([IndexWriteParams.visibleIndexed]), writes the
+/// visible-only disk file ([IndexWriteParams.diskFilePath], complete
+/// lands only), and returns the visible rows' JSON for the memo
+/// publish — one parse serves the index, the disk file and the memos.
+/// The seed path passes neither new param and behaves exactly as
+/// before.
 Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) async {
   final started = DateTime.now();
   final db = sqlite3.open(params.dbPath);
@@ -1139,6 +1191,10 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     final decoded = _decodeJson(catalogBody);
     final parsed = _rowsFromDecoded(params.type, decoded);
     final rows = parsed.rows;
+    // 1.2.10 (one-parse sync): the typed rows survive beside the index
+    // rows, so the isolate can build the visible JSON (disk file +
+    // memo publish) from the SAME parse — no second decode.
+    final typedRows = parsed.typedRows;
     final categories = <String, String>{
       for (final c in parseFlexibleJsonList(_decodeJson(categoryBody), XtreamCategory.fromJson))
         c.id: c.name,
@@ -1158,7 +1214,9 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     // v1.0.16 skip did. `rowCount` is the visible rows landed now.
     var hiddenSkipped = 0;
     final visibleRows = <IptvSearchIndexRow>[];
-    for (final row in rows) {
+    final visibleTypedRows = <Object>[];
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
       if (isHiddenIptvCategory(
         row.categoryId,
         row.categoryId == null ? null : categories[row.categoryId],
@@ -1168,6 +1226,7 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         hiddenSkipped++;
       } else {
         visibleRows.add(row);
+        visibleTypedRows.add(typedRows[i]);
       }
     }
     // Category ids hidden by id or by initial, for the post-upsert
@@ -1189,6 +1248,27 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         ms: ms(),
         skippedReason: 'empty-response',
         droppedRows: parsed.dropped,
+        fetchedCount: rows.length,
+      );
+    }
+    // 1.2.10 (one-parse sync): the row-count partial guard lives here
+    // now — the caller passes the indexed visible count and the
+    // isolate compares its own visible count against it. A partial
+    // list must never overwrite a good index (P5a); the old rows are
+    // kept and the type stays due, exactly as the old main-isolate
+    // guard did. Nothing is written on this path — index and disk
+    // both untouched.
+    final visibleIndexed = params.visibleIndexed;
+    if (visibleIndexed != null && visibleIndexed > 0 && visibleRows.length < visibleIndexed ~/ 2) {
+      return IndexWriteResult(
+        rowCount: 0,
+        ms: ms(),
+        skippedReason: 'partial-kept',
+        droppedRows: parsed.dropped,
+        coveredCategories: covered.length,
+        totalCategories: categories.length,
+        hiddenSkipped: hiddenSkipped,
+        fetchedCount: rows.length,
       );
     }
     // Completeness guard (the seed's P5a): a crawl-shaped / partial
@@ -1203,6 +1283,7 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         ms: ms(),
         skippedReason: 'no-categories',
         droppedRows: parsed.dropped,
+        fetchedCount: rows.length,
       );
     }
     final isPartial = categories.isNotEmpty && covered.length / categories.length < 0.5;
@@ -1230,6 +1311,7 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
           coveredCategories: covered.length,
           totalCategories: categories.length,
           hiddenSkipped: hiddenSkipped,
+          fetchedCount: rows.length,
         );
       }
       index.upsertType(
@@ -1248,6 +1330,7 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
         coveredCategories: covered.length,
         totalCategories: categories.length,
         hiddenSkipped: hiddenSkipped,
+        fetchedCount: rows.length,
       );
     }
     // Complete list: upsert-merge (series fix, v1.0.16) — rows the fetch
@@ -1265,6 +1348,29 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
       syncStampMs: params.syncStampMs,
       deleteCategoryIds: hiddenCategoryIds.toList(),
     );
+    // 1.2.10 (one-parse sync): the visible disk file is written here,
+    // from the same parse — the caller no longer re-encodes the body
+    // in a second isolate round trip. The payload is the visible
+    // typed rows' JSON, the same payload the old encode*BodyVisible
+    // round trip produced. The same list is returned for the memo
+    // publish, so the main isolate rebuilds the typed rows from these
+    // maps instead of holding the body. A failed write is flagged,
+    // never thrown: the index land stands.
+    var diskWriteFailed = false;
+    var visibleRowsJson = const <Map<String, dynamic>>[];
+    final diskFilePath = params.diskFilePath;
+    if (diskFilePath != null) {
+      visibleRowsJson = visibleTypedRows
+          .map((row) => _typedCatalogRowToJson(params.type, row))
+          .toList(growable: false);
+      try {
+        final file = File(diskFilePath);
+        await file.parent.create(recursive: true);
+        await file.writeAsString(jsonEncode(visibleRowsJson));
+      } catch (_) {
+        diskWriteFailed = true;
+      }
+    }
     return IndexWriteResult(
       rowCount: visibleRows.length,
       ms: ms(),
@@ -1272,6 +1378,9 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
       coveredCategories: covered.length,
       totalCategories: categories.length,
       hiddenSkipped: hiddenSkipped,
+      visibleRowsJson: visibleRowsJson,
+      fetchedCount: rows.length,
+      diskWriteFailed: diskWriteFailed,
     );
   } finally {
     db.close();
@@ -1297,28 +1406,40 @@ int _metaRowCount(Database db, String connectionId, String type) {
   }
 }
 
-({List<IptvSearchIndexRow> rows, int dropped}) _rowsFromDecoded(String type, dynamic decoded) {
+({List<IptvSearchIndexRow> rows, List<Object> typedRows, int dropped}) _rowsFromDecoded(String type, dynamic decoded) {
   switch (type) {
     case IptvSearchIndex.typeLive:
       final parsed = parseFlexibleJsonListCounted(decoded, XtreamLiveStream.fromJson);
       return (
         rows: parsed.rows.map(IptvSearchIndexRow.fromLive).toList(growable: false),
+        typedRows: parsed.rows,
         dropped: parsed.dropped,
       );
     case IptvSearchIndex.typeMovie:
       final parsed = parseFlexibleJsonListCounted(decoded, XtreamVodStream.fromJson);
       return (
         rows: parsed.rows.map(IptvSearchIndexRow.fromMovie).toList(growable: false),
+        typedRows: parsed.rows,
         dropped: parsed.dropped,
       );
     default:
       final parsed = parseFlexibleJsonListCounted(decoded, XtreamSeries.fromJson);
       return (
         rows: parsed.rows.map(IptvSearchIndexRow.fromSeries).toList(growable: false),
+        typedRows: parsed.rows,
         dropped: parsed.dropped,
       );
   }
 }
+
+/// The typed catalog row's JSON (1.2.10, one-parse sync): the disk
+/// file and the memo publish both carry the typed rows' `toJson` — the
+/// same payload the old `encode*BodyVisible` round trip produced.
+Map<String, dynamic> _typedCatalogRowToJson(String type, Object row) => switch (type) {
+      IptvSearchIndex.typeLive => (row as XtreamLiveStream).toJson(),
+      IptvSearchIndex.typeMovie => (row as XtreamVodStream).toJson(),
+      _ => (row as XtreamSeries).toJson(),
+    };
 
 dynamic _decodeJson(String body) {
   try {

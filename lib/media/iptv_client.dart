@@ -874,6 +874,11 @@ class IptvClient implements MediaServerClient {
     // hands the interval in directly.
     final intervalHours = intervalHoursOverride ?? _catalogSyncIntervalHours();
     final dbPath = await IptvSearchIndex.dbFilePath();
+    // 1.2.10 (one-parse sync): one temp dir for the run's streamed
+    // catalog files — each type's body streams here, the isolate job
+    // reads it, and the finally below deletes the whole dir, so no
+    // catalog copy survives the run.
+    final syncTempDir = await Directory.systemTemp.createTemp('plezy_sync_');
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     // 1.2.4 (catalog memory, Matt's prune decision — supersedes the
     // v1.1.0 Option B "disk stays full" split, FORK §45): the stored
@@ -954,11 +959,11 @@ class IptvClient implements MediaServerClient {
         if (!force) await _waitForIdleUnlessAborted(abort, backgroundPlaybackCheck: backgroundPlaybackCheck);
         onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'fetching'));
         List<XtreamCategory> categories;
-        int fetchedCount;
-        String? catalogBody;
-        // Hoisted out of the fetch try so the disk write + memoized
-        // publish below can use the parsed rows after the guards pass.
-        List<Object>? fetchedRows;
+        // 1.2.10 (one-parse sync): the catalog streams straight to a
+        // temp file — the main isolate never holds the body String or
+        // the parsed list. The file path is what the isolate job gets;
+        // the guards and the lands all run inside that one job.
+        String? catalogFilePath;
         try {
           // R2.4: each fetch gets its own retry (categories and catalog
           // separately) — retrying the whole per-type block would cost
@@ -969,39 +974,31 @@ class IptvClient implements MediaServerClient {
             retry: retryTransportErrors,
             abort: abort,
           );
-          // The unfiltered getters store the raw body on the api (see
-          // lastXxxStreamsBody) — read it synchronously right after the
-          // await, before any other await, so a concurrent browse load
-          // cannot swap it underneath this sync.
-          final List<Object> fetched;
+          final tempPath = '${syncTempDir.path}/$type.json';
           switch (type) {
             case IptvSearchIndex.typeLive:
               attempts++;
-              fetched = await _fetchWithTransportRetry(
-                () => _xtreamApi.getLiveStreams(abortTrigger: abort?.trigger),
+              await _fetchWithTransportRetry(
+                () => _xtreamApi.getLiveStreamsToFile(filePath: tempPath, abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
                 abort: abort,
               );
-              catalogBody = _xtreamApi.lastLiveStreamsBody;
             case IptvSearchIndex.typeMovie:
               attempts++;
-              fetched = await _fetchWithTransportRetry(
-                () => _xtreamApi.getVodStreams(abortTrigger: abort?.trigger),
+              await _fetchWithTransportRetry(
+                () => _xtreamApi.getVodStreamsToFile(filePath: tempPath, abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
                 abort: abort,
               );
-              catalogBody = _xtreamApi.lastVodStreamsBody;
             default:
               attempts++;
-              fetched = await _fetchWithTransportRetry(
-                () => _xtreamApi.getSeries(abortTrigger: abort?.trigger),
+              await _fetchWithTransportRetry(
+                () => _xtreamApi.getSeriesToFile(filePath: tempPath, abortTrigger: abort?.trigger),
                 retry: retryTransportErrors,
                 abort: abort,
               );
-              catalogBody = _xtreamApi.lastSeriesBody;
           }
-          fetchedRows = fetched;
-          fetchedCount = fetched.length;
+          catalogFilePath = tempPath;
         } on XtreamCatalogTooLargeException {
           skipped[type] = 'oversize';
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'oversize'));
@@ -1016,7 +1013,14 @@ class IptvClient implements MediaServerClient {
         // Sync-time guards (the choke point): empty keeps the old rows;
         // partial (< half the indexed rows, when the index has rows)
         // keeps the old rows — a partial list must never overwrite a
-        // good index (the P5a class). 1.2.4: the comparison is
+        // good index (the P5a class). 1.2.10: the partial guard runs
+        // inside the one-parse isolate job now — it parses once and
+        // compares its own visible count against the indexed visible
+        // count, so the main isolate never needs the parsed list. The
+        // main isolate keeps only the cheap pre-check: a zero-byte
+        // file is an empty response without an isolate round trip (a
+        // file that cannot be read is treated the same — the isolate
+        // would refuse it as empty anyway). 1.2.4: the comparison is
         // VISIBLE-against-visible — the index holds visible rows only
         // now, so comparing the full fetch against the visible land
         // would never fire (a half-catalog fetch would pass as complete
@@ -1025,34 +1029,26 @@ class IptvClient implements MediaServerClient {
         // from the last sync): when the hidden set grew since, the
         // stored count includes rows that are hidden now, and comparing
         // the fresh visible fetch against it would cry partial on a
-        // complete fetch and leave the type due forever. The empty
-        // check still uses the full count: a fetch returning 0 rows is
-        // empty regardless.
-        final body = catalogBody;
-        if (fetchedCount == 0 || body == null || body.isEmpty) {
+        // complete fetch and leave the type due forever.
+        final catalogPath = catalogFilePath;
+        var catalogBytes = 0;
+        try {
+          catalogBytes = await File(catalogPath).length();
+        } catch (_) {
+          catalogBytes = 0;
+        }
+        if (catalogBytes == 0) {
           skipped[type] = 'empty-response';
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'empty-response'));
           continue;
         }
-        final visibleFetchedCount = _visibleFetchedRows(
-          type,
-          fetchedRows,
-          categories,
-        ).length;
         final visibleIndexed = index.visibleRowCount(
           connection.id,
           type,
           _pruneHiddenCategoryIds,
           _pruneHiddenCategoryInitials,
         );
-        if (visibleIndexed > 0 && visibleFetchedCount < visibleIndexed ~/ 2) {
-          // 'partial-kept' (v1.0.16 dialog fix): the old rows are kept
-          // and searchable, so the dialog must not call it a failure.
-          skipped[type] = 'partial-kept';
-          onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'skipped', reason: 'partial-kept'));
-          continue;
-        }
-        onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'writing', rows: fetchedCount));
+        onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'writing'));
         try {
           final result = await compute(
             writeIndexTypeInBackground,
@@ -1060,9 +1056,22 @@ class IptvClient implements MediaServerClient {
               dbPath: dbPath,
               connectionId: connection.id,
               type: type,
-              catalogBody: body,
+              // 1.2.10 (one-parse sync): the isolate reads the streamed
+              // file itself — the body is never copied across the port
+              // (the seed path has done this since 1.2.6; the sync
+              // joins it). catalogBody is ignored when the path is set.
+              catalogBody: '',
+              catalogFilePath: catalogPath,
               categoryBody: jsonEncode(categories.map((c) => c.toJson()).toList()),
               syncStampMs: nowMs,
+              // The row-count partial guard's denominator (see above).
+              visibleIndexed: visibleIndexed,
+              // The visible disk file's destination — the isolate
+              // writes it after a complete land.
+              diskFilePath: await _catalogCache.writeFilePath(
+                connection.id,
+                _diskDatasetFor(type),
+              ),
               // 1.2.4 (catalog memory, Matt's prune decision): the
               // isolate lands VISIBLE rows only and deletes the
               // hidden rows it already holds for this connection.
@@ -1113,55 +1122,33 @@ class IptvClient implements MediaServerClient {
           // ever gets complete lists; the next sync (the type stays
           // due) refreshes it when the panel answers in full.
           if (!result.partial) {
+            // 1.2.10 (one-parse sync): the visible disk file was already
+            // written by the isolate job (complete lands only) — the
+            // main isolate only writes the small category file and
+            // publishes the visible rows the isolate returned. The
+            // publish rebuilds the typed rows from the isolate's JSON
+            // maps; the listing consumers still filter hidden
+            // categories at read time (defence for a stale full memo),
+            // and a direct id resolve (favourite/resume) falls back to
+            // the index. A disk-write failure is flagged on the result
+            // and never fails the sync — the index is the primary store.
+            if (result.diskWriteFailed) {
+              appLogger.w('IPTV: catalog sync disk write failed for $type (index land stands)');
+            }
             try {
-              // 1.2.4 (catalog memory, Matt's prune decision): the disk
-              // file holds VISIBLE rows only — encoded off-thread from
-              // the raw body with the filter built from the fetched
-              // categories (the category file still holds the full
-              // list: the filter derives from it). An all-hidden type
-              // writes an empty-array file, not no file — so the next
-              // load reads the deliberate empty instead of re-fetching.
-              // The wire still downloads the full lists.
-              final filter = VisibleCatalogFilter.fromCategories(
-                categories,
-                hiddenCategoryIds: _pruneHiddenCategoryIds,
-                hiddenInitials: _pruneHiddenCategoryInitials,
-              );
-              // No-op filter (nothing hidden): the raw body IS the
-              // visible body — skip the isolate round trip (sending a
-              // ~40MB body across the port blocks the main isolate
-              // ~300ms at Trex scale, build #13 bench).
-              final visibleBody = filter.isNoOp
-                  ? body
-                  : await switch (type) {
-                      IptvSearchIndex.typeLive => XtreamApi.encodeLiveStreamsBodyVisible(body, filter),
-                      IptvSearchIndex.typeMovie => XtreamApi.encodeVodStreamsBodyVisible(body, filter),
-                      _ => XtreamApi.encodeSeriesBodyVisible(body, filter),
-                    };
-              await _catalogCache.write(
-                connection.id,
-                _diskDatasetFor(type),
-                visibleBody,
-              );
               await _catalogCache.write(
                 connection.id,
                 _diskCategoryDatasetFor(type),
                 jsonEncode(categories.map((c) => c.toJson()).toList()),
               );
-              // fetchedRows is set by the fetch try above; every failure
-              // path (throw, empty, partial, oversize) continues past here.
-              // 1.2.4: the memoized publish carries VISIBLE rows only.
-              // The listing consumers still filter hidden categories at
-              // read time (defence for a stale full memo), and a direct
-              // id resolve (favourite/resume) falls back to the index.
-              _publishSyncedCatalog(
-                type,
-                _visibleFetchedRows(type, fetchedRows, categories),
-                categories,
-              );
             } catch (e) {
-              appLogger.w('IPTV: catalog sync disk write failed for $type', error: e);
+              appLogger.w('IPTV: catalog sync category write failed for $type', error: e);
             }
+            _publishSyncedCatalog(
+              type,
+              _typedRowsFromJson(type, result.visibleRowsJson),
+              categories,
+            );
           }
           onProgress?.call(IptvSearchSyncProgress(type: type, phase: 'done', rows: result.rowCount, partial: result.partial));
         } catch (e) {
@@ -1212,6 +1199,12 @@ class IptvClient implements MediaServerClient {
         requests: attempts,
       );
     } finally {
+      try {
+        if (await syncTempDir.exists()) await syncTempDir.delete(recursive: true);
+      } catch (_) {
+        // Best-effort temp cleanup; a leftover temp dir is reclaimed
+        // by the OS, and the catalog inside it is already landed.
+      }
       _activeBackgroundAborts.remove(abort);
       await _clearSyncRunningStamp();
       _refreshSearchIndexState();
@@ -1785,25 +1778,16 @@ class IptvClient implements MediaServerClient {
   List<T> _visibleRows<T>(List<T> rows, String? Function(T row) categoryIdOf, VisibleCatalogFilter filter) =>
       rows.where((row) => !filter.isHidden(categoryIdOf(row))).toList();
 
-  /// Visible rows from a just-fetched list, type-switched (1.2.4): the
-  /// sync's partial guard and publish share this — the guard compares
-  /// visible-against-visible (see [_syncSearchIndex]), and the publish
-  /// carries visible rows only.
-  List<Object> _visibleFetchedRows(String type, List<Object> fetchedRows, List<XtreamCategory> categories) {
-    final filter = VisibleCatalogFilter.fromCategories(
-      categories,
-      hiddenCategoryIds: _pruneHiddenCategoryIds,
-      hiddenInitials: _pruneHiddenCategoryInitials,
-    );
-    switch (type) {
-      case IptvSearchIndex.typeLive:
-        return _visibleRows<XtreamLiveStream>(fetchedRows.cast<XtreamLiveStream>(), (r) => r.categoryId, filter);
-      case IptvSearchIndex.typeMovie:
-        return _visibleRows<XtreamVodStream>(fetchedRows.cast<XtreamVodStream>(), (r) => r.categoryId, filter);
-      default:
-        return _visibleRows<XtreamSeries>(fetchedRows.cast<XtreamSeries>(), (r) => r.categoryId, filter);
-    }
-  }
+  /// Rebuild the typed rows the one-parse isolate job returned as JSON
+  /// maps (1.2.10): the memo publish needs typed rows, and the isolate
+  /// can only send plain values across the port. One fromJson pass over
+  /// the visible rows only — the body itself was parsed once, in the
+  /// isolate.
+  List<Object> _typedRowsFromJson(String type, List<Map<String, dynamic>> rowsJson) => switch (type) {
+        IptvSearchIndex.typeLive => rowsJson.map(XtreamLiveStream.fromJson).toList(),
+        IptvSearchIndex.typeMovie => rowsJson.map(XtreamVodStream.fromJson).toList(),
+        _ => rowsJson.map(XtreamSeries.fromJson).toList(),
+      };
 
   /// Public read of [_isHiddenCategory] (v1.0.16): the guide category
   /// submenu resolves the channel's category state through this, so the

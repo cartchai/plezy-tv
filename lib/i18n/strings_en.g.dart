@@ -3670,6 +3670,12 @@ class Translations$about$en {
 		'Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon',
 		'The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed',
 	];
+	List<String> get changelog2296 => [
+		'Refreshing the catalog now uses less memory: each list is downloaded straight to a file and read once, instead of being held in memory and read three times',
+		'The refresh still keeps the same safety checks — a partial or empty list keeps your old channels and movies instead of wiping them',
+		'Hidden categories still stay out of search and the saved catalog, and showing one again still needs a refresh',
+		'The scheduled background refresh uses the same lighter path',
+	];
 
 	/// en: 'About'
 	String get title => 'About';
@@ -10840,6 +10846,10 @@ extension on Translations {
 			'about.changelog2295.1' => 'After three starts in a row that never finish loading, the app saves a debug file by itself, in the app\'s folder on the device\'s storage, so a crashing TV leaves evidence behind',
 			'about.changelog2295.2' => 'Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon',
 			'about.changelog2295.3' => 'The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed',
+			'about.changelog2296.0' => 'Refreshing the catalog now uses less memory: each list is downloaded straight to a file and read once, instead of being held in memory and read three times',
+			'about.changelog2296.1' => 'The refresh still keeps the same safety checks — a partial or empty list keeps your old channels and movies instead of wiping them',
+			'about.changelog2296.2' => 'Hidden categories still stay out of search and the saved catalog, and showing one again still needs a refresh',
+			'about.changelog2296.3' => 'The scheduled background refresh uses the same lighter path',
 			'about.title' => 'About',
 			'about.openSourceLicenses' => 'Open Source Licenses',
 			'about.versionLabel' => ({required Object version}) => 'Version ${version}',
@@ -11080,12 +11090,12 @@ extension on Translations {
 			'startup.repairFailed' => 'Repair failed',
 			'startup.repairKeptSignIns' => 'Your servers and profiles are still signed in.',
 			'startup.repairLostSignIns' => 'The key protecting your saved sign-ins could not be recovered. You will have to sign in to every server and profile again.',
+			_ => null,
+		} ?? switch (path) {
 			'startup.repairLostSessions' => 'At least one tracker or Seerr connection was lost and has to be reconnected.',
 			'startup.backupTitle' => 'A copy of the damaged file was kept',
 			'startup.backupWarning' => 'It contains your sign-in credentials. Do not upload or share it.',
 			'startup.deleteBackup' => 'Delete copy',
-			_ => null,
-		} ?? switch (path) {
 			'startup.backupDeleted' => 'Copy deleted.',
 			'startup.previousFailureTitle' => 'PlezTV failed to start last time',
 			'licenses.relatedPackages' => 'Related Packages',
@@ -11594,12 +11604,12 @@ extension on Translations {
 			'downloads.retryDownload' => 'Retry download',
 			'downloads.downloadQueued' => 'Download queued',
 			'downloads.downloadResumed' => 'Download resumed',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.serverErrorBitrate' => 'Server error: file may exceed the remote bitrate limit',
 			'downloads.storageFull' => 'Downloads stopped to protect available storage. Free some space or choose another download location, then retry.',
 			'downloads.storageUnavailable' => 'Downloads stopped because available storage could not be checked. Check the download location, then retry.',
 			'downloads.episodesQueued' => ({required Object count}) => '${count} episodes queued for download',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.downloadDeleted' => 'Download deleted',
 			'downloads.deleteConfirm' => ({required Object title}) => 'Delete "${title}" from this device?',
 			'downloads.deleteCollectionDownloads' => 'Delete downloads',
@@ -12108,12 +12118,12 @@ extension on Translations {
 			'addServer.quickConnectRejected' => 'Quick Connect was rejected by the server',
 			'addServer.quickConnectNotJson' => 'The Quick Connect response was not valid JSON',
 			'addServer.quickConnectMissingFields' => 'The Quick Connect response is missing a code or secret',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.quickConnectPollRejected' => 'Quick Connect polling was rejected by the server',
 			'addServer.serverTimedOut' => 'The server did not respond in time',
 			'addServer.responseNotJson' => 'The server response was not valid JSON',
 			'addServer.responseMissingIdentity' => ({required Object product}) => 'The response is missing an ID or server name — is this a ${product} server?',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.probeFailed' => ({required Object error}) => 'Could not reach the server: ${error}',
 			'addServer.enterAtLeastOneUrl' => ({required Object product}) => 'Enter at least one ${product} server URL',
 			'addServer.noReachableServer' => ({required Object product}) => 'No reachable ${product} server was found',

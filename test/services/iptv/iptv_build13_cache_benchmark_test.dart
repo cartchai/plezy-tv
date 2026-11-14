@@ -345,4 +345,31 @@ class _BenchmarkFakeXtreamApi extends XtreamApi {
 
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
+
+  // 1.2.10 (one-parse sync): the sync streams the catalog to a temp
+  // file now, so the fake answers the to-file getters with the same
+  // body — and the network-call counter moves here, so the
+  // second-launch assertion (0 network calls) still means the same.
+  @override
+  Future<String> getVodStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    if (categoryId == null) {
+      if (countNetworkCalls) unfilteredVodCalls++;
+      await File(filePath).writeAsString(body);
+      return filePath;
+    }
+    await File(filePath).writeAsString('[]');
+    return filePath;
+  }
+
+  @override
+  Future<String> getLiveStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    await File(filePath).writeAsString('[]');
+    return filePath;
+  }
+
+  @override
+  Future<String> getSeriesToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    await File(filePath).writeAsString('[]');
+    return filePath;
+  }
 }

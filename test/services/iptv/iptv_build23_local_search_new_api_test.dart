@@ -206,6 +206,18 @@ class _OversizeSeriesApi extends XtreamApi {
     if (categoryId == null) throw const XtreamCatalogTooLargeException(300000001);
     return super.getSeries(categoryId: categoryId, abortTrigger: abortTrigger);
   }
+
+  // 1.2.10 (one-parse sync): the sync fetches through the to-file
+  // getter now, so the oversize throw moves here — the test's sync
+  // still hits the same 'oversize' arm.
+  @override
+  Future<String> getSeriesToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    // Delegates to the body getter so the oversize throw (and the
+    // per-category path) behave exactly as before.
+    final rows = await getSeries(categoryId: categoryId, abortTrigger: abortTrigger);
+    await File(filePath).writeAsString(jsonEncode(rows.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
 }
 
 IptvClient _clientWith(_SyncPanel panel) {

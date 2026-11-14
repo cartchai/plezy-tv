@@ -1418,6 +1418,12 @@
       "Settings → Logs shows the last automatically saved debug file, its location, and a Share button — and the debug export is now a labelled row, not a bare download icon",
       "The debug file now opens with a short summary (app version, device, memory, last crash, failed starts) and then the full log — nothing is trimmed"
     ],
+    "changelog2296": [
+      "Refreshing the catalog now uses less memory: each list is downloaded straight to a file and read once, instead of being held in memory and read three times",
+      "The refresh still keeps the same safety checks — a partial or empty list keeps your old channels and movies instead of wiping them",
+      "Hidden categories still stay out of search and the saved catalog, and showing one again still needs a refresh",
+      "The scheduled background refresh uses the same lighter path"
+    ],
     "title": "About",
     "openSourceLicenses": "Open Source Licenses",
     "versionLabel": "Version ${version}",

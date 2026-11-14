@@ -242,6 +242,65 @@ class R2FakeXtreamApi extends XtreamApi {
     if (failCatalogs) _catalogTimeout();
     return _seriesRows.where((r) => r.categoryId == categoryId).toList();
   }
+
+  // 1.2.10 (one-parse sync): the sync streams each catalog to a temp
+  // file now, so the fake answers the to-file getters with the same
+  // rows, counters and failure behaviour as the body getters above —
+  // the sync's request contract (6 requests, same shapes) is
+  // unchanged. The file holds the raw body, as the real getter writes.
+  @override
+  Future<String> getLiveStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    totalRequests++;
+    requestLog.add(categoryId == null ? 'live-catalog' : 'live-cat:$categoryId');
+    if (categoryId == null) {
+      catalogRequests++;
+      if (failCatalogs || failCatalogFetches) _catalogTimeout();
+      _maybeFailOnce(IptvSearchIndex.typeLive);
+      await File(filePath).writeAsString(jsonEncode(_liveRows.map((r) => r.toJson()).toList()));
+      return filePath;
+    }
+    perCategoryRequests++;
+    if (failCatalogs) _catalogTimeout();
+    final out = _liveRows.where((r) => r.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getVodStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    totalRequests++;
+    requestLog.add(categoryId == null ? 'vod-catalog' : 'vod-cat:$categoryId');
+    if (categoryId == null) {
+      catalogRequests++;
+      if (failCatalogs || failCatalogFetches) _catalogTimeout();
+      _maybeFailOnce(IptvSearchIndex.typeMovie);
+      await File(filePath).writeAsString(jsonEncode(_vodRows.map((r) => r.toJson()).toList()));
+      return filePath;
+    }
+    perCategoryRequests++;
+    if (failCatalogs) _catalogTimeout();
+    final out = _vodRows.where((r) => r.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getSeriesToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    totalRequests++;
+    requestLog.add(categoryId == null ? 'series-catalog' : 'series-cat:$categoryId');
+    if (categoryId == null) {
+      catalogRequests++;
+      if (failCatalogs || failCatalogFetches) _catalogTimeout();
+      _maybeFailOnce(IptvSearchIndex.typeSeries);
+      await File(filePath).writeAsString(jsonEncode(_seriesRows.map((r) => r.toJson()).toList()));
+      return filePath;
+    }
+    perCategoryRequests++;
+    if (failCatalogs) _catalogTimeout();
+    final out = _seriesRows.where((r) => r.categoryId == categoryId).toList();
+    await File(filePath).writeAsString(jsonEncode(out.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
 }
 
 /// A real [IptvClient] wired to [R2FakeXtreamApi] (fake panel only).

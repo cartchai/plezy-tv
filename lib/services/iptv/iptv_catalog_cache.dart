@@ -118,6 +118,21 @@ class IptvCatalogDiskCache {
     }
   }
 
+  /// The destination path a [write] for [dataset] would use, or null
+  /// when the cache is disabled (1.2.10, one-parse sync: the isolate
+  /// job writes the visible disk file itself, so the caller hands it
+  /// this path instead of the body). The file may not exist yet — this
+  /// never creates anything, unlike [filePath].
+  Future<String?> writeFilePath(String connectionId, String dataset) async {
+    if (debugDisableDisk) return null;
+    try {
+      return (await _file(connectionId, dataset)).path;
+    } catch (e) {
+      appLogger.w('IPTV catalog cache path lookup failed for $dataset', error: e);
+      return null;
+    }
+  }
+
   /// Store [body] for [dataset]. Creates the directory as needed.
   /// Never throws — a failed write is logged and the caller carries on
   /// with the in-memory rows.

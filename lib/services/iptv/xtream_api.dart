@@ -307,6 +307,97 @@ class XtreamApi {
     return response.body;
   }
 
+  /// Stream a response body straight to a file instead of buffering it
+  /// as a String (1.2.10, one-parse sync, research item #2). Same
+  /// request shape as [_fetchBody] (AbortableRequest + User-Agent) and
+  /// the same status checks + refusal recording — only the success path
+  /// differs: chunks flow into [filePath] as they arrive, so the main
+  /// isolate never holds the body. The oversize cap is enforced on the
+  /// streamed BYTES (the char cap in [_fetchBody] counts UTF-16 code
+  /// units, ≈ bytes for JSON, which is mostly ASCII — bytes is the
+  /// conservative measure for a hostile response); on oversize the
+  /// partial file is deleted and [XtreamCatalogTooLargeException] is
+  /// thrown, exactly as [_fetchBody] throws it. The send is awaited
+  /// (headers) under [timeout]; the body then streams with a
+  /// per-chunk-gap timeout (the [getXmltvFeed] shape), so a tens-of-MB
+  /// catalog on a slow connection is not cut off for merely being slow.
+  /// Any failure (transport, abort, bad status, oversize) deletes the
+  /// partial file — the caller never sees a half-written catalog.
+  Future<void> _fetchBodyToFile(
+    Uri uri,
+    String filePath, {
+    Duration timeout = const Duration(seconds: 120),
+    Future<void>? abortTrigger,
+  }) async {
+    http.StreamedResponse streamed;
+    try {
+      final request = http.AbortableRequest('GET', uri, abortTrigger: abortTrigger);
+      request.headers['User-Agent'] = _effectiveUserAgent;
+      streamed = await _http.send(request).timeout(timeout);
+    } catch (e) {
+      final mapped = MediaServerHttpException.from(e, uri: uri);
+      if (!mapped.isCancellation) {
+        await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
+      }
+      throw mapped;
+    }
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      // Buffer only the (small) error body for the refusal record, as
+      // [getXmltvFeed] does — the success path never materialises it.
+      final response = await http.Response.fromStream(streamed);
+      await _recordRefusal(uri: uri, statusCode: response.statusCode, failureKind: 'http', response: response);
+      if (response.statusCode == 401) {
+        throw MediaServerAuthException('Xtream authentication failed', statusCode: 401);
+      }
+      if (response.statusCode == 403) {
+        throw MediaServerHttpException(
+          type: MediaServerHttpErrorType.unknown,
+          message: 'Xtream access denied',
+          statusCode: 403,
+          requestUri: uri,
+        );
+      }
+      throw MediaServerHttpException(
+        type: MediaServerHttpErrorType.unknown,
+        message: 'Xtream request failed with HTTP ${response.statusCode}',
+        statusCode: response.statusCode,
+        requestUri: uri,
+      );
+    }
+    final sink = File(filePath).openWrite();
+    var bytes = 0;
+    var failed = false;
+    try {
+      await for (final chunk in streamed.stream.timeout(timeout)) {
+        bytes += chunk.length;
+        if (bytes > maxCatalogResponseChars) {
+          throw XtreamCatalogTooLargeException(bytes);
+        }
+        sink.add(chunk);
+      }
+      await sink.flush();
+    } catch (e) {
+      failed = true;
+      final mapped = e is XtreamCatalogTooLargeException ? e : MediaServerHttpException.from(e, uri: uri);
+      if (mapped is MediaServerHttpException && !mapped.isCancellation) {
+        await _recordRefusal(uri: uri, statusCode: null, failureKind: _failureKindFor(mapped.type));
+      }
+      throw mapped;
+    } finally {
+      await sink.close();
+      // Any failure leaves a half-written file behind: delete it, so
+      // the caller never sees a partial catalog. The success path
+      // returns with the file intact.
+      if (failed) {
+        try {
+          await File(filePath).delete();
+        } catch (_) {
+          // Best-effort cleanup; the error already thrown is the signal.
+        }
+      }
+    }
+  }
+
   /// Hand a refusal to the recorder (build #27), if one is attached.
   /// Record-only: the exception the caller sees is unchanged, and this
   /// never throws — a diagnostic must never break the error path it
@@ -494,6 +585,42 @@ class XtreamApi {
     }
     lastSeriesBody = categoryId == null ? body : null;
     return compute(_parseSeries, body);
+  }
+
+  /// Full-list catalogs streamed straight to a file (1.2.10, one-parse
+  /// sync): the sync's fetch path. Unlike [getLiveStreams] /
+  /// [getVodStreams] / [getSeries], these do NOT buffer the body, do
+  /// NOT parse, and do NOT set [lastLiveStreamsBody] /
+  /// [lastVodStreamsBody] / [lastSeriesBody] — the main isolate never
+  /// holds the body at all. The caller passes the temp file path (the
+  /// parent dir must exist); the returned path is the same file, ready
+  /// for the one-parse isolate job. Full-list only — per-category
+  /// bodies are small and keep the buffered getters.
+  Future<String> getLiveStreamsToFile({required String filePath, Future<void>? abortTrigger}) async {
+    await _fetchBodyToFile(
+      _playerApiUri(action: 'get_live_streams'),
+      filePath,
+      abortTrigger: abortTrigger,
+    );
+    return filePath;
+  }
+
+  Future<String> getVodStreamsToFile({required String filePath, Future<void>? abortTrigger}) async {
+    await _fetchBodyToFile(
+      _playerApiUri(action: 'get_vod_streams'),
+      filePath,
+      abortTrigger: abortTrigger,
+    );
+    return filePath;
+  }
+
+  Future<String> getSeriesToFile({required String filePath, Future<void>? abortTrigger}) async {
+    await _fetchBodyToFile(
+      _playerApiUri(action: 'get_series'),
+      filePath,
+      abortTrigger: abortTrigger,
+    );
+    return filePath;
   }
 
   /// Full series detail: info + per-season episode lists.

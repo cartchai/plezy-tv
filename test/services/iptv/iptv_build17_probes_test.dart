@@ -494,4 +494,29 @@ class _GotFakeApi extends XtreamApi {
 
   @override
   Future<List<XtreamLiveStream>> getLiveStreams({String? categoryId, Future<void>? abortTrigger}) async => const [];
+
+  // 1.2.10 (one-parse sync): the sync streams each catalog to a temp
+  // file now — delegate to this fake's own body getter (keeps its
+  // delays, counters, empty flags and throws) and write the returned
+  // rows out as the body.
+  @override
+  Future<String> getLiveStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    final rows = await getLiveStreams(categoryId: categoryId, abortTrigger: abortTrigger);
+    await File(filePath).writeAsString(jsonEncode(rows.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getVodStreamsToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    final rows = await getVodStreams(categoryId: categoryId, abortTrigger: abortTrigger);
+    await File(filePath).writeAsString(jsonEncode(rows.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
+
+  @override
+  Future<String> getSeriesToFile({required String filePath, String? categoryId, Future<void>? abortTrigger}) async {
+    final rows = await getSeries(categoryId: categoryId, abortTrigger: abortTrigger);
+    await File(filePath).writeAsString(jsonEncode(rows.map((r) => r.toJson()).toList()));
+    return filePath;
+  }
 }
