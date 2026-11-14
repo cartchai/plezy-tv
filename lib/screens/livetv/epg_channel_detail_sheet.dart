@@ -76,6 +76,17 @@ class _EpgChannelDetailSheetState extends State<_EpgChannelDetailSheet> {
     };
   }
 
+  /// Which source served the programmes (1.2.8 F8): the short-EPG
+  /// lookup or the downloaded feed. '—' when nothing served the
+  /// channel.
+  String _sourceLabel(IptvEpgSource? source) {
+    return switch (source) {
+      IptvEpgSource.shortEpg => t.iptv.epgSourceShort,
+      IptvEpgSource.feedById || IptvEpgSource.feedByName => t.iptv.epgSourceFeed,
+      _ => '—',
+    };
+  }
+
   String _reasonLabel(IptvEpgNoGuideReason reason) {
     return switch (reason) {
       IptvEpgNoGuideReason.noSource => t.iptv.epgNoGuideReasonNoSource,
@@ -144,6 +155,9 @@ class _EpgChannelDetailSheetState extends State<_EpgChannelDetailSheet> {
               const Center(child: CircularProgressIndicator())
             else if (detail != null) ...[
               _Row(label: t.iptv.epgDetailsSource, value: detail.sourceName ?? '—'),
+              // 1.2.8 F8: which source served the programmes — the
+              // quick lookup or the downloaded guide.
+              _Row(label: t.iptv.epgDetailsGuideSource, value: _sourceLabel(detail.epgSource)),
               _Row(label: t.iptv.epgDetailsMatchedId, value: detail.matchedXmltvId ?? '—'),
               _Row(label: t.iptv.epgDetailsMatchMethod, value: _matchMethodLabel(detail.matchMethod)),
               _Row(

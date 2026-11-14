@@ -474,6 +474,11 @@ class IptvChannelEpgDetail {
   /// nothing matched.
   final String? matchMethod;
 
+  /// Which source served this channel's programmes (1.2.8 F8): the
+  /// short-EPG lookup or a feed match (by id or by name). Null when
+  /// nothing served it — the details sheet shows '—'.
+  final IptvEpgSource? epgSource;
+
   /// Programmes in the requested window.
   final int programCount;
 
@@ -492,6 +497,7 @@ class IptvChannelEpgDetail {
     this.sourceName,
     this.matchedXmltvId,
     this.matchMethod,
+    this.epgSource,
     this.programCount = 0,
     this.lastFetch,
     this.nextFetch,
@@ -563,6 +569,13 @@ class IptvEpgMatchTiers {
   final int noTvgId;
   final int tvgIdNotInFeed;
   final int matchedButNoProgrammes;
+
+  /// 1.2.8 F2: the split of [matchedButNoProgrammes] — the feed
+  /// declaring the id with zero programmes vs programmes that exist
+  /// but all fall outside the Reload window. The two sum to
+  /// [matchedButNoProgrammes].
+  final int matchedButNoProgrammesDeclared;
+  final int matchedButNoProgrammesOutsideWindow;
   final int none;
 
   const IptvEpgMatchTiers({
@@ -575,6 +588,8 @@ class IptvEpgMatchTiers {
     this.noTvgId = 0,
     this.tvgIdNotInFeed = 0,
     this.matchedButNoProgrammes = 0,
+    this.matchedButNoProgrammesDeclared = 0,
+    this.matchedButNoProgrammesOutsideWindow = 0,
     this.none = 0,
   });
 
@@ -588,6 +603,8 @@ class IptvEpgMatchTiers {
         noTvgId = 0,
         tvgIdNotInFeed = 0,
         matchedButNoProgrammes = 0,
+        matchedButNoProgrammesDeclared = 0,
+        matchedButNoProgrammesOutsideWindow = 0,
         none = 0;
 
   /// Channels that got a guide, by any tier.
@@ -619,10 +636,42 @@ class IptvEpgUnmatchedSample {
   final String? epgChannelId;
   final String? tvgId;
 
+  /// 1.2.8 F7: the blocked reason for this row ('ambiguous',
+  /// 'foreign', 'no-tvg-id', 'tvg-id-not-in-feed',
+  /// 'matched-but-no-programmes-declared',
+  /// 'matched-but-no-programmes-outside-window', 'no-feed') — the
+  /// dialog renders it next to the name.
+  final String reason;
+
   const IptvEpgUnmatchedSample({
     required this.channelName,
     this.epgChannelId,
     this.tvgId,
+    required this.reason,
+  });
+}
+
+/// One feed candidate behind a foreign block (1.2.8 F9): the feed id
+/// and the countries its id suffix / display-name tags name.
+class IptvEpgForeignCandidate {
+  final String xmltvId;
+  final List<String> countries;
+
+  const IptvEpgForeignCandidate({required this.xmltvId, this.countries = const []});
+}
+
+/// One foreign-blocked channel, for the Reload report's foreign
+/// diagnostic (1.2.8 F9): the playlist name, the country the playlist
+/// name claims, and the feed candidates the country gate refused.
+class IptvEpgForeignSample {
+  final String channelName;
+  final String? playlistCountry;
+  final List<IptvEpgForeignCandidate> candidates;
+
+  const IptvEpgForeignSample({
+    required this.channelName,
+    this.playlistCountry,
+    this.candidates = const [],
   });
 }
 
@@ -647,6 +696,24 @@ class IptvReloadTvDetailsResult {
   /// the name tier is doing all the work. Null when the channel list
   /// was not re-fetched.
   final int? epgChannelIdCount;
+
+  /// 1.2.8 F3: matches over ALL channels including hidden ones (the
+  /// visible counts above are the filtered list). Null when the
+  /// channel list was not re-fetched.
+  final int? withGuideAllChannels;
+  final int? channelsLoadedAll;
+
+  /// 1.2.8 F2: the nearest retained programme start to now across
+  /// the outside-window rows (null when no row is outside-window) —
+  /// how far out the feed's schedule runs.
+  final DateTime? nearestOutsideWindowProgramme;
+
+  /// 1.2.8 F9: the first 5 foreign-blocked rows with their refused
+  /// candidates, and the total count of refused candidates whose
+  /// countries are all language-only codes (an "EN:"-tagged feed
+  /// standing in for a US channel).
+  final List<IptvEpgForeignSample> foreignSamples;
+  final int foreignLanguageTaggedCandidateCount;
 
   /// Why the channel-list re-fetch failed, when it did (1.2.3 RC1).
   /// Null when the list loaded. The report dialog names this instead of
@@ -675,6 +742,11 @@ class IptvReloadTvDetailsResult {
     this.feedSamples = const [],
     this.sampleUnmatched = const [],
     this.epgChannelIdCount,
+    this.withGuideAllChannels,
+    this.channelsLoadedAll,
+    this.nearestOutsideWindowProgramme,
+    this.foreignSamples = const [],
+    this.foreignLanguageTaggedCandidateCount = 0,
   });
 }
 
@@ -687,6 +759,13 @@ class IptvEpgUpdateNowResult {
 
   const IptvEpgUpdateNowResult({required this.feedOutcomes});
 }
+
+/// Which source served a channel's EPG (build #17, §10) — the split the
+/// guide coverage diagnostic reports. `unknown` is for entries read from
+/// disk files written before this build recorded the source.
+/// (Moved here from iptv_live_tv.dart in 1.2.8: the EPG detail and the
+/// Reload result in this file need the type without an import cycle.)
+enum IptvEpgSource { feedById, feedByName, shortEpg, none, unknown }
 
 /// How one EPG source's feed ended up during a Reload / Update-now
 /// attempt (PlezTV 1.2.3) — so the report dialog can name the feed

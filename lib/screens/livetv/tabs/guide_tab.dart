@@ -2370,6 +2370,11 @@ class GuideTabState extends State<GuideTab>
       isSelected: (focus) =>
           focus.hasFocus && focus.zone == _GuideZone.grid && focus.gridColumn == 0 && focus.channelIndex == index,
       builder: (context, isFocused) {
+        // 1.2.8 F8: the guide row names the source that served it —
+        // short-EPG lookup or feed match — so a row's programmes can
+        // be told apart by origin. Null support (Plex/Jellyfin) has
+        // no chip.
+        final epgSource = _iptvSupportFor(channel)?.epgSourceForChannel(channel.key);
         return _ChannelCell(
           rowHeight: _rowHeight,
           channelColumnWidth: _channelColumnWidth,
@@ -2387,6 +2392,7 @@ class GuideTabState extends State<GuideTab>
           isFocused: isFocused,
           isFavorite: widget.isFavoriteChannel?.call(channel) ?? false,
           showCatchUpBadge: widget.showCatchUpBadge,
+          epgSource: epgSource,
           fallbackBuilder: () => _buildChannelNameFallback(channel, theme),
         );
       },
@@ -2792,6 +2798,11 @@ class _ChannelCell extends StatefulWidget {
   final bool isFocused;
   final bool isFavorite;
   final bool showCatchUpBadge;
+
+  /// Which source served this channel's programmes (1.2.8 F8): the
+  /// row shows a small chip for a short-EPG or feed source, and no
+  /// chip when the source is unknown / none / a non-IPTV row.
+  final IptvEpgSource? epgSource;
   final Widget Function() fallbackBuilder;
 
   const _ChannelCell({
@@ -2806,6 +2817,7 @@ class _ChannelCell extends StatefulWidget {
     required this.isFocused,
     this.isFavorite = false,
     this.showCatchUpBadge = true,
+    this.epgSource,
     required this.fallbackBuilder,
   });
 
@@ -2888,6 +2900,33 @@ class _ChannelCellState extends State<_ChannelCell> {
                             Symbols.history_rounded,
                             size: 14,
                             color: widget.isFocused ? theme.colorScheme.onPrimary : theme.colorScheme.primary,
+                          ),
+                        ),
+                      // Guide source chip (1.2.8 F8, bottom-right): which
+                      // source served this row — short-EPG lookup or the
+                      // downloaded feed — so a row's programmes can be
+                      // told apart by origin. No chip while unfetched.
+                      if (widget.epgSource == IptvEpgSource.shortEpg ||
+                          widget.epgSource == IptvEpgSource.feedById ||
+                          widget.epgSource == IptvEpgSource.feedByName)
+                        Positioned(
+                          bottom: 2,
+                          right: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              widget.epgSource == IptvEpgSource.shortEpg
+                                  ? t.iptv.epgSourceShort
+                                  : t.iptv.epgSourceFeed,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                fontSize: 10,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
                           ),
                         ),
                     ],

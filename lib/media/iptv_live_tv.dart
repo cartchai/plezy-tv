@@ -27,11 +27,6 @@ import '../utils/app_logger.dart';
 import '../utils/media_server_http_client.dart' show AbortController;
 import 'iptv_client.dart';
 
-/// Which source served a channel's EPG (build #17, §10) — the split the
-/// guide coverage diagnostic reports. `unknown` is for entries read from
-/// disk files written before this build recorded the source.
-enum IptvEpgSource { feedById, feedByName, shortEpg, none, unknown }
-
 /// The XMLTV feed download was deferred by the playback gate (build #28,
 /// 1.1.2 D1b): no feed exists yet and a stream is playing. This is NOT a
 /// failure and NOT a genuine empty — the fetch returns empty without
@@ -466,8 +461,19 @@ List<String> _epgNameWords(String name, {required bool loose}) {
       .split(RegExp(r'[^0-9a-z]+'))
       .where((w) => w.isNotEmpty && !_epgNameMarkers.contains(w))
       .toList(growable: false);
-  if (!loose) return words;
-  return words.map((w) => _epgLooseWordForms[w] ?? w).toList(growable: false);
+  // 1.2.8 F4: zero-padded numbers fold (beIN SPORT 01/02): an
+  // all-digit word with a leading zero loses the zeros, so "01" meets
+  // "1" and "007" meets "7". "101" has no leading zero and "0"/"00"
+  // stay "0". Applies to both keys (strict and loose).
+  final folded = words.map((w) {
+    if (w.length > 1 && w.startsWith('0') && w.codeUnits.every((c) => c >= 0x30 && c <= 0x39)) {
+      final stripped = w.replaceFirst(RegExp(r'^0+'), '');
+      return stripped.isEmpty ? '0' : stripped;
+    }
+    return w;
+  }).toList(growable: false);
+  if (!loose) return folded;
+  return folded.map((w) => _epgLooseWordForms[w] ?? w).toList(growable: false);
 }
 
 /// Reduce a channel name to the key two sources can be compared on
@@ -1566,10 +1572,9 @@ class IptvLiveTvSupport implements LiveTvSupport {
   /// local details probe, and the without-guide computation): a manual
   /// assignment for this source first, then the tvg-id (exact,
   /// case-insensitive, numeric), then the normalized name against the
-  /// feed's display names and ids, then — only when an earlier tier
-  /// identified a feed id that brought no in-window programmes — the
-  /// loose name. Never null: a non-match names its reason, so the
-  /// diagnostics can say why instead of only counting.
+  /// feed's display names and ids, then — whenever the channel's country
+  /// is known — the loose name. Never null: a non-match names its
+  /// reason, so the diagnostics can say why instead of only counting.
   _GuideResolution _matchInGuide(
     _CachedXmltvGuide guide,
     String channelKey,
@@ -1697,6 +1702,41 @@ class IptvLiveTvSupport implements LiveTvSupport {
             final plain = pick.where((id) => !_epgHasTimeshift(id, guide.displayNames[id] ?? const <String>[])).toSet();
             if (plain.length == 1) pick = plain;
           }
+          // 1.2.8 F6: the name still names more than one feed channel.
+          // F6A — display-name-exact preference: when exactly one
+          // candidate has a display name normalizing exactly to the
+          // playlist key ("FOX" for "US - FOX HD"), that candidate is
+          // the channel; "FOX Channel" is a different name.
+          // F6B — same-channel duplicate collapse: when every
+          // candidate's display names are one channel's ("CNN" under
+          // CNN.us and CNN.us2) AND exactly one candidate has
+          // programmes in the window, that candidate is the live feed
+          // — the other copy's programmes are all outside the window.
+          // Several in-window holders stay ambiguous: two live feeds
+          // both claiming the name is a guess, and the 1.2.5
+          // uniqueness gate (cnn-a/cnn-b) must keep holding.
+          if (pick.length > 1) {
+            final exact = pick.where((id) {
+              final names = guide.displayNames[id] ?? const <String>[];
+              return names.any((n) => normalizeEpgChannelName(n) == key);
+            }).toList(growable: false);
+            if (exact.length == 1) {
+              pick = {exact.single};
+            } else {
+              final allNames = <String>[];
+              for (final id in pick) {
+                allNames.addAll(guide.displayNames[id] ?? const <String>[]);
+              }
+              if (allNames.isNotEmpty && epgDisplayNamesAreOneChannel(allNames)) {
+                final inWindow = pick.where((id) {
+                  final programs = mapPrograms(guide.byChannel[id] ?? const []);
+                  return programs.isNotEmpty;
+                }).toList(growable: false)
+                  ..sort();
+                if (inWindow.length == 1) pick = {inWindow.single};
+              }
+            }
+          }
           if (pick.length == 1) {
             final feedId = pick.single;
             final programs = mapPrograms(guide.byChannel[feedId] ?? const []);
@@ -1709,43 +1749,63 @@ class IptvLiveTvSupport implements LiveTvSupport {
         }
       }
       // 6. Loose-name fallback for a split feed id (Fix 6, the TNT
-      // case): only when an earlier tier identified a feed id that
-      // brought nothing, and only when the channel's country is
+      // case): 1.2.8 F5 — it runs whenever the channel's country is
       // known (from the playlist name, or from the identified id's
-      // `.xx` suffix) — the loose key is too weak to cross countries
-      // on its own. The loose key strips tier tags ("NOW:", "VIP:")
-      // and reads "sports" as "sport", so a feed split into
+      // `.xx` suffix as a fallback), not only when an earlier tier
+      // identified a feed id. A no-id channel with a known country
+      // ("US - FOX SPORTS 1 HD") can now find its split copy ("Fox
+      // Sport 1"). The loose key is too weak to cross countries on
+      // its own. The loose key strips tier tags ("NOW:", "VIP:") and
+      // reads "sports" as "sport", so a feed split into
       // "UK: TNT SPORTS 1" and "NOW: TNT SPORT 1" is found by the
-      // copy that is actually in the window.
-      if (identifiedButEmpty.isNotEmpty) {
-        final looseKey = looseEpgChannelNameKey(channelName);
-        final country = epgChannelCountry(channelName) ?? epgFeedIdCountry(identifiedButEmpty.first);
-        if (looseKey.isNotEmpty && country != null) {
-          var looseCandidates = guide.looseCandidatesFor(looseKey);
-          looseCandidates.removeAll(identifiedButEmpty);
-          looseCandidates = looseCandidates.where((id) {
-            final countries = epgFeedChannelCountries(id, guide.displayNames[id] ?? const <String>[]);
-            return countries.contains(country);
-          }).toSet();
-          final serving = looseCandidates.where((id) => guide.byChannel.containsKey(id)).toSet();
-          if (serving.isNotEmpty) {
-            var pick = serving;
-            if (pick.length > 1) {
-              final plain = pick.where((id) => !_epgHasTimeshift(id, guide.displayNames[id] ?? const <String>[])).toSet();
-              if (plain.length == 1) pick = plain;
-            }
-            if (pick.length == 1) {
-              final feedId = pick.single;
-              final programs = mapPrograms(guide.byChannel[feedId] ?? const []);
-              if (programs.isNotEmpty) return matched(programs, feedId, 'name-loose');
-            }
+      // copy that is actually in the window. The country filter
+      // matches the name tier's: a feed id with no country of its own
+      // is not filtered out (a country-free feed twin still counts).
+      final looseKey = looseEpgChannelNameKey(channelName);
+      final looseCountry =
+          epgChannelCountry(channelName) ??
+          (identifiedButEmpty.isNotEmpty ? epgFeedIdCountry(identifiedButEmpty.first) : null);
+      if (looseKey.isNotEmpty && looseCountry != null) {
+        var looseCandidates = guide.looseCandidatesFor(looseKey);
+        looseCandidates.removeAll(identifiedButEmpty);
+        looseCandidates = looseCandidates.where((id) {
+          final countries = epgFeedChannelCountries(id, guide.displayNames[id] ?? const <String>[]);
+          return countries.isEmpty || countries.contains(looseCountry);
+        }).toSet();
+        final serving = looseCandidates.where((id) => guide.byChannel.containsKey(id)).toSet();
+        if (serving.isNotEmpty) {
+          var pick = serving;
+          if (pick.length > 1) {
+            final plain = pick.where((id) => !_epgHasTimeshift(id, guide.displayNames[id] ?? const <String>[])).toSet();
+            if (plain.length == 1) pick = plain;
+          }
+          if (pick.length == 1) {
+            final feedId = pick.single;
+            final programs = mapPrograms(guide.byChannel[feedId] ?? const []);
+            if (programs.isNotEmpty) return matched(programs, feedId, 'name-loose');
           }
         }
       }
     }
     if (identifiedButEmpty.isNotEmpty) {
       final sorted = identifiedButEmpty.toList(growable: false)..sort();
-      return blocked('matched-but-no-programmes', sorted);
+      // 1.2.8 F2: split "matched but no programmes" — the feed
+      // declaring the id with zero programmes ("declared") vs
+      // programmes that exist but all fall outside the Reload window
+      // ("outside-window"). The kind is "outside-window" when ANY
+      // identified id has retained programmes; else "declared".
+      // (The overview/details keep the single matchedButNoPrograms
+      // reason — the split lives in the Reload tiers and dialog.)
+      final anyProgrammes = sorted.any((id) {
+        final rows = guide.byChannel[id];
+        return rows != null && rows.isNotEmpty;
+      });
+      return blocked(
+        anyProgrammes
+            ? 'matched-but-no-programmes-outside-window'
+            : 'matched-but-no-programmes-declared',
+        sorted,
+      );
     }
     if (epgChannelId != null || tvgId != null) return blocked('tvg-id-not-in-feed');
     return blocked('no-tvg-id');
@@ -2833,6 +2893,13 @@ class IptvLiveTvSupport implements LiveTvSupport {
     return mappings[channelKey];
   }
 
+  /// Which source served [channelKey]'s cached programmes (1.2.8 F8):
+  /// the guide row's source chip reads this. `unknown` when the
+  /// channel was never fetched (or its entry predates source
+  /// recording) — an unfetched channel is `unknown`, not "no source".
+  IptvEpgSource epgSourceForChannel(String channelKey) =>
+      _epgCache[channelKey]?.source ?? IptvEpgSource.unknown;
+
   /// One channel's EPG assignment state (§3.2, the "see my assigned EPG"
   /// view): which source serves it, which XMLTV id matched, how it
   /// matched, programmes in the requested window, when it was fetched
@@ -2859,6 +2926,8 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceName: await _sourceName(cached.sourceId),
         matchedXmltvId: cached.matchedXmltvId,
         matchMethod: cached.matchMethod,
+        // 1.2.8 F8: the cached entry knows which source served it.
+        epgSource: cached.source,
         programCount: slice.length,
         lastFetch: cached.fetchedAt,
         nextFetch: ttl == null ? null : cached.fetchedAt.add(ttl),
@@ -2873,7 +2942,11 @@ class IptvLiveTvSupport implements LiveTvSupport {
     final perChannelReason = switch (probe.resolution.blockedReason) {
       'ambiguous' => IptvEpgNoGuideReason.ambiguous,
       'foreign' => IptvEpgNoGuideReason.foreign,
-      'matched-but-no-programmes' => IptvEpgNoGuideReason.matchedButNoPrograms,
+      // 1.2.8 F2: the split codes map back to the single overview
+      // reason — the split lives in the Reload tiers and dialog.
+      'matched-but-no-programmes' ||
+      'matched-but-no-programmes-declared' ||
+      'matched-but-no-programmes-outside-window' => IptvEpgNoGuideReason.matchedButNoPrograms,
       'no-tvg-id' || 'tvg-id-not-in-feed' => IptvEpgNoGuideReason.noMatch,
       _ => null,
     };
@@ -2917,6 +2990,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
         sourceName: entry.attempt.config.name,
         matchedXmltvId: resolution.matchedXmltvId,
         matchMethod: resolution.matchMethod,
+        // 1.2.8 F8: the probe matched through a feed — a name match
+        // was served by the feed's name index, an id/manual match by
+        // the feed id.
+        epgSource: switch (resolution.matchMethod) {
+          'name' || 'name-loose' => IptvEpgSource.feedByName,
+          'tvg-id' || 'manual' => IptvEpgSource.feedById,
+          _ => IptvEpgSource.unknown,
+        },
         programCount: resolution.programs.length,
       ),
       resolution: resolution,
@@ -3041,7 +3122,14 @@ class IptvLiveTvSupport implements LiveTvSupport {
       final (perChannelReason, candidates) = switch (resolution.blockedReason) {
         'ambiguous' => (IptvEpgNoGuideReason.ambiguous, resolution.blockedCandidates),
         'foreign' => (IptvEpgNoGuideReason.foreign, resolution.blockedCandidates),
-        'matched-but-no-programmes' => (IptvEpgNoGuideReason.matchedButNoPrograms, resolution.blockedCandidates),
+        // 1.2.8 F2: the split codes map back to the single overview
+        // reason — the split lives in the Reload tiers and dialog.
+        'matched-but-no-programmes' ||
+        'matched-but-no-programmes-declared' ||
+        'matched-but-no-programmes-outside-window' => (
+          IptvEpgNoGuideReason.matchedButNoPrograms,
+          resolution.blockedCandidates,
+        ),
         'no-tvg-id' || 'tvg-id-not-in-feed' => (IptvEpgNoGuideReason.noMatch, const <String>[]),
         _ => (reason, const <String>[]),
       };
@@ -3230,10 +3318,22 @@ class IptvLiveTvSupport implements LiveTvSupport {
     var noTvgIdCount = 0;
     var tvgIdNotInFeedCount = 0;
     var matchedButNoProgrammesCount = 0;
+    // 1.2.8 F2: the split of the matched-but-no-programmes bucket.
+    var matchedButNoProgrammesDeclaredCount = 0;
+    var matchedButNoProgrammesOutsideWindowCount = 0;
     var noFeedCount = 0;
-    final sampleUnmatched = <IptvEpgUnmatchedSample>[];
     var epgChannelIdCount = 0;
-    for (final channel in channels) {
+    // 1.2.8 F7: every unmatched row in channel order — stratified
+    // into the 5-row sample after the loop.
+    final unmatchedRows = <({int index, IptvEpgUnmatchedSample sample})>[];
+    // 1.2.8 F9: the foreign-bucket diagnostic.
+    final foreignSamples = <IptvEpgForeignSample>[];
+    var foreignLanguageTaggedCandidateCount = 0;
+    // 1.2.8 F2: the nearest retained programme start to now across
+    // the outside-window rows.
+    DateTime? nearestOutsideWindowProgramme;
+    for (var i = 0; i < channels.length; i++) {
+      final channel = channels[i];
       if ((_client.epgChannelIdForChannelKey(channel.key) ?? '').isNotEmpty) epgChannelIdCount++;
       final resolution = _resolveChannelAcrossFeeds(channel.key, outcome.loaded, mappings, settings, from, to);
       if (resolution.matchedXmltvId != null) {
@@ -3249,30 +3349,105 @@ class IptvLiveTvSupport implements LiveTvSupport {
             tvgIdMatches++;
         }
       } else {
-        switch (resolution.blockedReason) {
+        final blockedReason = resolution.blockedReason ?? 'no-feed';
+        switch (blockedReason) {
           case 'ambiguous':
             ambiguousCount++;
           case 'foreign':
             foreignCount++;
+            // 1.2.8 F9: record the refused candidates with their
+            // countries (first loaded feed's guide — the resolution
+            // came from it) and count the language-tagged ones.
+            if (outcome.loaded.isNotEmpty) {
+              final firstGuide = outcome.loaded.first.guide;
+              final candidates = resolution.blockedCandidates.map((id) {
+                final countries = epgFeedChannelCountries(id, firstGuide.displayNames[id] ?? const <String>[]);
+                return IptvEpgForeignCandidate(
+                  xmltvId: id,
+                  countries: countries.toList(growable: false)..sort(),
+                );
+              }).toList(growable: false);
+              for (final candidate in candidates) {
+                if (candidate.countries.isNotEmpty &&
+                    candidate.countries.every(_epgLanguageOnlyCodes.contains)) {
+                  foreignLanguageTaggedCandidateCount++;
+                }
+              }
+              if (foreignSamples.length < 5) {
+                foreignSamples.add(
+                  IptvEpgForeignSample(
+                    channelName: channel.title ?? channel.key,
+                    playlistCountry: epgChannelCountry(channel.title ?? channel.key),
+                    candidates: candidates,
+                  ),
+                );
+              }
+            }
           case 'no-tvg-id':
             noTvgIdCount++;
           case 'tvg-id-not-in-feed':
             tvgIdNotInFeedCount++;
           case 'matched-but-no-programmes':
+          case 'matched-but-no-programmes-declared':
             matchedButNoProgrammesCount++;
+            matchedButNoProgrammesDeclaredCount++;
+          case 'matched-but-no-programmes-outside-window':
+            matchedButNoProgrammesCount++;
+            matchedButNoProgrammesOutsideWindowCount++;
+            // 1.2.8 F2: the nearest retained start to now across this
+            // row's identified ids (first loaded feed's guide).
+            if (outcome.loaded.isNotEmpty) {
+              final firstGuide = outcome.loaded.first.guide;
+              for (final id in resolution.blockedCandidates) {
+                for (final program in firstGuide.byChannel[id] ?? const []) {
+                  final start = DateTime.fromMillisecondsSinceEpoch(program.startEpoch * 1000, isUtc: true);
+                  if (nearestOutsideWindowProgramme == null ||
+                      start.difference(now).abs() < nearestOutsideWindowProgramme.difference(now).abs()) {
+                    nearestOutsideWindowProgramme = start;
+                  }
+                }
+              }
+            }
           default:
             noFeedCount++;
         }
-        if (sampleUnmatched.length < 5) {
-          sampleUnmatched.add(
-            IptvEpgUnmatchedSample(
-              channelName: channel.title ?? channel.key,
-              epgChannelId: _client.epgChannelIdForChannelKey(channel.key),
-              tvgId: _client.tvgIdForChannelKey(channel.key),
-            ),
-          );
-        }
+        unmatchedRows.add((
+          index: i,
+          sample: IptvEpgUnmatchedSample(
+            channelName: channel.title ?? channel.key,
+            epgChannelId: _client.epgChannelIdForChannelKey(channel.key),
+            tvgId: _client.tvgIdForChannelKey(channel.key),
+            reason: blockedReason,
+          ),
+        ));
       }
+    }
+    // 1.2.8 F7: stratified sample — first row per reason in order of
+    // first appearance, then fill to 5 in channel order; the final
+    // sample is in channel order.
+    final pickedUnmatched = <({int index, IptvEpgUnmatchedSample sample})>[];
+    final seenUnmatchedReasons = <String>{};
+    for (final row in unmatchedRows) {
+      if (seenUnmatchedReasons.add(row.sample.reason)) pickedUnmatched.add(row);
+    }
+    for (final row in unmatchedRows) {
+      if (pickedUnmatched.length >= 5) break;
+      if (!pickedUnmatched.contains(row)) pickedUnmatched.add(row);
+    }
+    pickedUnmatched.sort((a, b) => a.index.compareTo(b.index));
+    final sampleUnmatched = pickedUnmatched.map((r) => r.sample).toList(growable: false);
+    // 1.2.8 F3: the same resolution over ALL channels including
+    // hidden ones (the refresh captured the full list). Null when the
+    // list failed to load.
+    final allChannels = channelListError == null ? _client.fullLiveChannelsFromLastRefresh : null;
+    int? withGuideAllChannels;
+    if (allChannels != null) {
+      var count = 0;
+      for (final channel in allChannels) {
+        final resolution = _resolveChannelAcrossFeeds(channel.key, outcome.loaded, mappings, settings, from, to);
+        if (resolution.matchedXmltvId != null) count++;
+      }
+      withGuideAllChannels = count;
     }
     final feedChannelIds = outcome.loaded.expand((e) => e.guide.byChannel.keys).toSet().length;
     // Feed sample: the first loaded feed's first 5 ids, sorted, with
@@ -3305,6 +3480,12 @@ class IptvLiveTvSupport implements LiveTvSupport {
       'no match: ambiguous $ambiguousCount, foreign $foreignCount, no-tvg-id $noTvgIdCount, '
       'tvg-id-not-in-feed $tvgIdNotInFeedCount, matched-but-no-programmes $matchedButNoProgrammesCount, '
       'no-feed $noFeedCount); $epgChannelIdCount carry epg_channel_id; '
+      'matched-but-no-programmes split: declared $matchedButNoProgrammesDeclaredCount, '
+      'outside-window $matchedButNoProgrammesOutsideWindowCount'
+      '${nearestOutsideWindowProgramme == null ? '' : ', nearest outside-window programme $nearestOutsideWindowProgramme'}; '
+      '${allChannels == null ? 'all-channels counts unavailable' : 'all channels (incl. hidden): $withGuideAllChannels with guide of ${allChannels.length}'}; '
+      'foreign samples: ${foreignSamples.map((e) => e.channelName).join(', ')} '
+      '($foreignLanguageTaggedCandidateCount language-tagged candidates); '
       'feeds: $feedSummary; '
       'feed sample: ${feedSamples.map((e) => e.xmltvId).join(', ')}; '
       'unmatched sample: ${sampleUnmatched.map((e) => e.channelName).join(', ')}',
@@ -3336,11 +3517,18 @@ class IptvLiveTvSupport implements LiveTvSupport {
         noTvgId: noTvgIdCount,
         tvgIdNotInFeed: tvgIdNotInFeedCount,
         matchedButNoProgrammes: matchedButNoProgrammesCount,
+        matchedButNoProgrammesDeclared: matchedButNoProgrammesDeclaredCount,
+        matchedButNoProgrammesOutsideWindow: matchedButNoProgrammesOutsideWindowCount,
         none: noFeedCount,
       ),
       feedSamples: feedSamples,
       sampleUnmatched: sampleUnmatched,
       epgChannelIdCount: epgChannelIdCount,
+      withGuideAllChannels: withGuideAllChannels,
+      channelsLoadedAll: allChannels?.length,
+      nearestOutsideWindowProgramme: nearestOutsideWindowProgramme,
+      foreignSamples: foreignSamples,
+      foreignLanguageTaggedCandidateCount: foreignLanguageTaggedCandidateCount,
     );
   }
 

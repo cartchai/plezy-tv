@@ -62,7 +62,9 @@ List<M3uEntry> parseM3u(String text) {
       M3uEntry(
         name: name,
         url: line,
-        tvgId: pendingAttrs?['tvg-id'],
+        // 1.2.8 F1 (same rule as Xtream epg_channel_id): an empty
+        // tvg-id="" is absent, not an id.
+        tvgId: switch (pendingAttrs?['tvg-id']) { final s? when s.isNotEmpty => s, _ => null },
         tvgLogo: pendingAttrs?['tvg-logo'],
         groupTitle: pendingAttrs?['group-title'],
         catchupSource: pendingAttrs?['catchup-source'],

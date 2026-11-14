@@ -282,6 +282,22 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
     }
   }
 
+  /// The label for one unmatched sample row's blocked reason (1.2.8
+  /// F7): the same wording the EPG details view uses, plus the two
+  /// split reasons the overview collapses into one.
+  String _unmatchedReasonLabel(String reason) {
+    return switch (reason) {
+      'ambiguous' => t.iptv.epgNoGuideReasonAmbiguous,
+      'foreign' => t.iptv.epgNoGuideReasonForeign,
+      'matched-but-no-programmes' => t.iptv.epgNoGuideReasonMatchedButNoPrograms,
+      'matched-but-no-programmes-declared' => t.iptv.epgNoGuideReasonMatchedButNoProgramsDeclared,
+      'matched-but-no-programmes-outside-window' => t.iptv.epgNoGuideReasonMatchedButNoProgramsOutsideWindow,
+      'no-tvg-id' => t.iptv.epgNoGuideReasonNoTvgId,
+      'tvg-id-not-in-feed' => t.iptv.epgNoGuideReasonTvgIdNotInFeed,
+      _ => t.iptv.epgNoGuideReasonNotLoaded,
+    };
+  }
+
   Future<void> _reloadTvDetails() async {
     final support = _boundSupport();
     if (support == null || _reloading) return;
@@ -351,6 +367,22 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
             matchedButNoProgrammes: tiers.matchedButNoProgrammes,
           ),
         );
+        // 1.2.8 F2: the matched-but-no-programmes split — declared
+        // with nothing scheduled vs programmes outside the window.
+        if (tiers.matchedButNoProgrammes > 0) {
+          lines.add(
+            t.iptv.epgReloadNoProgrammesSplit(
+              declared: tiers.matchedButNoProgrammesDeclared,
+              outsideWindow: tiers.matchedButNoProgrammesOutsideWindow,
+            ),
+          );
+        }
+      }
+      // 1.2.8 F3: matches over ALL channels including hidden ones.
+      if (result.channelsLoadedAll != null && result.withGuideAllChannels != null) {
+        lines.add(
+          t.iptv.epgReloadAllChannels(withGuide: result.withGuideAllChannels!, total: result.channelsLoadedAll!),
+        );
       }
       for (final outcome in result.feedOutcomes) {
         if (outcome.feedProgramsParsed == null) continue;
@@ -358,6 +390,9 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
           t.iptv.epgReloadFeedStats(
             source: outcome.sourceName,
             channels: outcome.feedChannelsParsed ?? 0,
+            // 1.2.8 F3: how many feed channels actually carry
+            // programmes, next to the declared count.
+            withProgrammes: outcome.feedChannels,
             parsed: outcome.feedProgramsParsed ?? 0,
             retained: outcome.feedProgramsRetained ?? 0,
           ),
@@ -373,8 +408,16 @@ class _IptvEpgSourcesScreenState extends State<IptvEpgSourcesScreen> {
         );
       }
       if (result.sampleUnmatched.isNotEmpty) {
+        // 1.2.8 F7: each sample row names its reason and the id the
+        // matcher tried (epg_channel_id, else tvg-id, else nothing).
         lines.add(
-          t.iptv.epgReloadUnmatchedSample(samples: result.sampleUnmatched.map((e) => e.channelName).join(', ')),
+          t.iptv.epgReloadUnmatchedSample(
+            samples: result.sampleUnmatched.map((e) {
+              final id = e.epgChannelId ?? e.tvgId ?? '';
+              final reason = _unmatchedReasonLabel(e.reason);
+              return id.isEmpty ? '${e.channelName} — $reason' : '${e.channelName} — $reason — $id';
+            }).join(', '),
+          ),
         );
       }
       if (result.epgChannelIdCount != null) {

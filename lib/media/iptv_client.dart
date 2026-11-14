@@ -1656,6 +1656,17 @@ class IptvClient implements MediaServerClient {
   final Map<String, XtreamLiveStream> _xtreamChannelByKey = {};
   final Map<String, M3uEntry> _m3uChannelByKey = {};
 
+  /// The FULL live-channel list (including hidden categories/groups)
+  /// from the last [refreshLiveChannelsFromNetwork] — 1.2.8 F3. The
+  /// published list ([iptvChannels]) and the disk file / live memo hold
+  /// visible rows only (the 1.2.7 Low-RAM invariant); Reload needs the
+  /// unfiltered list so its match counts can cover hidden channels too.
+  /// Set only by a refresh (Reload); null before the first refresh or
+  /// when the refresh failed. Retains the hidden rows (~10MB at Trex
+  /// scale) until the next refresh — a deliberate, documented cost of
+  /// the Reload report, not of normal browsing.
+  List<LiveTvChannel>? fullLiveChannelsFromLastRefresh;
+
   static const String liveLibrarySuffix = 'live';
   static const String moviesLibrarySuffix = 'movies';
   static const String seriesLibrarySuffix = 'series';
@@ -5482,20 +5493,7 @@ class IptvClient implements MediaServerClient {
       for (final stream in streams) {
         if (_isHiddenCategory(stream.categoryId, liveCategoryNames[stream.categoryId])) continue;
         _xtreamChannelByKey['${stream.streamId}'] = stream;
-        channels.add(
-          LiveTvChannel(
-            key: '${stream.streamId}',
-            identifier: stream.epgChannelId,
-            title: stream.name,
-            thumb: stream.streamIcon,
-            serverId: connection.id,
-            serverName: _name,
-            // Visible catch-up badge in the guide (tv_archive = 1).
-            hasCatchUp: stream.tvArchive,
-            // Guide category picker (build #17): the Xtream category id.
-            categoryId: stream.categoryId,
-          ),
-        );
+        channels.add(_liveTvChannelForStream(stream));
       }
       if (wasFresh) {
         await _maybeRefreshEpgForPlaylistChange(
@@ -5513,19 +5511,7 @@ class IptvClient implements MediaServerClient {
       if (_isHiddenGroup(entry.groupTitle)) continue;
       final key = entry.tvgId ?? entry.url;
       _m3uChannelByKey[key] = entry;
-      channels.add(
-        LiveTvChannel(
-          key: key,
-          identifier: entry.tvgId,
-          title: entry.name,
-          thumb: entry.tvgLogo,
-          serverId: connection.id,
-          serverName: _name,
-          // Guide category picker (build #17): an M3U channel's
-          // category is its group title.
-          categoryId: entry.groupTitle,
-        ),
-      );
+      channels.add(_liveTvChannelForM3uEntry(entry, key));
     }
     if (wasFresh) {
       await _maybeRefreshEpgForPlaylistChange(
@@ -5558,6 +5544,37 @@ class IptvClient implements MediaServerClient {
     await store.saveChannelFingerprint(fingerprint);
   }
 
+  /// One [LiveTvChannel] for one raw Xtream row — shared by
+  /// [iptvChannels] and the F3 full-list capture, so the visible and
+  /// the full list are built identically.
+  LiveTvChannel _liveTvChannelForStream(XtreamLiveStream stream) => LiveTvChannel(
+    key: '${stream.streamId}',
+    identifier: stream.epgChannelId,
+    title: stream.name,
+    thumb: stream.streamIcon,
+    serverId: connection.id,
+    serverName: _name,
+    // Visible catch-up badge in the guide (tv_archive = 1).
+    hasCatchUp: stream.tvArchive,
+    // Guide category picker (build #17): the Xtream category id.
+    categoryId: stream.categoryId,
+  );
+
+  /// One [LiveTvChannel] for one M3U entry — shared by [iptvChannels]
+  /// and the F3 full-list capture. [key] is `tvg-id ?? url`, the same
+  /// key derivation [iptvChannels] uses.
+  LiveTvChannel _liveTvChannelForM3uEntry(M3uEntry entry, String key) => LiveTvChannel(
+    key: key,
+    identifier: entry.tvgId,
+    title: entry.name,
+    thumb: entry.tvgLogo,
+    serverId: connection.id,
+    serverName: _name,
+    // Guide category picker (build #17): an M3U channel's
+    // category is its group title.
+    categoryId: entry.groupTitle,
+  );
+
   /// Re-fetch the live channel list from the provider (PlezTV 1.2.0,
   /// §3.2 — Reload TV details): Xtream re-fetches get_live_streams and
   /// rewrites the disk catalog; M3U drops its playlist cache and
@@ -5567,6 +5584,8 @@ class IptvClient implements MediaServerClient {
   /// with the fresh rows, so the next fresh load does not re-trigger an
   /// update-on-playlist-change refresh for a change already handled.
   Future<List<LiveTvChannel>> refreshLiveChannelsFromNetwork() async {
+    // 1.2.8 F3: a failed refresh leaves no stale full list behind.
+    fullLiveChannelsFromLastRefresh = null;
     if (_isXtream) {
       _liveStreamsFuture = null;
       _liveCategoriesFuture = null;
@@ -5578,6 +5597,14 @@ class IptvClient implements MediaServerClient {
       // re-fills the live memo (FORK §45.8d).
       final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeLive);
       final rows = await _xtreamApi.getLiveStreams();
+      // 1.2.8 F3: capture the FULL list (hidden rows included) and
+      // resolve the key map for ALL rows, so Reload can count matches
+      // over hidden channels. The published memo / disk file below
+      // still hold visible rows only.
+      fullLiveChannelsFromLastRefresh = rows.map(_liveTvChannelForStream).toList(growable: false);
+      for (final row in rows) {
+        _xtreamChannelByKey['${row.streamId}'] = row;
+      }
       final visible = _visibleRows(rows, (r) => r.categoryId, filter);
       final rawBody = _xtreamApi.lastLiveStreamsBody;
       if (visible.isNotEmpty) {
@@ -5611,6 +5638,15 @@ class IptvClient implements MediaServerClient {
     } else {
       _m3uEntriesFuture = null;
       await _catalogCache.delete(connection.id, IptvCatalogDiskCache.m3uDataset);
+      // 1.2.8 F3: same full-list capture as Xtream above — the entries
+      // fetch re-downloads the playlist once; iptvChannels() below
+      // reuses the cached parse.
+      final entries = await _m3uEntries();
+      fullLiveChannelsFromLastRefresh = entries.map((entry) {
+        final key = entry.tvgId ?? entry.url;
+        _m3uChannelByKey[key] = entry;
+        return _liveTvChannelForM3uEntry(entry, key);
+      }).toList(growable: false);
     }
     final channels = await iptvChannels();
     notifyCatalogRefreshed(userInitiated: true);

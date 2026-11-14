@@ -935,7 +935,8 @@ class XtreamLiveStream {
       streamId: flexibleInt(json['stream_id']) ?? 0,
       name: flexibleString(json['name']) ?? '',
       streamIcon: flexibleString(json['stream_icon']),
-      epgChannelId: flexibleString(json['epg_channel_id']),
+      // 1.2.8 F1: an empty-string epg_channel_id is absent, not an id.
+      epgChannelId: flexibleNonEmptyString(json['epg_channel_id']),
       categoryId: json['category_id']?.toString(),
       tvArchive: flexibleInt(json['tv_archive']) == 1,
       tvArchiveDuration: archiveDurationSeconds(flexibleInt(json['tv_archive_duration']) ?? 0),

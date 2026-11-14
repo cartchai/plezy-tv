@@ -16,6 +16,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:plezy/connection/connection.dart';
 import 'package:plezy/connection/connection_registry.dart';
 import 'package:plezy/database/app_database.dart';
@@ -103,11 +104,19 @@ class _FakeXtreamApi extends XtreamApi {
       xmltvBody;
 }
 
-String _feedWith({required String channelId, required String title}) =>
-    '<?xml version="1.0" encoding="UTF-8"?><tv>'
-    '<channel id="$channelId"><display-name>$channelId</display-name></channel>'
-    '<programme start="20261113050000 +0000" stop="20261113060000 +0000" channel="$channelId">'
-    '<title>$title</title></programme></tv>';
+String _xmltvTime(DateTime dt) => '${DateFormat('yyyyMMddHHmmss').format(dt.toUtc())} +0000';
+
+String _feedWith({required String channelId, required String title}) {
+  // The programme sits in the probe window (now ± 1h): a fixed date
+  // expires as the days pass and the channel silently loses its guide
+  // (1.2.8: the Nov 13 date expired Nov 14 06:00 UTC, failing the
+  // without-guide test with no code change behind it).
+  final now = DateTime.now();
+  return '<?xml version="1.0" encoding="UTF-8"?><tv>'
+      '<channel id="$channelId"><display-name>$channelId</display-name></channel>'
+      '<programme start="${_xmltvTime(now.subtract(const Duration(hours: 1)))}" stop="${_xmltvTime(now.add(const Duration(hours: 1)))}" channel="$channelId">'
+      '<title>$title</title></programme></tv>';
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

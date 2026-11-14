@@ -61,9 +61,15 @@ String? flexibleString(Object? v) {
   return v.toString();
 }
 
-/// `@JsonKey(readValue:)` adapter — coerces the named field to a String via
-/// `toString()` before the generated cast. Use for required `String` fields
-/// that Plex may return as int in some endpoints.
+/// [flexibleString] with empty strings folded to null: an id field that
+/// arrives as "" means "no id", and every downstream null check must
+/// see it that way (PlezTV 1.2.8 F1 — the panel returns
+/// `epg_channel_id: ""` for ~20.7k channels, which used to read as a
+/// real id and land in "tvg-id not in feed").
+String? flexibleNonEmptyString(Object? v) {
+  final s = flexibleString(v);
+  return (s == null || s.isEmpty) ? null : s;
+}
 Object? readStringField(Map json, String key) => json[key]?.toString();
 
 /// Coerce a value that may be a single Map or a List of Maps into a `List<dynamic>`.

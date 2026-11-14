@@ -3932,6 +3932,13 @@ class Translations$about$en {
 		'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 		'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
 	];
+	List<String> get changelog2294 => [
+		'The guide matcher now recognises channels whose names use numbered parts like beIN SPORTS 01, and channels with no ID whose country is known',
+		'When a channel name still matches more than one guide channel, the app now picks the one whose name matches exactly, or the copy that actually has programmes showing now',
+		'Reload TV details now splits \'matched but no programmes\' into channels the feed declares but never schedules and channels whose programmes fall outside the loaded window, and counts matches across all channels including hidden ones',
+		'Each guide row now says whether its programmes came from the quick channel lookup or from the downloaded guide, and the EPG details view says the same',
+		'The unmatched sample in Reload TV details now shows one channel per reason instead of the first five in the list',
+	];
 	List<String> get changelog2293 => [
 		'Settings → IPTV has a Catalog mode: Low RAM (the default — only the categories you have turned on are stored) or Instant search (the whole catalog is stored, so search is instant — it uses more memory and a larger cache file)',
 		'Switching modes re-syncs the catalog so the lists, the saved cache and search all agree under the new mode',
@@ -7023,8 +7030,14 @@ class Translations$iptv$en {
 	/// en: '${withId} of ${total} live channels carry a non-empty epg_channel_id'
 	String epgReloadEpgChannelIds({required Object withId, required Object total}) => '${withId} of ${total} live channels carry a non-empty epg_channel_id';
 
-	/// en: '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept'
-	String epgReloadFeedStats({required Object source, required Object channels, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept';
+	/// en: '${source}: ${channels} feed channels (${withProgrammes} with programmes), ${parsed} programmes before the window filter, ${retained} kept'
+	String epgReloadFeedStats({required Object source, required Object channels, required Object withProgrammes, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels (${withProgrammes} with programmes), ${parsed} programmes before the window filter, ${retained} kept';
+
+	/// en: 'Matched but no programmes — feed declares the channel but schedules nothing: ${declared}; programmes exist outside the window: ${outsideWindow}'
+	String epgReloadNoProgrammesSplit({required Object declared, required Object outsideWindow}) => 'Matched but no programmes — feed declares the channel but schedules nothing: ${declared}; programmes exist outside the window: ${outsideWindow}';
+
+	/// en: 'All channels (including hidden): ${withGuide} with guide of ${total}'
+	String epgReloadAllChannels({required Object withGuide, required Object total}) => 'All channels (including hidden): ${withGuide} with guide of ${total}';
 
 	/// en: 'Channel list could not be re-fetched — ${reason}'
 	String epgReloadChannelListFailed({required Object reason}) => 'Channel list could not be re-fetched — ${reason}';
@@ -7095,6 +7108,12 @@ class Translations$iptv$en {
 	/// en: 'No matching guide'
 	String get epgNoGuideReasonNoMatch => 'No matching guide';
 
+	/// en: 'No channel ID'
+	String get epgNoGuideReasonNoTvgId => 'No channel ID';
+
+	/// en: 'Channel ID not in the guide'
+	String get epgNoGuideReasonTvgIdNotInFeed => 'Channel ID not in the guide';
+
 	/// en: 'Guide source failed'
 	String get epgNoGuideReasonSourceFailed => 'Guide source failed';
 
@@ -7109,6 +7128,18 @@ class Translations$iptv$en {
 
 	/// en: 'Matched a guide channel, but it has no programmes in this window'
 	String get epgNoGuideReasonMatchedButNoPrograms => 'Matched a guide channel, but it has no programmes in this window';
+
+	/// en: 'Matched a guide channel, but the feed schedules nothing for it'
+	String get epgNoGuideReasonMatchedButNoProgramsDeclared => 'Matched a guide channel, but the feed schedules nothing for it';
+
+	/// en: 'Matched a guide channel, but its programmes fall outside this window'
+	String get epgNoGuideReasonMatchedButNoProgramsOutsideWindow => 'Matched a guide channel, but its programmes fall outside this window';
+
+	/// en: 'Short EPG'
+	String get epgSourceShort => 'Short EPG';
+
+	/// en: 'Feed'
+	String get epgSourceFeed => 'Feed';
 
 	/// en: 'Candidates: ${candidates}'
 	String epgNoGuideCandidates({required Object candidates}) => 'Candidates: ${candidates}';
@@ -7130,6 +7161,9 @@ class Translations$iptv$en {
 
 	/// en: 'Guide source'
 	String get epgDetailsSource => 'Guide source';
+
+	/// en: 'Guide data from'
+	String get epgDetailsGuideSource => 'Guide data from';
 
 	/// en: 'Matched guide channel'
 	String get epgDetailsMatchedId => 'Matched guide channel';
@@ -10949,6 +10983,11 @@ extension on Translations {
 			'about.changelog2290.1' => 'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
 			'about.changelog2290.2' => 'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 			'about.changelog2290.3' => 'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
+			'about.changelog2294.0' => 'The guide matcher now recognises channels whose names use numbered parts like beIN SPORTS 01, and channels with no ID whose country is known',
+			'about.changelog2294.1' => 'When a channel name still matches more than one guide channel, the app now picks the one whose name matches exactly, or the copy that actually has programmes showing now',
+			'about.changelog2294.2' => 'Reload TV details now splits \'matched but no programmes\' into channels the feed declares but never schedules and channels whose programmes fall outside the loaded window, and counts matches across all channels including hidden ones',
+			'about.changelog2294.3' => 'Each guide row now says whether its programmes came from the quick channel lookup or from the downloaded guide, and the EPG details view says the same',
+			'about.changelog2294.4' => 'The unmatched sample in Reload TV details now shows one channel per reason instead of the first five in the list',
 			'about.changelog2293.0' => 'Settings → IPTV has a Catalog mode: Low RAM (the default — only the categories you have turned on are stored) or Instant search (the whole catalog is stored, so search is instant — it uses more memory and a larger cache file)',
 			'about.changelog2293.1' => 'Switching modes re-syncs the catalog so the lists, the saved cache and search all agree under the new mode',
 			'about.changelog2293.2' => 'The debug log export also withholds web addresses that appear inside a list of settings, not just on their own',
@@ -11015,13 +11054,13 @@ extension on Translations {
 			'navigation.explore' => 'Explore',
 			'explore.title' => 'Explore',
 			'explore.selectSource' => 'Select source',
+			_ => null,
+		} ?? switch (path) {
 			'explore.rows.watchlist' => 'Watchlist',
 			'explore.rows.recommendedMovies' => 'Recommended Movies',
 			'explore.rows.recommendedShows' => 'Recommended Shows',
 			'explore.rows.trendingMovies' => 'Trending Movies',
 			'explore.rows.trendingShows' => 'Trending Shows',
-			_ => null,
-		} ?? switch (path) {
 			'explore.rows.popularMovies' => 'Popular Movies',
 			'explore.rows.popularShows' => 'Popular Shows',
 			'explore.rows.trendingAnime' => 'Trending Anime',
@@ -11529,13 +11568,13 @@ extension on Translations {
 			'downloads.cancelledDownload' => 'Canceled download',
 			'downloads.syncingFile' => ({required Object file, required Object status}) => '${file} (syncing ${status})',
 			'downloads.downloadedFileClickToComplete' => ({required Object file}) => 'Downloaded ${file} - Click to complete',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.partialDownloadClickToComplete' => 'Partially downloaded - Click to complete',
 			'downloads.deleting' => 'Deleting...',
 			'downloads.deletingWithProgress' => ({required Object title, required Object current, required Object total}) => 'Deleting ${title}... (${current} of ${total})',
 			'downloads.queuedTooltip' => 'Queued',
 			'downloads.queuedFilesTooltip' => ({required Object files}) => 'Queued ${files}',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
@@ -12043,13 +12082,13 @@ extension on Translations {
 			'addServer.addM3uTitle' => 'Add M3U playlist',
 			'addServer.addXtreamTitle' => 'Add Xtream Codes',
 			'addServer.connectToM3uCard' => 'Connect to M3U',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.connectToM3uCardSubtitle' => 'Import a playlist URL.',
 			'addServer.connectToXtreamCard' => 'Connect to Xtream Codes',
 			'addServer.connectToXtreamCardSubtitle' => 'Enter your server URL, username, and password.',
 			'addServer.libraryName' => 'Library name',
 			'addServer.libraryNameHelper' => 'This name becomes the library\'s name.',
-			_ => null,
-		} ?? switch (path) {
 			'addServer.playlistUrl' => 'Playlist URL',
 			'addServer.epgUrl' => 'EPG URL (optional)',
 			'addServer.serverUrl' => 'Server URL',
@@ -12191,7 +12230,9 @@ extension on Translations {
 			'iptv.epgReloadFeedSample' => ({required Object samples}) => 'Feed sample: ${samples}',
 			'iptv.epgReloadUnmatchedSample' => ({required Object samples}) => 'Unmatched sample: ${samples}',
 			'iptv.epgReloadEpgChannelIds' => ({required Object withId, required Object total}) => '${withId} of ${total} live channels carry a non-empty epg_channel_id',
-			'iptv.epgReloadFeedStats' => ({required Object source, required Object channels, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels, ${parsed} programmes before the window filter, ${retained} kept',
+			'iptv.epgReloadFeedStats' => ({required Object source, required Object channels, required Object withProgrammes, required Object parsed, required Object retained}) => '${source}: ${channels} feed channels (${withProgrammes} with programmes), ${parsed} programmes before the window filter, ${retained} kept',
+			'iptv.epgReloadNoProgrammesSplit' => ({required Object declared, required Object outsideWindow}) => 'Matched but no programmes — feed declares the channel but schedules nothing: ${declared}; programmes exist outside the window: ${outsideWindow}',
+			'iptv.epgReloadAllChannels' => ({required Object withGuide, required Object total}) => 'All channels (including hidden): ${withGuide} with guide of ${total}',
 			'iptv.epgReloadChannelListFailed' => ({required Object reason}) => 'Channel list could not be re-fetched — ${reason}',
 			'iptv.epgReloadUnexpectedFailure' => ({required Object reason}) => 'Reload failed unexpectedly — ${reason}',
 			'iptv.epgFeedOutcomeLoaded' => ({required Object source, required Object matched, required Object channels}) => '${source}: loaded — ${matched} of ${channels} channels have guide data',
@@ -12215,11 +12256,17 @@ extension on Translations {
 			'iptv.epgNoGuideEmpty' => 'Every channel has guide data',
 			'iptv.epgNoGuideReasonNoSource' => 'No guide source',
 			'iptv.epgNoGuideReasonNoMatch' => 'No matching guide',
+			'iptv.epgNoGuideReasonNoTvgId' => 'No channel ID',
+			'iptv.epgNoGuideReasonTvgIdNotInFeed' => 'Channel ID not in the guide',
 			'iptv.epgNoGuideReasonSourceFailed' => 'Guide source failed',
 			'iptv.epgNoGuideReasonNotLoaded' => 'Guide not loaded yet',
 			'iptv.epgNoGuideReasonAmbiguous' => 'Name matches more than one guide channel',
 			'iptv.epgNoGuideReasonForeign' => 'Name matches only a guide channel from another country',
 			'iptv.epgNoGuideReasonMatchedButNoPrograms' => 'Matched a guide channel, but it has no programmes in this window',
+			'iptv.epgNoGuideReasonMatchedButNoProgramsDeclared' => 'Matched a guide channel, but the feed schedules nothing for it',
+			'iptv.epgNoGuideReasonMatchedButNoProgramsOutsideWindow' => 'Matched a guide channel, but its programmes fall outside this window',
+			'iptv.epgSourceShort' => 'Short EPG',
+			'iptv.epgSourceFeed' => 'Feed',
 			'iptv.epgNoGuideCandidates' => ({required Object candidates}) => 'Candidates: ${candidates}',
 			'iptv.epgAssignTitle' => 'Assign EPG',
 			'iptv.epgAssignSearchHint' => 'Search guide channels',
@@ -12227,6 +12274,7 @@ extension on Translations {
 			'iptv.epgClearAssignment' => 'Clear assignment',
 			'iptv.epgDetailsTitle' => 'EPG details',
 			'iptv.epgDetailsSource' => 'Guide source',
+			'iptv.epgDetailsGuideSource' => 'Guide data from',
 			'iptv.epgDetailsMatchedId' => 'Matched guide channel',
 			'iptv.epgDetailsMatchMethod' => 'Matched by',
 			'iptv.epgDetailsPrograms' => 'Programmes',
