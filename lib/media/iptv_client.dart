@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 
 import '../connection/connection.dart';
@@ -32,6 +34,7 @@ import '../media/server_capabilities.dart';
 import '../models/livetv_channel.dart';
 import '../services/api_cache.dart';
 import '../services/base_shared_preferences_service.dart';
+import '../services/device_performance.dart';
 import '../services/iptv/iptv_catalog_cache.dart';
 import '../services/iptv/iptv_epg_sources.dart';
 import '../services/iptv/iptv_playback_activity.dart';
@@ -563,23 +566,32 @@ class IptvClient implements MediaServerClient {
         if ((counts[type] ?? 0) > 0) continue;
         final dataset = _diskDatasetFor(type);
         final catDataset = _diskCategoryDatasetFor(type);
-        final catalog = await _catalogCache.read(connection.id, dataset);
-        final categories = await _catalogCache.read(connection.id, catDataset);
-        if (catalog == null || categories == null) continue;
-        if (catalog.body.isEmpty || categories.body.isEmpty) continue;
+        // 1.2.6 (catalog memory, item 4): the seed passes FILE PATHS
+        // to the isolate — the isolate reads the files itself, so the
+        // main isolate never holds the tens-of-MB bodies and `compute`
+        // copies only paths. The file's modification time IS its
+        // fetched time (same semantics as the read's fetchedAt).
+        final catalogPath = await _catalogCache.filePath(connection.id, dataset);
+        final categoriesPath = await _catalogCache.filePath(connection.id, catDataset);
+        if (catalogPath == null || categoriesPath == null) continue;
         try {
+          final catalogStat = await File(catalogPath).stat();
+          final categoriesStat = await File(categoriesPath).stat();
+          if (catalogStat.size == 0 || categoriesStat.size == 0) continue;
           final result = await compute(
             writeIndexTypeInBackground,
             IndexWriteParams(
               dbPath: dbPath,
               connectionId: connection.id,
               type: type,
-              catalogBody: catalog.body,
-              categoryBody: categories.body,
+              catalogBody: '',
+              categoryBody: '',
+              catalogFilePath: catalogPath,
+              categoryFilePath: categoriesPath,
               // Build v1.0.10 (M1): the disk file's real age, not now —
               // stamping now told the sync this type was just synced, so
               // a days-old disk was never refreshed for a week.
-              syncStampMs: catalog.fetchedAt.millisecondsSinceEpoch,
+              syncStampMs: catalogStat.modified.millisecondsSinceEpoch,
               // 1.2.4 (catalog memory): the seed lands VISIBLE rows from
               // whatever the disk file holds — a visible-only disk file
               // (written by a 1.2.4 sync) covers only visible categories,
@@ -2202,6 +2214,31 @@ class IptvClient implements MediaServerClient {
     }
   }
 
+  /// File-path variant of [_readDiskCatalog] (1.2.6, catalog memory,
+  /// item 4): the path goes to the isolate and the file is read THERE,
+  /// so the main isolate never holds the tens-of-MB body and `compute`
+  /// never copies it across the port — the whole-body message copy that
+  /// drove the bind peak is gone. Same miss semantics as
+  /// [_readDiskCatalog]: no file is null, a corrupt file is logged,
+  /// deleted and null (and a successfully parsed empty list is still a
+  /// valid catalog — the deliberate all-hidden file, FORK §45.3).
+  Future<({List<T> rows, DateTime fetchedAt})?> _readDiskCatalogFromFile<T>(
+    String dataset,
+    Future<List<T>> Function(String path) parseFile,
+  ) async {
+    final path = await _catalogCache.filePath(connection.id, dataset);
+    if (path == null) return null;
+    try {
+      final fetchedAt = (await File(path).stat()).modified;
+      final rows = await parseFile(path);
+      return (rows: rows, fetchedAt: fetchedAt);
+    } catch (e) {
+      appLogger.w('IPTV: cached $dataset catalog unreadable; refetching', error: e);
+      unawaited(_catalogCache.delete(connection.id, dataset));
+      return null;
+    }
+  }
+
   /// Best-effort disk write for freshly fetched rows, serialized back to
   /// the API's JSON shape so the cached payload re-parses through the
   /// same parsers. Fire-and-forget: awaiting a tens-of-MB write would
@@ -2304,9 +2341,9 @@ class IptvClient implements MediaServerClient {
     // hidden-by-initial rows can briefly slip into the memo — the sync
     // publish + next sync prune heal it (see FORK §45).
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeLive);
-    final disk = await _readDiskCatalog<XtreamLiveStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamLiveStream>(
       IptvCatalogDiskCache.liveDataset,
-      (body) => XtreamApi.parseLiveStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseLiveStreamsFileVisible(path, filter),
     );
     if (disk != null) {
       _liveLoadSource = 'disk';
@@ -2434,9 +2471,9 @@ class IptvClient implements MediaServerClient {
     // FULL rows: it asks whether the panel answered in full, and a
     // hidden category still counts as covered there.
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeMovie);
-    final disk = await _readDiskCatalog<XtreamVodStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamVodStream>(
       IptvCatalogDiskCache.vodDataset,
-      (body) => XtreamApi.parseVodStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseVodStreamsFileVisible(path, filter),
     );
     if (disk != null) {
       _vodLoadSource = 'disk';
@@ -2577,9 +2614,9 @@ class IptvClient implements MediaServerClient {
     // [_loadVodStreamsCached]. The coverage guard still runs on the
     // full rows (whether the panel answered in full).
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeSeries);
-    final disk = await _readDiskCatalog<XtreamSeries>(
+    final disk = await _readDiskCatalogFromFile<XtreamSeries>(
       IptvCatalogDiskCache.seriesDataset,
-      (body) => XtreamApi.parseSeriesBodyVisible(body, filter),
+      (path) => XtreamApi.parseSeriesFileVisible(path, filter),
     );
     if (disk != null) {
       _seriesLoadSource = 'disk';
@@ -2973,9 +3010,9 @@ class IptvClient implements MediaServerClient {
     // parser here used to scan all 200k rows (77% hidden) on every
     // cold Enter search before the warm-up landed.
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeMovie);
-    final disk = await _readDiskCatalog<XtreamVodStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamVodStream>(
       IptvCatalogDiskCache.vodDataset,
-      (body) => XtreamApi.parseVodStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseVodStreamsFileVisible(path, filter),
     );
     if (disk != null) return (rows: disk.rows, source: 'disk');
     if (_vodPartialRows.isNotEmpty) return (rows: List.of(_vodPartialRows), source: 'crawl');
@@ -2990,9 +3027,9 @@ class IptvClient implements MediaServerClient {
     // 1.2.4 (catalog memory): visible-only disk fallback (see
     // [_vodRowsForEnterSearch]).
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeSeries);
-    final disk = await _readDiskCatalog<XtreamSeries>(
+    final disk = await _readDiskCatalogFromFile<XtreamSeries>(
       IptvCatalogDiskCache.seriesDataset,
-      (body) => XtreamApi.parseSeriesBodyVisible(body, filter),
+      (path) => XtreamApi.parseSeriesFileVisible(path, filter),
     );
     if (disk != null) return (rows: disk.rows, source: 'disk');
     if (_seriesPartialRows.isNotEmpty) return (rows: List.of(_seriesPartialRows), source: 'crawl');
@@ -3008,9 +3045,9 @@ class IptvClient implements MediaServerClient {
     // 1.2.4 (catalog memory): visible-only disk fallback (see
     // [_vodRowsForEnterSearch]).
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeLive);
-    final disk = await _readDiskCatalog<XtreamLiveStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamLiveStream>(
       IptvCatalogDiskCache.liveDataset,
-      (body) => XtreamApi.parseLiveStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseLiveStreamsFileVisible(path, filter),
     );
     if (disk != null) return (rows: disk.rows, source: 'disk');
     return (rows: const <XtreamLiveStream>[], source: 'syncing');
@@ -3435,6 +3472,93 @@ class IptvClient implements MediaServerClient {
     return initialsMeetingThreshold(countCategoryInitials(names));
   }
 
+  /// Sequential bind warm-up (1.2.6, catalog memory, item 3): the bind
+  /// used to fire the three warm-ups + the FTS seed CONCURRENTLY at
+  /// startup — four isolates, each holding a whole-body copy, spiking
+  /// RSS ~279MB at Trex scale (M2 probe). Now the warm-ups run one at a
+  /// time, in browse order: live first (the guide needs it), then the
+  /// first frame, then VOD + series only when RSS leaves room — a
+  /// pressured device skips them and loads each type on demand from
+  /// disk instead (the cold fallback). The FTS seed runs AFTER the
+  /// warm-ups, chained by the caller ([MultiServerManager
+  /// .addIptvConnection]), never racing them. The public warm-up
+  /// wrappers stay as-is for their other callers; this method uses the
+  /// private disk warm-ups directly so it does not re-trigger the seed.
+  /// [waitForFirstFrame] is false in tests (no frame loop there).
+  Future<void> warmUpCatalogsSequentially({bool waitForFirstFrame = true}) async {
+    if (!_isXtream) return;
+    _bindPhaseLog.clear();
+    try {
+      await _warmLiveCatalogFromDisk();
+      _bindPhaseLog.add('live');
+      if (waitForFirstFrame) {
+        await _waitForFirstFrame();
+        _bindPhaseLog.add('first-frame');
+      }
+      if (_bindRssTooHigh()) {
+        _bindPhaseLog.add('deferred-memory');
+        appLogger.i(
+          'IPTV: bind warm-up deferred VOD/series (RSS ${ProcessInfo.currentRss >> 20}MB) — on-demand load',
+        );
+        return;
+      }
+      await _warmVodCatalogFromDisk();
+      _bindPhaseLog.add('vod');
+      await _warmSeriesCatalogFromDisk();
+      _bindPhaseLog.add('series');
+    } catch (e) {
+      appLogger.w('IPTV: sequential bind warm-up failed', error: e);
+    }
+  }
+
+  /// Bind-phase log for [warmUpCatalogsSequentially]: the phases that
+  /// ran, in order (`live`, `first-frame`, `vod`, `series` — or
+  /// `deferred-memory` when the RSS gate skipped VOD/series). Tests
+  /// assert the order; production never reads it.
+  final List<String> _bindPhaseLog = [];
+
+  /// The phases [warmUpCatalogsSequentially] ran, in order. Test-only.
+  @visibleForTesting
+  List<String> get bindPhaseLog => List.unmodifiable(_bindPhaseLog);
+
+  /// First frame, or give up after 500ms. In production the splash
+  /// frame lands in milliseconds, so this is effectively immediate; in
+  /// unit tests there is no frame loop, so the timeout bounds the wait
+  /// instead of hanging the test.
+  Future<void> _waitForFirstFrame() async {
+    try {
+      await SchedulerBinding.instance.endOfFrame.timeout(
+        const Duration(milliseconds: 500),
+        onTimeout: () {},
+      );
+    } catch (_) {
+      // No binding / no frame — proceed; the warm-ups are still
+      // serialized, which is the part that cuts the peak.
+    }
+  }
+
+  /// True when RSS is already high enough that warming the two big
+  /// catalogs (VOD + series) would push the device toward a memory
+  /// kill. The budget is half the RSS-watchdog threshold (45% of total
+  /// RAM, clamped 512MB–1.5GB — the same scale main.dart evicts at):
+  /// on a 2GB stick that is ~460MB, on the Fold ~768MB. Tests force
+  /// the gate with [debugBindWarmRssBudgetBytes].
+  bool _bindRssTooHigh() {
+    final budget = debugBindWarmRssBudgetBytes ?? _bindWarmBudgetBytes();
+    return ProcessInfo.currentRss > budget;
+  }
+
+  static int _bindWarmBudgetBytes() {
+    final totalMem = DevicePerformance.totalMemBytes;
+    final threshold = totalMem != null ? (totalMem * 0.45).round().clamp(512 << 20, 1536 << 20) : 1 << 30;
+    return threshold ~/ 2;
+  }
+
+  /// Test-only override for the bind warm-up RSS budget (bytes). Null
+  /// (default) computes it from device RAM; 0 always defers VOD/series.
+  @visibleForTesting
+  static int? debugBindWarmRssBudgetBytes;
+
   /// Warms the series catalog in the background (build #10): starts the
   /// unfiltered series load without awaiting it, so the NEXT search finds
   /// a warm catalog. Called at startup bind (see
@@ -3472,9 +3596,9 @@ class IptvClient implements MediaServerClient {
   Future<void> _warmSeriesCatalogFromDisk({bool force = false}) async {
     if (!force && _seriesListLoaded) return;
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeSeries);
-    final disk = await _readDiskCatalog<XtreamSeries>(
+    final disk = await _readDiskCatalogFromFile<XtreamSeries>(
       IptvCatalogDiskCache.seriesDataset,
-      (body) => XtreamApi.parseSeriesBodyVisible(body, filter),
+      (path) => XtreamApi.parseSeriesFileVisible(path, filter),
     );
     if (disk == null) return;
     _seriesFuture = Future.value(disk.rows);
@@ -3497,9 +3621,9 @@ class IptvClient implements MediaServerClient {
   Future<void> _warmVodCatalogFromDisk({bool force = false}) async {
     if (!force && _vodStreamsLoaded) return;
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeMovie);
-    final disk = await _readDiskCatalog<XtreamVodStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamVodStream>(
       IptvCatalogDiskCache.vodDataset,
-      (body) => XtreamApi.parseVodStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseVodStreamsFileVisible(path, filter),
     );
     if (disk == null) return;
     _vodStreamsFuture = Future.value(disk.rows);
@@ -3522,9 +3646,9 @@ class IptvClient implements MediaServerClient {
   Future<void> _warmLiveCatalogFromDisk({bool force = false}) async {
     if (!force && _liveStreamsLoaded) return;
     final filter = await _visibleCatalogFilterFor(IptvSearchIndex.typeLive);
-    final disk = await _readDiskCatalog<XtreamLiveStream>(
+    final disk = await _readDiskCatalogFromFile<XtreamLiveStream>(
       IptvCatalogDiskCache.liveDataset,
-      (body) => XtreamApi.parseLiveStreamsBodyVisible(body, filter),
+      (path) => XtreamApi.parseLiveStreamsFileVisible(path, filter),
     );
     if (disk == null) return;
     _liveStreamsFuture = Future.value(disk.rows);

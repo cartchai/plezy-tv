@@ -971,6 +971,19 @@ class MultiServerManager {
     }
   }
 
+  /// The bind catalog chain (1.2.6, catalog memory, item 3): the
+  /// sequential warm-up, then the FTS seed + sync — one chain, never
+  /// concurrent. A warm-up failure still reaches the sync (the seed is
+  /// what makes search work when the memos are cold).
+  Future<void> _bindIptvCatalogs(IptvClient client) async {
+    try {
+      await client.warmUpCatalogsSequentially();
+    } catch (e) {
+      appLogger.w('IPTV: bind warm-up chain failed, continuing to index sync', error: e);
+    }
+    await client.ensureSearchIndexSynced();
+  }
+
   /// Add an IPTV connection (M3U playlist or Xtream Codes account) backed
   /// by an [IptvClient]. Returns true when the health probe reports online.
   ///
@@ -1030,23 +1043,18 @@ class MultiServerManager {
         await client.clearCatalogForNewDataSource();
       }
 
-      // Warm the catalogs in the background (build #10 series, build #13
-      // VOD + live): the unfiltered loads take a while on a cold
-      // connection, and the first search/browse after app start would
-      // otherwise race them. Started BEFORE the health probe so the
-      // probe's round trip doesn't delay the warm-up. Unawaited on
-      // purpose — binding must not wait for 46k/199k/55k-row loads.
-      client.warmUpSeriesCatalog();
-      client.warmUpVodCatalog();
-      client.warmUpLiveCatalog();
-
-      // Build #23: populate/refresh the local search index in the
-      // background — seed it from the disk catalog when cold, then sync
-      // from the panel when the interval has elapsed. Fire-and-forget;
-      // search falls back to the disk/sync paths until the index is
-      // warm. M3U connections return immediately (no VOD/series catalog
-      // to index).
-      unawaited(client.ensureSearchIndexSynced());
+      // 1.2.6 (catalog memory, item 3): the bind work is SERIALIZED
+      // and deferred — live warms first, then the first frame, then
+      // VOD/series (skipped when RSS is already high), then the FTS
+      // seed + sync. The old shape fired the three warm-ups + the
+      // seed concurrently at startup (four isolates, whole-body
+      // copies), spiking RSS ~279MB at Trex scale (M2 probe). One
+      // fire-and-forget chain now; binding still never waits for the
+      // 46k/199k/55k-row loads. M3U connections return immediately
+      // from the warm-ups and the sync (no VOD/series catalog to
+      // index). Started BEFORE the health probe so the probe's round
+      // trip doesn't delay the warm-up.
+      unawaited(_bindIptvCatalogs(client));
 
       final health = await client.checkHealth();
       final healthy = health == HealthStatus.online;

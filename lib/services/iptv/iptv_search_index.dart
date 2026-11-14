@@ -1007,6 +1007,8 @@ class IndexWriteParams {
     required this.syncStampMs,
     this.hiddenCategoryIds = const [],
     this.hiddenCategoryInitials = const [],
+    this.catalogFilePath,
+    this.categoryFilePath,
   });
 
   final String dbPath;
@@ -1015,6 +1017,15 @@ class IndexWriteParams {
   final String catalogBody;
   final String categoryBody;
   final int syncStampMs;
+
+  /// Disk-file path variant (1.2.6, catalog memory, item 4): when set,
+  /// the isolate reads the file itself instead of receiving the whole
+  /// body across the port — the body copy that drove the bind peak is
+  /// gone. The seed path sets these; the network sync keeps passing
+  /// bodies, and [catalogBody]/[categoryBody] are then ignored (pass
+  /// ''). Plain values only, so the params stay isolate-safe.
+  final String? catalogFilePath;
+  final String? categoryFilePath;
 
   /// Categories turned off by the user (1.2.4 prune — supersedes the
   /// v1.1.0 Option B "disk stays full" split, FORK §45): per-category
@@ -1115,11 +1126,21 @@ Future<IndexWriteResult> writeIndexTypeInBackground(IndexWriteParams params) asy
     // Decode once: the typed rows feed the index, the decoded list
     // feeds the filtered body the caller writes to disk — one parse
     // serves both stores.
-    final decoded = _decodeJson(params.catalogBody);
+    // 1.2.6 (catalog memory, item 4): when the caller passed file
+    // paths, the isolate reads the files itself — the main isolate
+    // never held the bodies and `compute` copied only paths. The
+    // network sync keeps passing bodies.
+    final catalogBody = params.catalogFilePath != null
+        ? await File(params.catalogFilePath!).readAsString()
+        : params.catalogBody;
+    final categoryBody = params.categoryFilePath != null
+        ? await File(params.categoryFilePath!).readAsString()
+        : params.categoryBody;
+    final decoded = _decodeJson(catalogBody);
     final parsed = _rowsFromDecoded(params.type, decoded);
     final rows = parsed.rows;
     final categories = <String, String>{
-      for (final c in parseFlexibleJsonList(_decodeJson(params.categoryBody), XtreamCategory.fromJson))
+      for (final c in parseFlexibleJsonList(_decodeJson(categoryBody), XtreamCategory.fromJson))
         c.id: c.name,
     };
     final hiddenIds = params.hiddenCategoryIds.toSet();

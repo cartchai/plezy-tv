@@ -19,6 +19,7 @@ import '../../mixins/mounted_set_state_mixin.dart';
 import '../../utils/dialogs.dart';
 import '../../main.dart' show gitCommit;
 import '../../services/background_work_diagnostics_service.dart';
+import '../../services/debug_log_export_service.dart';
 import '../../services/device_performance.dart';
 import '../../services/log_upload_service.dart';
 import '../../services/startup_diagnostics.dart';
@@ -261,6 +262,21 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
     showSuccessSnackBar(context, t.messages.logsCopied);
   }
 
+  /// Debug file export (1.2.6): the logs plus every setting, memory
+  /// numbers and the last crash, saved to a file of the user's
+  /// choosing. A null path is the user cancelling the picker — nothing
+  /// to report; a throw is a real failure.
+  Future<void> _exportDebugFile() async {
+    try {
+      final path = await DebugLogExportService.exportToFile(baseLogsText: _formatAllLogs());
+      if (!mounted || path == null) return;
+      showSuccessSnackBar(context, t.messages.debugLogExported);
+    } catch (e) {
+      if (!mounted) return;
+      showErrorSnackBar(context, t.messages.debugLogExportFailed);
+    }
+  }
+
   Future<void> _uploadLogs() async {
     final logText = _formatAllLogs(maxBytes: maxLogUploadBytes);
 
@@ -487,6 +503,11 @@ class _LogsScreenState extends State<LogsScreen> with MountedSetStateMixin {
                                 icon: Symbols.upload_rounded,
                                 tooltip: t.logs.uploadLogs,
                                 onPressed: _hasDiagnostics ? _uploadLogs : null,
+                              ),
+                              FocusableAction(
+                                icon: Symbols.download_rounded,
+                                tooltip: t.logs.exportDebugFile,
+                                onPressed: _hasDiagnostics ? _exportDebugFile : null,
                               ),
                               FocusableAction(
                                 icon: Symbols.content_copy_rounded,

@@ -225,7 +225,7 @@ void main() {
       // Gating these on the log buffer alone would show the record and then
       // refuse to let the user do anything with it.
       final bar = tester.widget<FocusableActionBar>(find.byType(FocusableActionBar));
-      for (final tooltip in [t.logs.uploadLogs, t.logs.copyLogs, t.logs.clearLogs]) {
+      for (final tooltip in [t.logs.uploadLogs, t.logs.copyLogs, t.logs.clearLogs, t.logs.exportDebugFile]) {
         final action = bar.actions.singleWhere((candidate) => candidate.tooltip == tooltip);
         expect(action.onPressed, isNotNull, reason: tooltip);
       }

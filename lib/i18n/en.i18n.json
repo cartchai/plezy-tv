@@ -1008,6 +1008,8 @@
     "playbackNotAllowedBody": "The server refused to stream this item (HTTP 403). Your account may not have permission to play it, or the server may only allow playback on its local network.",
     "logsUploaded": "Logs uploaded",
     "logsUploadFailed": "Failed to upload logs",
+    "debugLogExported": "Debug file saved",
+    "debugLogExportFailed": "Failed to save debug file",
     "logId": "Log ID",
     "burnedSubtitlesUseMenu": "Subtitles are burned into this stream. Change them from the subtitle menu.",
     "noVideoUrl": "No video URL available",
@@ -1665,6 +1667,12 @@
       "Favourites and Continue Watching still open for shows in a category you've since switched off",
       "When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed"
     ],
+    "changelog2292": [
+      "At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks",
+      "When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed",
+      "Settings → Logs has an Export debug file button: one file with all settings, logs, errors and app info, with server addresses and passwords kept out of it",
+      "The channel, movie and series lists are now read from their saved files inside the background worker instead of being copied through in full first"
+    ],
     "changelog2291": [
       "The guide now matches channels by their display names as well as their channel IDs, and ignores quality tags like HD and country prefixes like US - when comparing names",
       "When a name matches more than one guide channel, the app no longer guesses — it says so, and you can pick the right one with Assign EPG",
@@ -1691,7 +1699,9 @@
   "logs": {
     "clearLogs": "Clear Logs",
     "copyLogs": "Copy Logs",
-    "uploadLogs": "Upload Logs"
+    "uploadLogs": "Upload Logs",
+    "exportDebugFile": "Export debug file",
+    "exportDebugDialogTitle": "Save debug file"
   },
   "startup": {
     "failedTitle": "PlezTV could not start",

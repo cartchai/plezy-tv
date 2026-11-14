@@ -2808,6 +2808,12 @@ class Translations$messages$en {
 	/// en: 'Failed to upload logs'
 	String get logsUploadFailed => 'Failed to upload logs';
 
+	/// en: 'Debug file saved'
+	String get debugLogExported => 'Debug file saved';
+
+	/// en: 'Failed to save debug file'
+	String get debugLogExportFailed => 'Failed to save debug file';
+
 	/// en: 'Log ID'
 	String get logId => 'Log ID';
 
@@ -3926,6 +3932,12 @@ class Translations$about$en {
 		'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 		'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
 	];
+	List<String> get changelog2292 => [
+		'At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks',
+		'When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed',
+		'Settings → Logs has an Export debug file button: one file with all settings, logs, errors and app info, with server addresses and passwords kept out of it',
+		'The channel, movie and series lists are now read from their saved files inside the background worker instead of being copied through in full first',
+	];
 	List<String> get changelog2291 => [
 		'The guide now matches channels by their display names as well as their channel IDs, and ignores quality tags like HD and country prefixes like US - when comparing names',
 		'When a name matches more than one guide channel, the app no longer guesses — it says so, and you can pick the right one with Assign EPG',
@@ -3996,6 +4008,12 @@ class Translations$logs$en {
 
 	/// en: 'Upload Logs'
 	String get uploadLogs => 'Upload Logs';
+
+	/// en: 'Export debug file'
+	String get exportDebugFile => 'Export debug file';
+
+	/// en: 'Save debug file'
+	String get exportDebugDialogTitle => 'Save debug file';
 }
 
 // Path: startup
@@ -10375,6 +10393,8 @@ extension on Translations {
 			'messages.playbackNotAllowedBody' => 'The server refused to stream this item (HTTP 403). Your account may not have permission to play it, or the server may only allow playback on its local network.',
 			'messages.logsUploaded' => 'Logs uploaded',
 			'messages.logsUploadFailed' => 'Failed to upload logs',
+			'messages.debugLogExported' => 'Debug file saved',
+			'messages.debugLogExportFailed' => 'Failed to save debug file',
 			'messages.logId' => 'Log ID',
 			'messages.burnedSubtitlesUseMenu' => 'Subtitles are burned into this stream. Change them from the subtitle menu.',
 			'messages.noVideoUrl' => 'No video URL available',
@@ -10463,10 +10483,10 @@ extension on Translations {
 			'profiles.connectionsLabel' => 'Connections',
 			'profiles.add' => 'Add',
 			'profiles.deleteProfileButton' => 'Delete profile',
-			'profiles.noConnectionsHint' => 'No connections — add one to use this profile.',
-			'profiles.noConnections' => 'No connections',
 			_ => null,
 		} ?? switch (path) {
+			'profiles.noConnectionsHint' => 'No connections — add one to use this profile.',
+			'profiles.noConnections' => 'No connections',
 			'profiles.plexHomeAccount' => 'Plex Home account',
 			'profiles.plexAccountChip' => ({required Object account}) => 'Plex account: ${account}',
 			'profiles.plexAccountUserChip' => ({required Object user, required Object account}) => '${user} via ${account}',
@@ -10906,6 +10926,10 @@ extension on Translations {
 			'about.changelog2290.1' => 'Turning a category back on brings its shows back right away when they\'re still saved; when they were removed, the app says so and offers a refresh to bring them back',
 			'about.changelog2290.2' => 'Favourites and Continue Watching still open for shows in a category you\'ve since switched off',
 			'about.changelog2290.3' => 'When the phone runs low on memory, the app drops its in-memory catalogues and guide and reloads them from disk instead of being closed',
+			'about.changelog2292.0' => 'At startup the app now loads the channel list first, then movies and series one at a time, instead of all three at once — the startup memory spike is much smaller on phones and TV sticks',
+			'about.changelog2292.1' => 'When the phone is already low on memory at startup, movies and series are skipped and load later when you open them, instead of pushing the app toward being closed',
+			'about.changelog2292.2' => 'Settings → Logs has an Export debug file button: one file with all settings, logs, errors and app info, with server addresses and passwords kept out of it',
+			'about.changelog2292.3' => 'The channel, movie and series lists are now read from their saved files inside the background worker instead of being copied through in full first',
 			'about.changelog2291.0' => 'The guide now matches channels by their display names as well as their channel IDs, and ignores quality tags like HD and country prefixes like US - when comparing names',
 			'about.changelog2291.1' => 'When a name matches more than one guide channel, the app no longer guesses — it says so, and you can pick the right one with Assign EPG',
 			'about.changelog2291.2' => 'Reload TV details now reports how each channel matched and why the rest didn\'t, with a sample of the feed\'s channels and of the channels still without a guide',
@@ -10923,6 +10947,8 @@ extension on Translations {
 			'logs.clearLogs' => 'Clear Logs',
 			'logs.copyLogs' => 'Copy Logs',
 			'logs.uploadLogs' => 'Upload Logs',
+			'logs.exportDebugFile' => 'Export debug file',
+			'logs.exportDebugDialogTitle' => 'Save debug file',
 			'startup.failedTitle' => 'PlezTV could not start',
 			'startup.failedBody' => 'Something went wrong during startup. The details below identify what failed.',
 			'startup.failedBodyRepairable' => 'PlezTV\'s saved settings file is damaged and has to be rebuilt before PlezTV can start. Retrying will not help — choose Repair storage.',
@@ -10971,6 +10997,8 @@ extension on Translations {
 			'explore.rows.popularMovies' => 'Popular Movies',
 			'explore.rows.popularShows' => 'Popular Shows',
 			'explore.rows.trendingAnime' => 'Trending Anime',
+			_ => null,
+		} ?? switch (path) {
 			'explore.rows.suggestedAnime' => 'Suggested Anime',
 			'explore.rows.airingAnime' => 'Top Airing Anime',
 			'explore.rows.popularAnime' => 'Most Popular Anime',
@@ -10979,8 +11007,6 @@ extension on Translations {
 			'explore.rows.upcomingShows' => 'Upcoming Shows',
 			'explore.status.airing' => 'Airing',
 			'explore.status.ended' => 'Ended',
-			_ => null,
-		} ?? switch (path) {
 			'explore.status.canceled' => 'Canceled',
 			'explore.status.upcoming' => 'Upcoming',
 			'explore.episodeCount' => ({required num n}) => (_root.$meta.cardinalResolver ?? PluralResolvers.cardinal('en'))(n, one: '${n} episode', other: '${n} episodes', ), 
@@ -11485,6 +11511,8 @@ extension on Translations {
 			'downloads.downloadingTooltip' => 'Downloading...',
 			'downloads.downloadingFilesTooltip' => ({required Object files}) => 'Downloading ${files}',
 			'downloads.noDownloadsTree' => 'No downloads',
+			_ => null,
+		} ?? switch (path) {
 			'downloads.pauseAll' => 'Pause all',
 			'downloads.resumeAll' => 'Resume all',
 			'downloads.retryAll' => 'Retry all',
@@ -11493,8 +11521,6 @@ extension on Translations {
 			'downloads.selectVersion' => 'Select Version',
 			'downloads.allEpisodes' => 'All episodes',
 			'downloads.unwatchedOnly' => 'Unwatched only',
-			_ => null,
-		} ?? switch (path) {
 			'downloads.nextNUnwatched' => ({required Object count}) => 'Next ${count} unwatched',
 			'downloads.customAmount' => 'Custom amount...',
 			'downloads.includeSpecials' => 'Include Specials',
@@ -11999,6 +12025,8 @@ extension on Translations {
 			'addServer.playlistUrl' => 'Playlist URL',
 			'addServer.epgUrl' => 'EPG URL (optional)',
 			'addServer.serverUrl' => 'Server URL',
+			_ => null,
+		} ?? switch (path) {
 			'addServer.m3uProbeFailed' => 'Could not load that playlist. Check the URL and try again.',
 			'addServer.m3uPlaylistEmpty' => 'That playlist has no channels.',
 			'addServer.m3uInvalidUrl' => 'Enter a valid playlist URL starting with http:// or https://.',
@@ -12007,8 +12035,6 @@ extension on Translations {
 			'deepLinks.invalid' => 'This PlezTV link isn\'t valid.',
 			'deepLinks.profileNotFound' => ({required Object profile}) => 'No profile matches "${profile}".',
 			'deepLinks.serverUnavailable' => 'Couldn\'t reach the server for this link.',
-			_ => null,
-		} ?? switch (path) {
 			'deepLinks.notFound' => 'Couldn\'t find this title in your libraries.',
 			'deepLinks.unsupportedItem' => 'This link can\'t be played.',
 			'deepLinks.noLiveTv' => 'No Live TV server is available for this link.',

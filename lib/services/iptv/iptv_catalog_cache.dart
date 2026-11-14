@@ -100,6 +100,24 @@ class IptvCatalogDiskCache {
     }
   }
 
+  /// The on-disk path for [dataset], or null when there is no file (or
+  /// the cache is disabled). 1.2.6 (catalog memory, item 4): the catalog
+  /// parsers and the FTS seed read the file themselves inside the
+  /// isolate, so the tens-of-MB body is never copied through the
+  /// isolate message channel — the main isolate never holds it at all.
+  /// Same miss semantics as [read]: a missing file is null, never an
+  /// error; the caller falls back to the network.
+  Future<String?> filePath(String connectionId, String dataset) async {
+    if (debugDisableDisk) return null;
+    try {
+      final file = await _file(connectionId, dataset);
+      return await file.exists() ? file.path : null;
+    } catch (e) {
+      appLogger.w('IPTV catalog cache path lookup failed for $dataset', error: e);
+      return null;
+    }
+  }
+
   /// Store [body] for [dataset]. Creates the directory as needed.
   /// Never throws — a failed write is logged and the caller carries on
   /// with the in-memory rows.

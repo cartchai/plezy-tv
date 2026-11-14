@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -665,6 +666,21 @@ static Future<List<XtreamVodStream>> parseVodStreamsBodyVisible(String body, Vis
 static Future<List<XtreamSeries>> parseSeriesBodyVisible(String body, VisibleCatalogFilter filter) =>
     compute(_parseSeriesVisible, _VisibleParseParams(body, filter));
 
+/// Visible-only parse from a DISK FILE (1.2.6, catalog memory, item 4):
+/// the isolate reads the file itself, so the main isolate never holds
+/// the tens-of-MB body and `compute` copies only the path + filter
+/// across the port — the whole-body message copy that drove the bind
+/// peak is gone. Same rows as [parseLiveStreamsBodyVisible] for the
+/// same file content (the file IS the body the disk cache wrote).
+static Future<List<XtreamLiveStream>> parseLiveStreamsFileVisible(String path, VisibleCatalogFilter filter) =>
+    compute(_parseLiveStreamsFileVisible, _VisibleFileParseParams(path, filter));
+
+static Future<List<XtreamVodStream>> parseVodStreamsFileVisible(String path, VisibleCatalogFilter filter) =>
+    compute(_parseVodStreamsFileVisible, _VisibleFileParseParams(path, filter));
+
+static Future<List<XtreamSeries>> parseSeriesFileVisible(String path, VisibleCatalogFilter filter) =>
+    compute(_parseSeriesFileVisible, _VisibleFileParseParams(path, filter));
+
 /// Visible-only re-encode (1.2.4, catalog memory): decode + filter +
 /// re-encode the raw body in the isolate, so the disk write gets a
 /// visible-only payload without a main-isolate `jsonEncode` freeze
@@ -769,6 +785,13 @@ class _VisibleParseParams {
 /// the isolate never builds the full typed list — that is what shrinks
 /// the parse peak, not just the steady state. Malformed rows are dropped
 /// exactly as the unfiltered parse drops them.
+///
+/// 1.2.6 (catalog memory, item 4): hidden rows are skipped BEFORE they
+/// are parsed at all — the category id comes straight off the raw map,
+/// exactly as the typed row would carry it (`category_id?.toString()`,
+/// no transformation in any of the three models), so the outcome is
+/// identical and the ~77% of rows in hidden categories never become
+/// typed objects. The post-parse check stays as a safety net.
 List<T> _parseVisibleList<T>(
   Object? value,
   T Function(Map<String, dynamic> json) parse,
@@ -778,6 +801,7 @@ List<T> _parseVisibleList<T>(
   final result = <T>[];
   for (final json in flexibleMapList(value)) {
     try {
+      if (filter.isHidden(json['category_id']?.toString())) continue;
       final row = parse(json);
       if (!filter.isHidden(categoryIdOf(row))) result.add(row);
     } catch (_) {
@@ -807,6 +831,49 @@ List<XtreamSeries> _parseSeriesVisible(_VisibleParseParams params) => _parseVisi
       (row) => row.categoryId,
       params.filter,
     );
+
+/// Message for the file-based visible parsers: a path plus the filter.
+/// Plain values only, like [_VisibleParseParams].
+class _VisibleFileParseParams {
+  final String path;
+  final VisibleCatalogFilter filter;
+
+  const _VisibleFileParseParams(this.path, this.filter);
+}
+
+/// File-based visible parsers (1.2.6, item 4): same rows as the
+/// body-based ones — the isolate reads the file, then runs the identical
+/// in-loop filter. A missing/corrupt file throws, and the caller treats
+/// that as a cache miss exactly like a corrupt body.
+Future<List<XtreamLiveStream>> _parseLiveStreamsFileVisible(_VisibleFileParseParams params) async {
+  final body = await File(params.path).readAsString();
+  return _parseVisibleList(
+    _decodeCatalogJson(body),
+    XtreamLiveStream.fromJson,
+    (row) => row.categoryId,
+    params.filter,
+  );
+}
+
+Future<List<XtreamVodStream>> _parseVodStreamsFileVisible(_VisibleFileParseParams params) async {
+  final body = await File(params.path).readAsString();
+  return _parseVisibleList(
+    _decodeCatalogJson(body),
+    XtreamVodStream.fromJson,
+    (row) => row.categoryId,
+    params.filter,
+  );
+}
+
+Future<List<XtreamSeries>> _parseSeriesFileVisible(_VisibleFileParseParams params) async {
+  final body = await File(params.path).readAsString();
+  return _parseVisibleList(
+    _decodeCatalogJson(body),
+    XtreamSeries.fromJson,
+    (row) => row.categoryId,
+    params.filter,
+  );
+}
 
 String _encodeLiveStreamsVisible(_VisibleParseParams params) =>
     jsonEncode(_parseLiveStreamsVisible(params).map((row) => row.toJson()).toList());
